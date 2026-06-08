@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
   const supabase = await createSupabaseServerClient();
   const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).single();
-  if (profile?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (profile?.role !== "admin" && profile?.role !== "super_admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { data: payment, error } = await supabase
     .from("payments")

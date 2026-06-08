@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { DashboardMetricCard } from "@/components/marketing/sections";
+import { getAiSpendSummary } from "@/lib/ai-usage";
+import { ButtonLink } from "@/components/ui/button";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { products, type ProductKey } from "@/lib/types";
 import { formatKes } from "@/lib/utils";
@@ -11,10 +13,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   const supabase = await createSupabaseServerClient();
   const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).single();
-  if (profile?.role !== "admin") redirect("/dashboard");
+  if (profile?.role !== "admin" && profile?.role !== "super_admin") redirect("/dashboard");
 
   const params = await searchParams;
-  const [usersCount, recentUsers, allPayments, failedPayments, pendingPayments, documentsCount, activity, generations, failedGenerations, paymentEvents] = await Promise.all([
+  const [usersCount, recentUsers, allPayments, failedPayments, pendingPayments, documentsCount, activity, generations, failedGenerations, paymentEvents, aiSpend, tickets, refunds, systemLogs] = await Promise.all([
     supabase.from("users").select("id", { count: "exact", head: true }),
     supabase.from("users").select("email,created_at").order("created_at", { ascending: false }).limit(8),
     supabase.from("payments").select("id,product,product_id,amount,status,created_at,result_description").order("created_at", { ascending: false }).limit(2000),
@@ -24,7 +26,11 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     supabase.from("audit_logs").select("action,entity_type,created_at").order("created_at", { ascending: false }).limit(12),
     supabase.from("ai_generations").select("product_type,total_tokens,estimated_cost,status,quality_scores").order("created_at", { ascending: false }).limit(1000),
     supabase.from("ai_generations").select("id,error_message,product_type,created_at", { count: "exact" }).eq("status", "failed").limit(10),
-    supabase.from("payment_events").select("event_type,created_at").order("created_at", { ascending: false }).limit(500)
+    supabase.from("payment_events").select("event_type,created_at").order("created_at", { ascending: false }).limit(500),
+    getAiSpendSummary(),
+    supabase.from("tickets").select("id,subject,status,priority,created_at").order("created_at", { ascending: false }).limit(8),
+    supabase.from("refund_requests").select("id,reason,status,created_at").order("created_at", { ascending: false }).limit(8),
+    supabase.from("system_logs").select("category,level,message,created_at").order("created_at", { ascending: false }).limit(8)
   ]);
 
   const now = new Date();
@@ -90,7 +96,13 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <DashboardMetricCard label="AI Generations" value={String(generationRows.length)} />
         <DashboardMetricCard label="AI Tokens" value={totalTokens.toLocaleString()} />
         <DashboardMetricCard label="Estimated AI Cost" value={`$${estimatedAiCost.toFixed(4)}`} />
+        <DashboardMetricCard label="AI Spend Total" value={`$${aiSpend.total.toFixed(4)}`} />
         <DashboardMetricCard label="Average Quality" value={averageQuality ? `${averageQuality}%` : "0%"} />
+      </div>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <ButtonLink href="/api/admin/reports/revenue?format=csv">Export CSV</ButtonLink>
+        <ButtonLink href="/api/admin/reports/revenue?format=excel" variant="secondary">Export Excel</ButtonLink>
+        <ButtonLink href="/dashboard/admin/launch" variant="secondary">Launch Readiness</ButtonLink>
       </div>
       <form className="mt-6 flex flex-wrap gap-3 rounded-lg border border-black/10 p-4 dark:border-white/10">
         <select name="range" defaultValue={params.range ?? "month"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
@@ -220,6 +232,30 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                 <span className="text-black/50 dark:text-white/50">{formatKes(payment.amount)} - {payment.status}</span>
               </div>
             ))}
+          </div>
+        </div>
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+          <h2 className="text-xl font-black">Support Tickets</h2>
+          <div className="mt-5 space-y-3">
+            {tickets.data?.length ? tickets.data.map((ticket) => (
+              <AlertLine key={ticket.id} label={ticket.subject} value={ticket.status} />
+            )) : <p className="text-sm text-black/55 dark:text-white/55">No support tickets yet.</p>}
+          </div>
+        </div>
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+          <h2 className="text-xl font-black">Refund Requests</h2>
+          <div className="mt-5 space-y-3">
+            {refunds.data?.length ? refunds.data.map((refund) => (
+              <AlertLine key={refund.id} label={refund.reason.slice(0, 42)} value={refund.status} />
+            )) : <p className="text-sm text-black/55 dark:text-white/55">No refund requests yet.</p>}
+          </div>
+        </div>
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+          <h2 className="text-xl font-black">System Logs</h2>
+          <div className="mt-5 space-y-3">
+            {systemLogs.data?.length ? systemLogs.data.map((log, index) => (
+              <AlertLine key={`${log.created_at}-${index}`} label={`${log.category}: ${log.message.slice(0, 34)}`} value={log.level} />
+            )) : <p className="text-sm text-black/55 dark:text-white/55">No system logs yet.</p>}
           </div>
         </div>
       </section>

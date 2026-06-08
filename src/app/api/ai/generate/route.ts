@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { assertAiUsageAllowed } from "@/lib/ai-usage";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { userHasPaidProject } from "@/lib/payments";
+import { checkRateLimit, clientIpFromHeaders, rateLimitResponse } from "@/lib/security";
 import { generateWithSolvaIntelligence } from "@/lib/solva-intelligence/service";
+import { hasPromptInjectionRisk } from "@/lib/solva-intelligence/safety";
 import { generationModeSchema } from "@/lib/solva-intelligence/types";
 
 const schema = z.object({
@@ -27,6 +30,10 @@ async function hasPaidGenerationAccess(projectId: string, userId: string) {
 }
 
 export async function POST(request: Request) {
+  const ip = clientIpFromHeaders(request.headers);
+  const limited = checkRateLimit(`ai:${ip}`, 10, 60 * 1000);
+  if (!limited.allowed) return rateLimitResponse(limited.resetAt);
+
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -37,11 +44,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid generation payload" }, { status: 400 });
   }
 
+  if (hasPromptInjectionRisk(parsed.data.payload) || hasPromptInjectionRisk({ brief: parsed.data.brief ?? "", sectionHtml: parsed.data.sectionHtml ?? "" })) {
+    return NextResponse.json({ error: "The input contains unsafe instructions. Please remove prompt override or secret-request language." }, { status: 400 });
+  }
+
   if (!(await hasPaidGenerationAccess(parsed.data.projectId, user.id))) {
     return NextResponse.json({ error: "A successful payment is required before generation." }, { status: 402 });
   }
 
   try {
+    await assertAiUsageAllowed(user.id, parsed.data.projectId);
     const payload = parsed.data.brief
       ? { ...parsed.data.payload, sourceBrief: parsed.data.brief }
       : parsed.data.payload;

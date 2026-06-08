@@ -31,7 +31,7 @@ export default async function DashboardPage() {
   const referralLink = absoluteUrl(`/register?ref=${referralCode}`);
 
   return (
-    <AppShell email={user.email} isAdmin={profile?.role === "admin"}>
+    <AppShell email={user.email} isAdmin={profile?.role === "admin" || profile?.role === "super_admin"}>
       <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <h1 className="text-4xl font-black">Welcome to SolvaOne</h1>

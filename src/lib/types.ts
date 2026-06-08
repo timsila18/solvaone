@@ -9,7 +9,7 @@ export type ProjectStatus = "draft" | "awaiting_payment" | "paid" | "generating"
 
 export type PaymentStatus = "pending" | "paid" | "failed" | "cancelled";
 
-export type UserRole = "user" | "admin";
+export type UserRole = "user" | "admin" | "super_admin";
 
 export const products: Record<ProductKey, { title: string; description: string; priceKes: number }> = {
   cv_builder: {

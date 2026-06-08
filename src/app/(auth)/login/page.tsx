@@ -24,6 +24,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               Login
             </Button>
           </form>
+          <a className="mt-4 block text-sm font-bold text-brand-blue" href="/forgot-password">
+            Forgot password?
+          </a>
         </div>
       </div>
     </main>

@@ -1,4 +1,4 @@
-import { BarChart3, BriefcaseBusiness, CreditCard, FileText, Home, PenLine, Sparkles, UserRound } from "lucide-react";
+import { BarChart3, BriefcaseBusiness, CheckCircle2, CreditCard, FileText, Home, PenLine, Sparkles, UserRound } from "lucide-react";
 import Link from "next/link";
 import { Logo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -11,7 +11,8 @@ const nav = [
   { href: "/dashboard/projects/new?product=cover_letter", label: "Cover Letter", icon: PenLine },
   { href: "/dashboard/projects/new?product=company_profile", label: "Company Profile", icon: BriefcaseBusiness },
   { href: "/dashboard/projects/new?product=business_plan", label: "Business Plan", icon: BarChart3 },
-  { href: "/dashboard#payments", label: "Payments", icon: CreditCard }
+  { href: "/dashboard#payments", label: "Payments", icon: CreditCard },
+  { href: "/dashboard/support", label: "Support", icon: PenLine }
 ];
 
 export function AppShell({
@@ -39,13 +40,22 @@ export function AppShell({
             </Link>
           ))}
           {isAdmin ? (
-            <Link
-              href="/dashboard/admin"
-              className="mt-4 flex h-10 items-center gap-3 rounded-lg bg-brand-blue px-3 text-sm font-semibold text-white"
-            >
-              <BarChart3 className="h-4 w-4" />
-              Admin
-            </Link>
+            <>
+              <Link
+                href="/dashboard/admin"
+                className="mt-4 flex h-10 items-center gap-3 rounded-lg bg-brand-blue px-3 text-sm font-semibold text-white"
+              >
+                <BarChart3 className="h-4 w-4" />
+                Admin
+              </Link>
+              <Link
+                href="/dashboard/admin/launch"
+                className="flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-semibold text-black/65 transition hover:bg-black/5 hover:text-black dark:text-white/65 dark:hover:bg-white/10 dark:hover:text-white"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Launch
+              </Link>
+            </>
           ) : null}
         </nav>
       </aside>

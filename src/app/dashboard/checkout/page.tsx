@@ -22,7 +22,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   if (productIdToGenerationProduct(product.productId) !== project.product && product.productId !== "cv_cover_bundle") redirect("/dashboard");
 
   return (
-    <AppShell email={user.email} isAdmin={profile?.role === "admin"}>
+    <AppShell email={user.email} isAdmin={profile?.role === "admin" || profile?.role === "super_admin"}>
       <CheckoutPanel projectId={params.projectId} productId={product.productId as ProductId} />
     </AppShell>
   );

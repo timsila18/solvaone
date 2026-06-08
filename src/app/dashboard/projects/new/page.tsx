@@ -16,7 +16,7 @@ export default async function NewProjectPage({ searchParams }: { searchParams: P
   const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).single();
 
   return (
-    <AppShell email={user.email} isAdmin={profile?.role === "admin"}>
+    <AppShell email={user.email} isAdmin={profile?.role === "admin" || profile?.role === "super_admin"}>
       <EditorStudio userId={user.id} productKey={product} />
     </AppShell>
   );

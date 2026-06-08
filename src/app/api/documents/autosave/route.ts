@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { checkRateLimit, clientIpFromHeaders, rateLimitResponse } from "@/lib/security";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -14,6 +15,9 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
+  const limited = checkRateLimit(`autosave:${clientIpFromHeaders(request.headers)}`, 60, 60 * 1000);
+  if (!limited.allowed) return rateLimitResponse(limited.resetAt);
+
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

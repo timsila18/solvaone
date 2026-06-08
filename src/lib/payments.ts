@@ -2,6 +2,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getPricingProduct, type ProductId } from "./pricing";
 import { notifyPaymentFailed, notifyPaymentSuccessful, notifyReceiptGenerated } from "./notifications";
+import { logSystemEvent } from "./security";
 
 export type PaymentStatus = "pending" | "processing" | "successful" | "failed" | "cancelled" | "timed_out" | "paid";
 
@@ -159,6 +160,7 @@ export async function handleDarajaCallback(payload: any) {
   const checkoutRequestId = callback?.CheckoutRequestID as string | undefined;
   if (!checkoutRequestId) {
     await supabase.from("payment_events").insert({ event_type: "callback_unmatched", raw_payload: payload });
+    await logSystemEvent({ category: "payment", level: "warning", message: "M-Pesa callback without checkout request id", metadata: { payload } });
     return { ok: true, matched: false };
   }
 
@@ -170,6 +172,7 @@ export async function handleDarajaCallback(payload: any) {
 
   if (!payment) {
     await supabase.from("payment_events").insert({ event_type: "callback_unknown_checkout", raw_payload: payload });
+    await logSystemEvent({ category: "payment", level: "warning", message: "M-Pesa callback for unknown checkout request", metadata: { checkoutRequestId } });
     return { ok: true, matched: false };
   }
 
@@ -221,6 +224,7 @@ export async function handleDarajaCallback(payload: any) {
       metadata: { receiptNumber }
     });
   } else {
+    await logSystemEvent({ category: "payment", level: "warning", message: "M-Pesa payment failed", metadata: { resultCode, checkoutRequestId } });
     await notifyPaymentFailed({
       userId: payment.user_id,
       phone: payment.phone_number,
