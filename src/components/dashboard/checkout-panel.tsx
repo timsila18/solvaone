@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Loader2, Phone, RefreshCw } from "lucide-react";
+import { ArrowRight, CheckCircle2, Loader2, Phone, RefreshCw } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ type Status = "pending" | "processing" | "successful" | "failed" | "cancelled" |
 
 export function CheckoutPanel({ projectId, productId }: CheckoutPanelProps) {
   const product = pricingProducts[productId];
+  const generationProduct = productId === "cv_cover_bundle" ? "cv_builder" : productId;
   const [phone, setPhone] = useState("");
   const [paymentId, setPaymentId] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("pending");
@@ -113,6 +114,14 @@ export function CheckoutPanel({ projectId, productId }: CheckoutPanelProps) {
           <Button className="mt-4" variant="secondary" onClick={initiatePayment}>
             <RefreshCw className="h-4 w-4" /> Retry payment
           </Button>
+        )}
+        {(status === "successful" || status === "paid") && (
+          <a
+            className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-blue px-5 text-sm font-black text-white transition hover:bg-blue-700"
+            href={`/dashboard/projects/new?product=${generationProduct}&projectId=${projectId}`}
+          >
+            Continue to Generate & Download <ArrowRight className="h-4 w-4" />
+          </a>
         )}
       </div>
     </section>

@@ -15,22 +15,38 @@ import { pricingProducts } from "@/lib/pricing";
 type EditorStudioProps = {
   userId: string;
   productKey: ProductKey;
+  initialProjectId?: string | null;
+  initialDocumentId?: string | null;
+  initialTitle?: string;
+  initialBrief?: string;
+  initialPayload?: Record<string, string>;
+  initialHtml?: string;
 };
 
-export function EditorStudio({ userId, productKey }: EditorStudioProps) {
+export function EditorStudio({ userId, productKey, initialProjectId = null, initialDocumentId = null, initialTitle, initialBrief = "", initialPayload = {}, initialHtml = "" }: EditorStudioProps) {
   const router = useRouter();
   const product = products[productKey];
   const pricing = pricingProducts[productKey];
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [documentId, setDocumentId] = useState<string | null>(null);
-  const [title, setTitle] = useState(product.title);
-  const [brief, setBrief] = useState("");
-  const [payload, setPayload] = useState<Record<string, string>>({});
-  const [html, setHtml] = useState("");
+  const [projectId, setProjectId] = useState<string | null>(initialProjectId);
+  const [documentId, setDocumentId] = useState<string | null>(initialDocumentId);
+  const [title, setTitle] = useState(initialTitle ?? product.title);
+  const [brief, setBrief] = useState(initialBrief);
+  const [payload, setPayload] = useState<Record<string, string>>(initialPayload);
+  const [html, setHtml] = useState(initialHtml);
   const [qualityNotes, setQualityNotes] = useState<string[]>([]);
   const [qualityScores, setQualityScores] = useState<Record<string, number>>({});
   const [status, setStatus] = useState("Draft");
-  const [uploadedCv, setUploadedCv] = useState<{ name: string; size: number; type: string; path?: string; parsed: boolean } | null>(null);
+  const [uploadedCv, setUploadedCv] = useState<{ name: string; size: number; type: string; path?: string; parsed: boolean } | null>(
+    initialPayload.uploadedCvFileName
+      ? {
+          name: initialPayload.uploadedCvFileName,
+          size: Number(initialPayload.uploadedCvFileSize ?? 0),
+          type: initialPayload.uploadedCvFileType ?? "CV",
+          path: initialPayload.uploadedCvStoragePath,
+          parsed: Boolean(initialPayload.oldCvContent)
+        }
+      : null
+  );
   const [uploadError, setUploadError] = useState("");
   const templates = templatesForProduct(productKey);
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
