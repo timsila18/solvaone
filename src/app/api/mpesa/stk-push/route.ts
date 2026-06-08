@@ -1,63 +1,47 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { initiateStkPush } from "@/lib/mpesa";
+import { initiateDarajaStkPush } from "@/lib/payments";
+import { productIdToGenerationProduct, type ProductId } from "@/lib/pricing";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
-import { products } from "@/lib/types";
 
 const schema = z.object({
-  projectId: z.string().uuid().nullable().optional(),
-  product: z.enum(["cv_builder", "cv_revamp", "cover_letter", "company_profile", "business_plan"]),
-  phone: z.string().regex(/^254\d{9}$/)
+  projectId: z.string().uuid(),
+  productId: z.enum(["cv_builder", "cv_revamp", "cover_letter", "cv_cover_bundle", "company_profile", "business_plan"]),
+  phone: z.string().min(9).max(20)
 });
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = schema.safeParse(await request.json());
-  if (!parsed.success || !parsed.data.projectId) {
-    return NextResponse.json({ error: "Save the project before payment and use phone format 2547XXXXXXXX." }, { status: 400 });
-  }
+  if (!parsed.success) return NextResponse.json({ error: "Invalid payment request." }, { status: 400 });
 
-  const product = products[parsed.data.product];
   const supabase = await createSupabaseServerClient();
   const { data: project } = await supabase
     .from("projects")
-    .select("id,title")
+    .select("id,user_id,product")
     .eq("id", parsed.data.projectId)
     .eq("user_id", user.id)
     .single();
 
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  if (!project) return NextResponse.json({ error: "Project not found." }, { status: 404 });
+
+  const generationProduct = productIdToGenerationProduct(parsed.data.productId as ProductId);
+  if (generationProduct !== project.product && parsed.data.productId !== "cv_cover_bundle") {
+    return NextResponse.json({ error: "Payment product does not match this project." }, { status: 400 });
   }
 
-  const mpesa = await initiateStkPush({
-    phone: parsed.data.phone,
-    amount: product.priceKes,
-    accountReference: `S1-${project.id.slice(0, 8)}`,
-    transactionDescription: product.title
-  });
-
-  const { error } = await supabase.from("payments").insert({
-    user_id: user.id,
-    project_id: project.id,
-    product: parsed.data.product,
-    amount: product.priceKes,
-    currency: "KES",
-    status: "pending",
-    provider: "mpesa",
-    checkout_request_id: mpesa.CheckoutRequestID,
-    merchant_request_id: mpesa.MerchantRequestID,
-    raw_request: mpesa
-  });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  try {
+    const payment = await initiateDarajaStkPush({
+      userId: user.id,
+      projectId: parsed.data.projectId,
+      productId: parsed.data.productId as ProductId,
+      phone: parsed.data.phone
+    });
+    return NextResponse.json({ paymentId: payment.id, checkoutRequestId: payment.checkout_request_id, status: "processing" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Payment initiation failed.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  await supabase.from("projects").update({ status: "awaiting_payment" }).eq("id", project.id);
-  return NextResponse.json({ checkoutRequestId: mpesa.CheckoutRequestID });
 }

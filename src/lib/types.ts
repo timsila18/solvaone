@@ -15,27 +15,27 @@ export const products: Record<ProductKey, { title: string; description: string; 
   cv_builder: {
     title: "CV Builder",
     description: "Create a polished, ATS-aware CV from structured career inputs.",
-    priceKes: 700
+    priceKes: 299
   },
   cv_revamp: {
     title: "CV Revamp",
     description: "Transform an existing CV into a sharper executive-ready version.",
-    priceKes: 1200
+    priceKes: 499
   },
   cover_letter: {
     title: "Cover Letter Generator",
     description: "Generate targeted cover letters for roles and opportunities.",
-    priceKes: 500
+    priceKes: 199
   },
   company_profile: {
     title: "Company Profile Generator",
     description: "Build a credible company profile for proposals and tenders.",
-    priceKes: 2500
+    priceKes: 999
   },
   business_plan: {
     title: "Business Plan Generator",
     description: "Create investor-ready plans with market, operating, and financial sections.",
-    priceKes: 3500
+    priceKes: 1499
   }
 };
 

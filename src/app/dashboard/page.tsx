@@ -11,11 +11,14 @@ export default async function DashboardPage() {
   if (!user) redirect("/login");
 
   const supabase = await createSupabaseServerClient();
-  const [{ data: profile }, { data: projects }, { data: payments }] = await Promise.all([
+  const [{ data: profile }, { data: projects }, { data: payments }, { data: documents }] = await Promise.all([
     supabase.from("users").select("role").eq("id", user.id).single(),
     supabase.from("projects").select("*").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(10),
-    supabase.from("payments").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5)
+    supabase.from("payments").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(10),
+    supabase.from("documents").select("id,project_id,title,updated_at").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(20)
   ]);
+  const paidProjectIds = new Set((payments ?? []).filter((payment) => payment.status === "successful" || payment.status === "paid").map((payment) => payment.project_id));
+  const paymentByProject = new Map((payments ?? []).map((payment) => [payment.project_id, payment]));
 
   return (
     <AppShell email={user.email} isAdmin={profile?.role === "admin"}>
@@ -73,13 +76,80 @@ export default async function DashboardPage() {
                     <span>{payment.status}</span>
                     <span>{formatKes(payment.amount)}</span>
                   </div>
-                  <div className="mt-1 text-black/50 dark:text-white/50">{payment.provider_reference ?? payment.checkout_request_id}</div>
+                  <div className="mt-1 text-black/50 dark:text-white/50">{payment.mpesa_receipt_number ?? payment.checkout_request_id}</div>
+                  {payment.status === "successful" || payment.status === "paid" ? (
+                    <ButtonLink className="mt-3 h-8 px-3" variant="secondary" href={`/api/receipts/download?paymentId=${payment.id}`}>
+                      Receipt
+                    </ButtonLink>
+                  ) : payment.status === "failed" || payment.status === "cancelled" || payment.status === "timed_out" ? (
+                    <ButtonLink className="mt-3 h-8 px-3" href={`/dashboard/checkout?projectId=${payment.project_id}&productId=${payment.product_id ?? payment.product}`}>
+                      Retry
+                    </ButtonLink>
+                  ) : null}
                 </div>
               ))
             ) : (
               <p className="text-sm leading-6 text-black/55 dark:text-white/55">No payments recorded for this account.</p>
             )}
           </div>
+        </div>
+      </section>
+      <section className="mt-8 rounded-lg border border-black/10 p-5 dark:border-white/10">
+        <h2 className="text-xl font-black">Purchased Documents</h2>
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="text-black/45 dark:text-white/45">
+              <tr>
+                <th className="py-3 font-bold">Document</th>
+                <th className="py-3 font-bold">Payment</th>
+                <th className="py-3 font-bold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {documents?.length ? (
+                documents.map((document) => {
+                  const payment = paymentByProject.get(document.project_id);
+                  const paid = paidProjectIds.has(document.project_id);
+                  return (
+                    <tr key={document.id} className="border-t border-black/10 dark:border-white/10">
+                      <td className="py-4 font-semibold">{document.title}</td>
+                      <td className="py-4 capitalize">{payment?.status?.replace("_", " ") ?? "draft"}</td>
+                      <td className="flex flex-wrap gap-2 py-4">
+                        <ButtonLink className="h-8 px-3" variant="secondary" href={`/dashboard/projects/new?product=${payment?.product ?? "cv_builder"}`}>
+                          Continue editing
+                        </ButtonLink>
+                        {paid ? (
+                          <>
+                            <ButtonLink className="h-8 px-3" href={`/api/documents/export?documentId=${document.id}&format=pdf`}>
+                              PDF
+                            </ButtonLink>
+                            <ButtonLink className="h-8 px-3" href={`/api/documents/export?documentId=${document.id}&format=docx`}>
+                              DOCX
+                            </ButtonLink>
+                            {payment?.id ? (
+                              <ButtonLink className="h-8 px-3" variant="secondary" href={`/api/receipts/download?paymentId=${payment.id}`}>
+                                Receipt
+                              </ButtonLink>
+                            ) : null}
+                          </>
+                        ) : payment && ["failed", "cancelled", "timed_out"].includes(payment.status) ? (
+                          <ButtonLink className="h-8 px-3" href={`/dashboard/checkout?projectId=${document.project_id}&productId=${payment.product_id ?? payment.product}`}>
+                            Retry payment
+                          </ButtonLink>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td className="py-6 text-black/55 dark:text-white/55" colSpan={3}>
+                    No documents have been created yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
     </AppShell>

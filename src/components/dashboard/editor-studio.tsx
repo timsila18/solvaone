@@ -1,6 +1,7 @@
 "use client";
 
 import { Download, Loader2, Phone, Save, Sparkles, Wand2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
@@ -8,6 +9,7 @@ import { products, type ProductKey } from "@/lib/types";
 import { templatesForProduct } from "@/lib/template-registry";
 import { formatKes } from "@/lib/utils";
 import type { GenerationMode } from "@/lib/solva-intelligence/types";
+import { pricingProducts } from "@/lib/pricing";
 
 type EditorStudioProps = {
   userId: string;
@@ -15,7 +17,9 @@ type EditorStudioProps = {
 };
 
 export function EditorStudio({ userId, productKey }: EditorStudioProps) {
+  const router = useRouter();
   const product = products[productKey];
+  const pricing = pricingProducts[productKey];
   const [projectId, setProjectId] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [title, setTitle] = useState(product.title);
@@ -102,7 +106,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
     });
   }
 
-  function startPayment() {
+  function goToCheckout() {
     startTransition(async () => {
       let activeProjectId = projectId;
       if (!activeProjectId) {
@@ -121,14 +125,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
         setProjectId(saved.projectId);
         setDocumentId(saved.documentId);
       }
-      setStatus("Requesting payment");
-      const response = await fetch("/api/mpesa/stk-push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: activeProjectId, product: productKey, phone })
-      });
-      const responsePayload = await response.json();
-      setStatus(response.ok ? "Payment requested" : responsePayload.error ?? "Payment failed");
+      router.push(`/dashboard/checkout?projectId=${activeProjectId}&productId=${productKey}`);
     });
   }
 
@@ -173,7 +170,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
             <h1 className="text-3xl font-black">{product.title}</h1>
             <p className="mt-2 text-sm leading-6 text-black/55 dark:text-white/55">{product.description}</p>
           </div>
-          <span className="rounded-lg bg-brand-blue px-3 py-2 text-sm font-black text-white">{formatKes(product.priceKes)}</span>
+          <span className="rounded-lg bg-brand-blue px-3 py-2 text-sm font-black text-white">{formatKes(pricing.price)}</span>
         </div>
         <div className="mt-6 space-y-4">
           <label className="block text-sm font-bold">
@@ -232,8 +229,8 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
           </label>
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
             <Input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="2547XXXXXXXX" />
-            <Button onClick={startPayment} disabled={isPending || !phone}>
-              <Phone className="h-4 w-4" /> Pay with M-Pesa
+            <Button onClick={goToCheckout} disabled={isPending}>
+              <Phone className="h-4 w-4" /> Pay & Generate
             </Button>
           </div>
           <div className="flex flex-wrap gap-3">

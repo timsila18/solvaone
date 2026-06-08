@@ -4,7 +4,7 @@ import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/serve
 import { products, type ProductKey } from "@/lib/types";
 import { formatKes } from "@/lib/utils";
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<{ range?: string; product?: string; status?: string }> }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
@@ -12,24 +12,43 @@ export default async function AdminPage() {
   const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).single();
   if (profile?.role !== "admin") redirect("/dashboard");
 
-  const [usersCount, paidPayments, failedPayments, documentsCount, activity, generations, failedGenerations] = await Promise.all([
+  const params = await searchParams;
+  const [usersCount, allPayments, paidPayments, failedPayments, pendingPayments, documentsCount, activity, generations, failedGenerations, paymentEvents] = await Promise.all([
     supabase.from("users").select("id", { count: "exact", head: true }),
+    supabase.from("payments").select("id,product,product_id,amount,status,created_at,result_description").order("created_at", { ascending: false }).limit(2000),
     supabase.from("payments").select("product,amount,status").eq("status", "paid"),
     supabase.from("payments").select("id,amount,product,created_at", { count: "exact" }).eq("status", "failed").limit(10),
+    supabase.from("payments").select("id", { count: "exact", head: true }).in("status", ["pending", "processing"]),
     supabase.from("documents").select("id", { count: "exact", head: true }),
     supabase.from("audit_logs").select("action,entity_type,created_at").order("created_at", { ascending: false }).limit(12),
     supabase.from("ai_generations").select("product_type,total_tokens,estimated_cost,status,quality_scores").order("created_at", { ascending: false }).limit(1000),
-    supabase.from("ai_generations").select("id,error_message,product_type,created_at", { count: "exact" }).eq("status", "failed").limit(10)
+    supabase.from("ai_generations").select("id,error_message,product_type,created_at", { count: "exact" }).eq("status", "failed").limit(10),
+    supabase.from("payment_events").select("event_type,created_at").order("created_at", { ascending: false }).limit(500)
   ]);
 
-  const revenue = paidPayments.data?.reduce((sum, payment) => sum + Number(payment.amount), 0) ?? 0;
-  const byProduct = (paidPayments.data ?? []).reduce(
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const filteredPayments = (allPayments.data ?? []).filter((payment) => {
+    const productOk = !params.product || params.product === "all" || payment.product_id === params.product || payment.product === params.product;
+    const statusOk = !params.status || params.status === "all" || payment.status === params.status;
+    return productOk && statusOk;
+  });
+  const successfulPayments = filteredPayments.filter((payment) => payment.status === "successful" || payment.status === "paid");
+  const revenue = successfulPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const revenueToday = successfulPayments.filter((payment) => new Date(payment.created_at) >= today).reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const revenueMonth = successfulPayments.filter((payment) => new Date(payment.created_at) >= monthStart).reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const averageOrderValue = successfulPayments.length ? revenue / successfulPayments.length : 0;
+  const conversionRate = filteredPayments.length ? Math.round((successfulPayments.length / filteredPayments.length) * 100) : 0;
+  const callbackFailures = (paymentEvents.data ?? []).filter((event) => event.event_type?.includes("unknown") || event.event_type?.includes("unmatched")).length;
+  const byProduct = successfulPayments.reduce(
     (acc, payment) => {
       acc[payment.product as ProductKey] = (acc[payment.product as ProductKey] ?? 0) + Number(payment.amount);
       return acc;
     },
     {} as Partial<Record<ProductKey, number>>
   );
+  const highestSellingProduct = Object.entries(byProduct).sort((a, b) => b[1] - a[1])[0]?.[0] as ProductKey | undefined;
   const generationRows = generations.data ?? [];
   const totalTokens = generationRows.reduce((sum, item) => sum + Number(item.total_tokens ?? 0), 0);
   const estimatedAiCost = generationRows.reduce((sum, item) => sum + Number(item.estimated_cost ?? 0), 0);
@@ -56,14 +75,45 @@ export default async function AdminPage() {
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Metric label="Total Users" value={String(usersCount.count ?? 0)} />
-        <Metric label="Total Revenue" value={formatKes(revenue)} />
+        <Metric label="Revenue Today" value={formatKes(revenueToday)} />
+        <Metric label="Revenue This Month" value={formatKes(revenueMonth)} />
+        <Metric label="Revenue All Time" value={formatKes(revenue)} />
         <Metric label="Documents Generated" value={String(documentsCount.count ?? 0)} />
+        <Metric label="Successful Payments" value={String(successfulPayments.length)} />
         <Metric label="Failed Payments" value={String(failedPayments.count ?? 0)} />
+        <Metric label="Pending Payments" value={String(pendingPayments.count ?? 0)} />
+        <Metric label="Average Order Value" value={formatKes(averageOrderValue)} />
+        <Metric label="Conversion Rate" value={`${conversionRate}%`} />
+        <Metric label="Top Product" value={highestSellingProduct ? products[highestSellingProduct].title : "None"} />
+        <Metric label="Callback Failures" value={String(callbackFailures)} />
         <Metric label="AI Generations" value={String(generationRows.length)} />
         <Metric label="AI Tokens" value={totalTokens.toLocaleString()} />
         <Metric label="Estimated AI Cost" value={`$${estimatedAiCost.toFixed(4)}`} />
         <Metric label="Average Quality" value={averageQuality ? `${averageQuality}%` : "0%"} />
       </div>
+      <form className="mt-6 flex flex-wrap gap-3 rounded-lg border border-black/10 p-4 dark:border-white/10">
+        <select name="range" defaultValue={params.range ?? "month"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
+          <option value="today">Today</option>
+          <option value="week">This week</option>
+          <option value="month">This month</option>
+          <option value="all">All time</option>
+        </select>
+        <select name="product" defaultValue={params.product ?? "all"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
+          <option value="all">All products</option>
+          {(Object.keys(products) as ProductKey[]).map((key) => (
+            <option key={key} value={key}>{products[key].title}</option>
+          ))}
+        </select>
+        <select name="status" defaultValue={params.status ?? "all"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
+          <option value="all">All statuses</option>
+          <option value="successful">Successful</option>
+          <option value="processing">Processing</option>
+          <option value="failed">Failed</option>
+          <option value="timed_out">Timed out</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <button className="h-10 rounded-lg bg-brand-blue px-4 text-sm font-bold text-white">Apply filters</button>
+      </form>
       <section className="mt-8 grid gap-5 xl:grid-cols-2">
         <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
           <h2 className="text-xl font-black">Revenue by Product</h2>

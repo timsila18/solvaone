@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
+import { userHasPaidProject } from "@/lib/payments";
 import { generateWithSolvaIntelligence } from "@/lib/solva-intelligence/service";
 import { generationModeSchema } from "@/lib/solva-intelligence/types";
 
@@ -18,20 +19,11 @@ const schema = z.object({
 });
 
 async function hasPaidGenerationAccess(projectId: string, userId: string) {
-  if (process.env.SOLVA_REQUIRE_PAYMENT_FOR_GENERATION !== "true") {
+  if (process.env.SOLVA_REQUIRE_PAYMENT_FOR_GENERATION === "false") {
     return true;
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data: payment } = await supabase
-    .from("payments")
-    .select("id,status")
-    .eq("project_id", projectId)
-    .eq("user_id", userId)
-    .eq("status", "paid")
-    .maybeSingle();
-
-  return Boolean(payment);
+  return userHasPaidProject(userId, projectId);
 }
 
 export async function POST(request: Request) {
