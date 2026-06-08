@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Loader2, Phone, Save, Sparkles, Wand2 } from "lucide-react";
+import { CreditCard, Download, Loader2, Save, Sparkles, Wand2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,6 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
   const [html, setHtml] = useState("");
   const [qualityNotes, setQualityNotes] = useState<string[]>([]);
   const [qualityScores, setQualityScores] = useState<Record<string, number>>({});
-  const [phone, setPhone] = useState("");
   const [status, setStatus] = useState("Draft");
   const templates = templatesForProduct(productKey);
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
@@ -227,13 +226,10 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
               placeholder="Add any extra context, constraints, tender details, job advert text, or style instructions."
             />
           </label>
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-            <Input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="2547XXXXXXXX" />
-            <Button onClick={goToCheckout} disabled={isPending}>
-              <Phone className="h-4 w-4" /> Pay & Generate
-            </Button>
-          </div>
           <div className="flex flex-wrap gap-3">
+            <Button onClick={goToCheckout} disabled={isPending}>
+              <CreditCard className="h-4 w-4" /> Pay & Generate
+            </Button>
             <Button onClick={() => saveDraft()} disabled={isPending}>
               <Save className="h-4 w-4" /> Save
             </Button>
