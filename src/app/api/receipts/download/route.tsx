@@ -8,10 +8,10 @@ import { formatKes } from "@/lib/utils";
 const styles = StyleSheet.create({
   page: { padding: 48, fontSize: 11, color: "#000000", lineHeight: 1.5 },
   brand: { color: "#0066FF", fontSize: 24, fontWeight: 700 },
-  subtitle: { marginTop: 4, color: "#333333" },
+  subtitle: { marginTop: 4, color: "#000000" },
   title: { marginTop: 36, fontSize: 18, fontWeight: 700 },
-  row: { flexDirection: "row", justifyContent: "space-between", borderBottom: "1 solid #E5E5E5", paddingVertical: 8 },
-  label: { color: "#555555" },
+  row: { flexDirection: "row", justifyContent: "space-between", borderBottom: "1 solid #000000", paddingVertical: 8 },
+  label: { color: "#000000" },
   value: { fontWeight: 700 }
 });
 

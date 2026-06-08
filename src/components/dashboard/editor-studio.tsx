@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
+import { trackEvent } from "@/lib/analytics";
 import { products, type ProductKey } from "@/lib/types";
 import { templatesForProduct } from "@/lib/template-registry";
 import { formatKes } from "@/lib/utils";
@@ -64,6 +65,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
 
   function generateDocument(mode: GenerationMode = "full_document") {
     startTransition(async () => {
+      trackEvent("start_document", { product: productKey, mode });
       setStatus(mode === "full_document" ? "Generating with Solva Intelligence" : "Improving with Solva Intelligence");
       const saveResponse = await fetch("/api/documents/autosave", {
         method: "POST",
@@ -102,6 +104,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
       setQualityScores(responsePayload.output?.qualityScores ?? {});
       setQualityNotes(responsePayload.output?.qualityScores?.notes ?? responsePayload.output?.improvementNotes ?? []);
       setStatus("Ready");
+      trackEvent("document_generated", { product: productKey, documentId: saved.documentId, mode });
     });
   }
 
@@ -159,6 +162,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
     anchor.download = `${title.replace(/\W+/g, "-").toLowerCase()}.${format}`;
     anchor.click();
     URL.revokeObjectURL(url);
+    trackEvent(format === "pdf" ? "pdf_downloaded" : "docx_downloaded", { documentId, product: productKey });
   }
 
   return (

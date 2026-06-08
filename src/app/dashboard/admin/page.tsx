@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
+import { DashboardMetricCard } from "@/components/marketing/sections";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { products, type ProductKey } from "@/lib/types";
 import { formatKes } from "@/lib/utils";
@@ -13,10 +14,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   if (profile?.role !== "admin") redirect("/dashboard");
 
   const params = await searchParams;
-  const [usersCount, allPayments, paidPayments, failedPayments, pendingPayments, documentsCount, activity, generations, failedGenerations, paymentEvents] = await Promise.all([
+  const [usersCount, recentUsers, allPayments, failedPayments, pendingPayments, documentsCount, activity, generations, failedGenerations, paymentEvents] = await Promise.all([
     supabase.from("users").select("id", { count: "exact", head: true }),
+    supabase.from("users").select("email,created_at").order("created_at", { ascending: false }).limit(8),
     supabase.from("payments").select("id,product,product_id,amount,status,created_at,result_description").order("created_at", { ascending: false }).limit(2000),
-    supabase.from("payments").select("product,amount,status").eq("status", "paid"),
     supabase.from("payments").select("id,amount,product,created_at", { count: "exact" }).eq("status", "failed").limit(10),
     supabase.from("payments").select("id", { count: "exact", head: true }).in("status", ["pending", "processing"]),
     supabase.from("documents").select("id", { count: "exact", head: true }),
@@ -74,22 +75,22 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <p className="mt-2 text-black/55 dark:text-white/55">Operational visibility for SolvaOne.</p>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Total Users" value={String(usersCount.count ?? 0)} />
-        <Metric label="Revenue Today" value={formatKes(revenueToday)} />
-        <Metric label="Revenue This Month" value={formatKes(revenueMonth)} />
-        <Metric label="Revenue All Time" value={formatKes(revenue)} />
-        <Metric label="Documents Generated" value={String(documentsCount.count ?? 0)} />
-        <Metric label="Successful Payments" value={String(successfulPayments.length)} />
-        <Metric label="Failed Payments" value={String(failedPayments.count ?? 0)} />
-        <Metric label="Pending Payments" value={String(pendingPayments.count ?? 0)} />
-        <Metric label="Average Order Value" value={formatKes(averageOrderValue)} />
-        <Metric label="Conversion Rate" value={`${conversionRate}%`} />
-        <Metric label="Top Product" value={highestSellingProduct ? products[highestSellingProduct].title : "None"} />
-        <Metric label="Callback Failures" value={String(callbackFailures)} />
-        <Metric label="AI Generations" value={String(generationRows.length)} />
-        <Metric label="AI Tokens" value={totalTokens.toLocaleString()} />
-        <Metric label="Estimated AI Cost" value={`$${estimatedAiCost.toFixed(4)}`} />
-        <Metric label="Average Quality" value={averageQuality ? `${averageQuality}%` : "0%"} />
+        <DashboardMetricCard label="Total Users" value={String(usersCount.count ?? 0)} />
+        <DashboardMetricCard label="Revenue Today" value={formatKes(revenueToday)} />
+        <DashboardMetricCard label="Revenue This Month" value={formatKes(revenueMonth)} />
+        <DashboardMetricCard label="Revenue All Time" value={formatKes(revenue)} />
+        <DashboardMetricCard label="Documents Generated" value={String(documentsCount.count ?? 0)} />
+        <DashboardMetricCard label="Successful Payments" value={String(successfulPayments.length)} />
+        <DashboardMetricCard label="Failed Payments" value={String(failedPayments.count ?? 0)} />
+        <DashboardMetricCard label="Pending Payments" value={String(pendingPayments.count ?? 0)} />
+        <DashboardMetricCard label="Average Order Value" value={formatKes(averageOrderValue)} />
+        <DashboardMetricCard label="Conversion Rate" value={`${conversionRate}%`} />
+        <DashboardMetricCard label="Top Product" value={highestSellingProduct ? products[highestSellingProduct].title : "None"} />
+        <DashboardMetricCard label="Callback Failures" value={String(callbackFailures)} />
+        <DashboardMetricCard label="AI Generations" value={String(generationRows.length)} />
+        <DashboardMetricCard label="AI Tokens" value={totalTokens.toLocaleString()} />
+        <DashboardMetricCard label="Estimated AI Cost" value={`$${estimatedAiCost.toFixed(4)}`} />
+        <DashboardMetricCard label="Average Quality" value={averageQuality ? `${averageQuality}%` : "0%"} />
       </div>
       <form className="mt-6 flex flex-wrap gap-3 rounded-lg border border-black/10 p-4 dark:border-white/10">
         <select name="range" defaultValue={params.range ?? "month"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
@@ -115,6 +116,30 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <button className="h-10 rounded-lg bg-brand-blue px-4 text-sm font-bold text-white">Apply filters</button>
       </form>
       <section className="mt-8 grid gap-5 xl:grid-cols-2">
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+          <h2 className="text-xl font-black">Payment Issue Alerts</h2>
+          <div className="mt-5 space-y-3">
+            {Number(failedPayments.count ?? 0) || callbackFailures ? (
+              <>
+                <AlertLine label="Failed payments" value={String(failedPayments.count ?? 0)} />
+                <AlertLine label="M-Pesa callback failures" value={String(callbackFailures)} />
+                <AlertLine label="Pending/processing payments" value={String(pendingPayments.count ?? 0)} />
+              </>
+            ) : (
+              <p className="text-sm text-black/55 dark:text-white/55">No payment issues currently flagged.</p>
+            )}
+          </div>
+        </div>
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+          <h2 className="text-xl font-black">AI Generation Issue Alerts</h2>
+          <div className="mt-5 space-y-3">
+            {failedGenerations.data?.length ? (
+              failedGenerations.data.slice(0, 4).map((item) => <AlertLine key={item.id} label={products[item.product_type as ProductKey]?.title ?? item.product_type} value={new Date(item.created_at).toLocaleDateString()} />)
+            ) : (
+              <p className="text-sm text-black/55 dark:text-white/55">No failed generations currently queued.</p>
+            )}
+          </div>
+        </div>
         <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
           <h2 className="text-xl font-black">Revenue by Product</h2>
           <div className="mt-5 space-y-3">
@@ -171,6 +196,32 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             )}
           </div>
         </div>
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+          <h2 className="text-xl font-black">Recent Users</h2>
+          <div className="mt-5 space-y-3">
+            {recentUsers.data?.length ? (
+              recentUsers.data.map((item) => (
+                <div key={`${item.email}-${item.created_at}`} className="flex justify-between gap-3 rounded-lg border border-black/10 p-3 text-sm dark:border-white/10">
+                  <span className="font-bold">{item.email}</span>
+                  <span className="text-black/50 dark:text-white/50">{new Date(item.created_at).toLocaleDateString()}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-black/55 dark:text-white/55">No users recorded yet.</p>
+            )}
+          </div>
+        </div>
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+          <h2 className="text-xl font-black">Recent Transactions</h2>
+          <div className="mt-5 space-y-3">
+            {filteredPayments.slice(0, 8).map((payment) => (
+              <div key={payment.id} className="flex justify-between gap-3 rounded-lg border border-black/10 p-3 text-sm dark:border-white/10">
+                <span className="font-bold">{products[payment.product as ProductKey]?.title ?? payment.product}</span>
+                <span className="text-black/50 dark:text-white/50">{formatKes(payment.amount)} - {payment.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
       <section className="mt-8 rounded-lg border border-black/10 p-5 dark:border-white/10">
         <h2 className="text-xl font-black">Failed AI Generations</h2>
@@ -225,11 +276,11 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function AlertLine({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
-      <p className="text-sm font-bold text-black/50 dark:text-white/50">{label}</p>
-      <p className="mt-3 text-3xl font-black">{value}</p>
+    <div className="flex justify-between gap-3 rounded-lg border border-black/10 p-3 text-sm dark:border-white/10">
+      <span className="font-bold">{label}</span>
+      <span className="text-brand-blue">{value}</span>
     </div>
   );
 }

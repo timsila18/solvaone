@@ -1,62 +1,104 @@
+import type { Metadata } from "next";
+import Link from "next/link";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { PublicShell } from "@/components/marketing/public-shell";
+import { CheckoutCTA, DocumentPreviewCard, FAQAccordion, Hero, PricingCard, ProductCard, ProgressSteps, TestimonialCard } from "@/components/marketing/sections";
 import { ButtonLink } from "@/components/ui/button";
-import { Logo } from "@/components/ui/logo";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { products } from "@/lib/types";
+import { faqs, productPages, site } from "@/lib/marketing";
+
+export const metadata: Metadata = {
+  title: "SolvaOne | Create professional documents in minutes",
+  description: "CVs, cover letters, company profiles and business plans powered by Solva Intelligence for Kenya.",
+  alternates: { canonical: "/" },
+  keywords: ["CV builder Kenya", "CV revamp Kenya", "Professional CV Kenya", "Cover letter Kenya", "Company profile Kenya", "Business plan Kenya"]
+};
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
-      <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
-        <Logo />
-        <div className="flex items-center gap-3">
-          <ThemeToggle />
-          <ButtonLink href="/login" variant="secondary">
-            Login
-          </ButtonLink>
-          <ButtonLink href="/register">Get started</ButtonLink>
+    <PublicShell>
+      <Hero
+        title="Create professional documents in minutes."
+        subtitle="CVs, cover letters, company profiles and business plans powered by Solva Intelligence."
+      />
+      <section className="border-y border-black/10 dark:border-white/10">
+        <div className="mx-auto grid max-w-7xl gap-4 px-4 py-10 md:grid-cols-5 md:px-6">
+          {productPages.map((page) => <ProductCard key={page.key} productKey={page.key} />)}
         </div>
-      </header>
-      <section className="mx-auto grid max-w-7xl gap-10 px-5 py-12 lg:grid-cols-[1fr_0.9fr] lg:items-center lg:py-20">
-        <div>
-          <h1 className="max-w-4xl text-5xl font-black leading-[1.03] tracking-normal md:text-7xl">
-            SolvaOne
-          </h1>
-          <p className="mt-5 max-w-2xl text-xl font-semibold text-black/65 dark:text-white/65">
-            Create. Apply. Grow.
-          </p>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-black/60 dark:text-white/60">
-            Premium AI document generation for careers, companies, and growing businesses across Kenya.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <ButtonLink href="/register">
-              Start a project <ArrowRight className="h-4 w-4" />
-            </ButtonLink>
-            <ButtonLink href="/login" variant="secondary">
-              Open dashboard
-            </ButtonLink>
-          </div>
+      </section>
+      <section className="mx-auto max-w-7xl px-4 py-14 md:px-6">
+        <div className="max-w-2xl">
+          <h2 className="text-4xl font-black">How it works</h2>
+          <p className="mt-3 text-sm leading-6 text-black/58 dark:text-white/58">A focused flow from draft to paid, editable, downloadable document.</p>
         </div>
-        <div className="rounded-lg border border-black/10 bg-white p-4 shadow-soft dark:border-white/10 dark:bg-white/5">
-          <div className="rounded-lg border border-black/10 bg-black p-5 text-white dark:border-white/10">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-bold">Document Studio</span>
-              <span className="text-xs text-white/55">Autosave ready</span>
-            </div>
-            <div className="mt-6 space-y-3">
-              {Object.values(products).map((product) => (
-                <div key={product.title} className="flex items-start gap-3 rounded-lg bg-white/8 p-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 text-brand-blue" />
-                  <div>
-                    <div className="text-sm font-bold">{product.title}</div>
-                    <div className="text-xs leading-5 text-white/55">{product.description}</div>
-                  </div>
+        <div className="mt-8">
+          <ProgressSteps />
+        </div>
+      </section>
+      <section className="bg-black text-white">
+        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 md:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div>
+            <h2 className="text-4xl font-black">Why SolvaOne</h2>
+            <div className="mt-6 space-y-4">
+              {["Kenyan professional tone", "M-Pesa-first checkout", "Editable documents with version history", "PDF, DOCX, and receipt downloads"].map((item) => (
+                <div key={item} className="flex gap-3 text-sm font-semibold text-white/72">
+                  <CheckCircle2 className="h-5 w-5 text-brand-blue" />
+                  {item}
                 </div>
               ))}
             </div>
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <DocumentPreviewCard product="company_profile" />
+            <DocumentPreviewCard product="business_plan" />
+          </div>
         </div>
       </section>
-    </main>
+      <section className="mx-auto grid max-w-7xl gap-8 px-4 py-14 md:px-6 lg:grid-cols-[0.8fr_1.2fr]">
+        <div>
+          <h2 className="text-4xl font-black">Pricing that is clear before checkout.</h2>
+          <p className="mt-4 text-sm leading-6 text-black/58 dark:text-white/58">No hidden platform fees. You see the product price before M-Pesa STK Push starts.</p>
+          <ButtonLink className="mt-6" href="/pricing" variant="secondary">View all pricing <ArrowRight className="h-4 w-4" /></ButtonLink>
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <PricingCard productId="cv_builder" />
+          <PricingCard productId="cv_cover_bundle" highlight />
+          <PricingCard productId="business_plan" />
+        </div>
+      </section>
+      <section className="mx-auto max-w-7xl px-4 py-14 md:px-6">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+          <div>
+            <h2 className="text-4xl font-black">Testimonials</h2>
+            <p className="mt-3 text-sm leading-6 text-black/58 dark:text-white/58">Displayed only after customer approval and verification.</p>
+          </div>
+          <Link href="/contact" className="text-sm font-black text-brand-blue">Share feedback</Link>
+        </div>
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <TestimonialCard />
+          <TestimonialCard />
+          <TestimonialCard />
+        </div>
+      </section>
+      <section className="mx-auto grid max-w-7xl gap-8 px-4 py-14 md:px-6 lg:grid-cols-[0.8fr_1.2fr]">
+        <div>
+          <h2 className="text-4xl font-black">Questions before you pay?</h2>
+          <p className="mt-4 text-sm leading-6 text-black/58 dark:text-white/58">Start with the common questions, then contact support if you need help.</p>
+        </div>
+        <FAQAccordion items={faqs.slice(0, 4)} />
+      </section>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            name: site.name,
+            url: site.url,
+            parentOrganization: site.parent
+          })
+        }}
+      />
+      <CheckoutCTA title="Create, apply, and grow with a document you can trust." product="cv_builder" />
+    </PublicShell>
   );
 }

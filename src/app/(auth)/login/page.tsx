@@ -13,7 +13,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <h1 className="text-3xl font-black">Login</h1>
           <p className="mt-2 text-sm text-black/55 dark:text-white/55">Access your SolvaOne workspace.</p>
           {params.error ? (
-            <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-200">
+            <div className="mt-4 rounded-lg border border-black px-3 py-2 text-sm font-semibold text-black dark:border-white dark:text-white">
               Please check your credentials and try again.
             </div>
           ) : null}

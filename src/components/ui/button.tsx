@@ -9,7 +9,7 @@ const variants = {
   primary: "bg-brand-blue text-white hover:bg-blue-700",
   secondary: "border border-black/10 bg-white text-black hover:border-brand-blue/40 dark:border-white/15 dark:bg-white/10 dark:text-white",
   ghost: "text-black hover:bg-black/5 dark:text-white dark:hover:bg-white/10",
-  danger: "bg-red-600 text-white hover:bg-red-700"
+  danger: "bg-black text-white hover:bg-brand-blue dark:bg-white dark:text-black dark:hover:bg-brand-blue dark:hover:text-white"
 };
 
 export function Button({ className, variant = "primary", ...props }: ButtonProps) {

@@ -7,13 +7,15 @@ import { absoluteUrl } from "@/lib/utils";
 
 const authSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8)
+  password: z.string().min(8),
+  referralCode: z.string().max(40).optional()
 });
 
 export async function loginAction(formData: FormData) {
   const parsed = authSchema.safeParse({
     email: formData.get("email"),
-    password: formData.get("password")
+    password: formData.get("password"),
+    referralCode: formData.get("referralCode") || undefined
   });
 
   if (!parsed.success) {
@@ -45,7 +47,10 @@ export async function registerAction(formData: FormData) {
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
-      emailRedirectTo: absoluteUrl("/auth/callback")
+      emailRedirectTo: absoluteUrl("/auth/callback"),
+      data: {
+        referral_code: parsed.data.referralCode?.toUpperCase()
+      }
     }
   });
 

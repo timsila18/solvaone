@@ -11,8 +11,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, marginBottom: 16, fontWeight: 700 },
   sectionTitle: { fontSize: 14, marginTop: 14, marginBottom: 7, fontWeight: 700 },
   body: { marginBottom: 5 },
-  footer: { position: "absolute", bottom: 24, left: 44, right: 44, fontSize: 8, color: "#666666", flexDirection: "row", justifyContent: "space-between" },
-  watermark: { position: "absolute", top: "45%", left: 80, right: 80, textAlign: "center", fontSize: 34, color: "#DDDDDD" }
+  footer: { position: "absolute", bottom: 24, left: 44, right: 44, fontSize: 8, color: "#000000", flexDirection: "row", justifyContent: "space-between" },
+  watermark: { position: "absolute", top: "45%", left: 80, right: 80, textAlign: "center", fontSize: 34, color: "#000000", opacity: 0.08 }
 });
 
 function stripHtml(html: string) {

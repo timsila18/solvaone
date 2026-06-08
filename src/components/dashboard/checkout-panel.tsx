@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, Phone, RefreshCw } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { trackEvent } from "@/lib/analytics";
 import { pricingProducts, type ProductId } from "@/lib/pricing";
 import { formatKes } from "@/lib/utils";
 
@@ -22,6 +23,10 @@ export function CheckoutPanel({ projectId, productId }: CheckoutPanelProps) {
   const [message, setMessage] = useState("Enter your Safaricom number to receive the M-Pesa STK prompt.");
   const [isPending, startTransition] = useTransition();
 
+  useEffect(() => {
+    trackEvent("start_checkout", { projectId, productId });
+  }, [projectId, productId]);
+
   function initiatePayment() {
     startTransition(async () => {
       setStatus("processing");
@@ -35,9 +40,11 @@ export function CheckoutPanel({ projectId, productId }: CheckoutPanelProps) {
       if (!response.ok) {
         setStatus("failed");
         setMessage(payload.error ?? "Payment failed. Confirm the phone number and try again.");
+        trackEvent("payment_failed", { projectId, productId, reason: payload.error });
         return;
       }
       setPaymentId(payload.paymentId);
+      trackEvent("payment_initiated", { projectId, productId, paymentId: payload.paymentId });
       setMessage("Payment request sent. M-Pesa callbacks can take a few seconds to update.");
     });
   }
@@ -56,6 +63,7 @@ export function CheckoutPanel({ projectId, productId }: CheckoutPanelProps) {
             ? "Payment confirmed. You can generate and download your document."
             : payload.payment?.result_description ?? "Payment was not completed. You can retry."
         );
+        trackEvent(nextStatus === "successful" || nextStatus === "paid" ? "payment_successful" : "payment_failed", { projectId, productId, paymentId, status: nextStatus });
         window.clearInterval(interval);
       }
       if (Date.now() - startedAt > 120000) {
