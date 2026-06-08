@@ -2,22 +2,28 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createOpenAIClient } from "@/lib/openai";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
+import { templateById } from "@/lib/template-registry";
 import { products } from "@/lib/types";
 
 const schema = z.object({
   projectId: z.string().uuid(),
   documentId: z.string().uuid(),
   product: z.enum(["cv_builder", "cv_revamp", "cover_letter", "company_profile", "business_plan"]),
+  templateId: z.string().min(2).max(120).nullable().optional(),
   title: z.string().min(2).max(160),
   brief: z.string().min(40).max(20000)
 });
 
-function systemPrompt(product: keyof typeof products) {
+function systemPrompt(product: keyof typeof products, templateId?: string | null) {
+  const template = templateById(templateId);
   return [
     "You are SolvaOne, a premium enterprise document generation assistant for Solva Business Group.",
     "Return clean semantic HTML only. Do not include markdown fences, scripts, inline event handlers, or external links unless requested.",
     "Use concise, professional Kenyan business English.",
-    `Document product: ${products[product].title}.`
+    `Document product: ${products[product].title}.`,
+    template
+      ? `Use this template direction: ${template.name}. ${template.description}. Preserve the template's section order and visual intent in semantic HTML.`
+      : "Use the default SolvaOne structure for this product."
   ].join("\n");
 }
 
@@ -49,7 +55,7 @@ export async function POST(request: Request) {
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
     input: [
-      { role: "system", content: systemPrompt(parsed.data.product) },
+      { role: "system", content: systemPrompt(parsed.data.product, parsed.data.templateId) },
       {
         role: "user",
         content: `Title: ${parsed.data.title}\n\nSource brief:\n${parsed.data.brief}`
@@ -61,7 +67,7 @@ export async function POST(request: Request) {
 
   const { error } = await supabase
     .from("documents")
-    .update({ html, version: 1, updated_at: new Date().toISOString() })
+    .update({ html, template_id: parsed.data.templateId, version: 1, updated_at: new Date().toISOString() })
     .eq("id", parsed.data.documentId)
     .eq("user_id", user.id);
 
@@ -75,7 +81,7 @@ export async function POST(request: Request) {
     action: "document.generate",
     entity_type: "document",
     entity_id: parsed.data.documentId,
-    metadata: { model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini", product: parsed.data.product }
+    metadata: { model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini", product: parsed.data.product, templateId: parsed.data.templateId }
   });
 
   return NextResponse.json({ html });

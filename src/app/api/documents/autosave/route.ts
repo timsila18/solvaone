@@ -6,6 +6,7 @@ const schema = z.object({
   projectId: z.string().uuid().nullable().optional(),
   documentId: z.string().uuid().nullable().optional(),
   product: z.enum(["cv_builder", "cv_revamp", "cover_letter", "company_profile", "business_plan"]),
+  templateId: z.string().min(2).max(120).nullable().optional(),
   title: z.string().min(2).max(160),
   brief: z.string().max(20000).optional().default(""),
   html: z.string().max(200000).optional().default("")
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
       .insert({
         user_id: user.id,
         product: input.product,
+        template_id: input.templateId,
         title: input.title,
         status: "draft",
         source_brief: input.brief
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
   } else {
     const { error } = await supabase
       .from("projects")
-      .update({ title: input.title, source_brief: input.brief, updated_at: new Date().toISOString() })
+      .update({ title: input.title, template_id: input.templateId, source_brief: input.brief, updated_at: new Date().toISOString() })
       .eq("id", projectId)
       .eq("user_id", user.id);
 
@@ -60,6 +62,7 @@ export async function POST(request: Request) {
     project_id: projectId,
     user_id: user.id,
     title: input.title,
+    template_id: input.templateId,
     content: { brief: input.brief },
     html: input.html,
     format: "html",

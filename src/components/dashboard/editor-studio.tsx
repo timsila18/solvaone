@@ -5,6 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { products, type ProductKey } from "@/lib/types";
+import { templatesForProduct } from "@/lib/template-registry";
 import { formatKes } from "@/lib/utils";
 
 type EditorStudioProps = {
@@ -21,6 +22,8 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
   const [html, setHtml] = useState("");
   const [phone, setPhone] = useState("");
   const [status, setStatus] = useState("Draft");
+  const templates = templatesForProduct(productKey);
+  const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
   const [isPending, startTransition] = useTransition();
 
   const canGenerate = useMemo(() => brief.trim().length > 40, [brief]);
@@ -31,7 +34,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
       const response = await fetch("/api/documents/autosave", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, documentId, product: productKey, title, brief, html: nextHtml })
+        body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, html: nextHtml })
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -50,7 +53,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
       const saveResponse = await fetch("/api/documents/autosave", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, documentId, product: productKey, title, brief, html })
+        body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, html })
       });
       const saved = await saveResponse.json();
       if (!saveResponse.ok) {
@@ -63,7 +66,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
       const response = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: saved.projectId, documentId: saved.documentId, product: productKey, title, brief })
+        body: JSON.stringify({ projectId: saved.projectId, documentId: saved.documentId, product: productKey, templateId, title, brief })
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -83,7 +86,7 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
         const saveResponse = await fetch("/api/documents/autosave", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId, documentId, product: productKey, title, brief, html })
+          body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, html })
         });
         const saved = await saveResponse.json();
         if (!saveResponse.ok) {
@@ -136,6 +139,25 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
             Project title
             <Input className="mt-2" value={title} onChange={(event) => setTitle(event.target.value)} />
           </label>
+          {templates.length ? (
+            <label className="block text-sm font-bold">
+              Template
+              <select
+                className="mt-2 h-11 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-black outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-white/15 dark:bg-white/10 dark:text-white"
+                value={templateId}
+                onChange={(event) => setTemplateId(event.target.value)}
+              >
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-2 block text-xs font-medium leading-5 text-black/50 dark:text-white/50">
+                Generation will follow the selected structure and tone.
+              </span>
+            </label>
+          ) : null}
           <label className="block text-sm font-bold">
             Source brief
             <Textarea
