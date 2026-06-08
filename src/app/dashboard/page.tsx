@@ -57,7 +57,7 @@ export default async function DashboardPage() {
               <h2 className="mt-2 text-2xl font-black">{activeProject.title}</h2>
               <p className="mt-1 text-sm font-semibold capitalize text-black/55 dark:text-white/55">{activeProject.status.replaceAll("_", " ")}</p>
             </div>
-            <ButtonLink href={`/dashboard/projects/new?product=${activeProject.product}`} variant="secondary">
+            <ButtonLink href={`/dashboard/projects/new?product=${activeProject.product}&projectId=${activeProject.id}`} variant="secondary">
               Continue editing <ArrowRight className="h-4 w-4" />
             </ButtonLink>
           </div>
@@ -98,7 +98,7 @@ export default async function DashboardPage() {
                     </div>
                     <p className="mt-1 text-sm text-black/50 dark:text-white/50">{products[project.product].title} - {project.status.replaceAll("_", " ")}</p>
                   </div>
-                  <ButtonLink className="h-8 px-3" variant="secondary" href={`/dashboard/projects/new?product=${project.product}`}>Continue</ButtonLink>
+                  <ButtonLink className="h-8 px-3" variant="secondary" href={`/dashboard/projects/new?product=${project.product}&projectId=${project.id}`}>Continue</ButtonLink>
                 </div>
               ))}
             </div>

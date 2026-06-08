@@ -1,4 +1,4 @@
-import { BarChart3, BriefcaseBusiness, CheckCircle2, CreditCard, FileText, Home, PenLine, Sparkles, UserRound } from "lucide-react";
+import { BarChart3, BriefcaseBusiness, CheckCircle2, CreditCard, Files, FileText, Home, PenLine, Sparkles, UserRound } from "lucide-react";
 import Link from "next/link";
 import { Logo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -11,6 +11,7 @@ const nav = [
   { href: "/dashboard/projects/new?product=cover_letter", label: "Cover Letter", icon: PenLine },
   { href: "/dashboard/projects/new?product=company_profile", label: "Company Profile", icon: BriefcaseBusiness },
   { href: "/dashboard/projects/new?product=business_plan", label: "Business Plan", icon: BarChart3 },
+  { href: "/dashboard/documents", label: "My Documents", icon: Files },
   { href: "/dashboard#payments", label: "Payments", icon: CreditCard },
   { href: "/dashboard/support", label: "Support", icon: PenLine }
 ];
