@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createOpenAIClient } from "@/lib/openai";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
-import { templateById } from "@/lib/template-registry";
-import { products } from "@/lib/types";
+import { generateWithSolvaIntelligence } from "@/lib/solva-intelligence/service";
+import { generationModeSchema } from "@/lib/solva-intelligence/types";
 
 const schema = z.object({
   projectId: z.string().uuid(),
@@ -11,20 +10,28 @@ const schema = z.object({
   product: z.enum(["cv_builder", "cv_revamp", "cover_letter", "company_profile", "business_plan"]),
   templateId: z.string().min(2).max(120).nullable().optional(),
   title: z.string().min(2).max(160),
-  brief: z.string().min(40).max(20000)
+  payload: z.record(z.unknown()).default({}),
+  brief: z.string().max(20000).optional(),
+  mode: generationModeSchema.optional(),
+  sectionId: z.string().max(120).optional(),
+  sectionHtml: z.string().max(30000).optional()
 });
 
-function systemPrompt(product: keyof typeof products, templateId?: string | null) {
-  const template = templateById(templateId);
-  return [
-    "You are SolvaOne, a premium enterprise document generation assistant for Solva Business Group.",
-    "Return clean semantic HTML only. Do not include markdown fences, scripts, inline event handlers, or external links unless requested.",
-    "Use concise, professional Kenyan business English.",
-    `Document product: ${products[product].title}.`,
-    template
-      ? `Use this template direction: ${template.name}. ${template.description}. Preserve the template's section order and visual intent in semantic HTML.`
-      : "Use the default SolvaOne structure for this product."
-  ].join("\n");
+async function hasPaidGenerationAccess(projectId: string, userId: string) {
+  if (process.env.SOLVA_REQUIRE_PAYMENT_FOR_GENERATION !== "true") {
+    return true;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data: payment } = await supabase
+    .from("payments")
+    .select("id,status")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .eq("status", "paid")
+    .maybeSingle();
+
+  return Boolean(payment);
 }
 
 export async function POST(request: Request) {
@@ -38,51 +45,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid generation payload" }, { status: 400 });
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data: payment } = await supabase
-    .from("payments")
-    .select("id,status")
-    .eq("project_id", parsed.data.projectId)
-    .eq("user_id", user.id)
-    .eq("status", "paid")
-    .maybeSingle();
-
-  if (!payment) {
+  if (!(await hasPaidGenerationAccess(parsed.data.projectId, user.id))) {
     return NextResponse.json({ error: "A successful payment is required before generation." }, { status: 402 });
   }
 
-  const client = createOpenAIClient();
-  const response = await client.responses.create({
-    model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
-    input: [
-      { role: "system", content: systemPrompt(parsed.data.product, parsed.data.templateId) },
-      {
-        role: "user",
-        content: `Title: ${parsed.data.title}\n\nSource brief:\n${parsed.data.brief}`
-      }
-    ]
-  });
+  try {
+    const payload = parsed.data.brief
+      ? { ...parsed.data.payload, sourceBrief: parsed.data.brief }
+      : parsed.data.payload;
 
-  const html = response.output_text;
+    const result = await generateWithSolvaIntelligence({
+      userId: user.id,
+      projectId: parsed.data.projectId,
+      documentId: parsed.data.documentId,
+      product: parsed.data.product,
+      templateId: parsed.data.templateId,
+      title: parsed.data.title,
+      payload,
+      mode: parsed.data.mode,
+      sectionId: parsed.data.sectionId,
+      sectionHtml: parsed.data.sectionHtml
+    });
 
-  const { error } = await supabase
-    .from("documents")
-    .update({ html, template_id: parsed.data.templateId, version: 1, updated_at: new Date().toISOString() })
-    .eq("id", parsed.data.documentId)
-    .eq("user_id", user.id);
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Generation failed.";
+    const supabase = await createSupabaseServerClient();
+    await supabase.from("audit_logs").insert({
+      user_id: user.id,
+      action: "document.generate.failed",
+      entity_type: "project",
+      entity_id: parsed.data.projectId,
+      metadata: { error: message, product: parsed.data.product }
+    });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  await supabase.from("projects").update({ status: "ready", updated_at: new Date().toISOString() }).eq("id", parsed.data.projectId);
-  await supabase.from("audit_logs").insert({
-    user_id: user.id,
-    action: "document.generate",
-    entity_type: "document",
-    entity_id: parsed.data.documentId,
-    metadata: { model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini", product: parsed.data.product, templateId: parsed.data.templateId }
-  });
-
-  return NextResponse.json({ html });
 }

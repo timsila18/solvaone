@@ -8,6 +8,7 @@ const schema = z.object({
   product: z.enum(["cv_builder", "cv_revamp", "cover_letter", "company_profile", "business_plan"]),
   templateId: z.string().min(2).max(120).nullable().optional(),
   title: z.string().min(2).max(160),
+  payload: z.record(z.unknown()).optional().default({}),
   brief: z.string().max(20000).optional().default(""),
   html: z.string().max(200000).optional().default("")
 });
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
         template_id: input.templateId,
         title: input.title,
         status: "draft",
-        source_brief: input.brief
+        source_brief: input.brief || JSON.stringify(input.payload)
       })
       .select("id")
       .single();
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
   } else {
     const { error } = await supabase
       .from("projects")
-      .update({ title: input.title, template_id: input.templateId, source_brief: input.brief, updated_at: new Date().toISOString() })
+      .update({ title: input.title, template_id: input.templateId, source_brief: input.brief || JSON.stringify(input.payload), updated_at: new Date().toISOString() })
       .eq("id", projectId)
       .eq("user_id", user.id);
 
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
     user_id: user.id,
     title: input.title,
     template_id: input.templateId,
-    content: { brief: input.brief },
+    content: { brief: input.brief, payload: input.payload },
     html: input.html,
     format: "html",
     updated_at: new Date().toISOString()
@@ -85,6 +86,24 @@ export async function POST(request: Request) {
     entity_id: document.id,
     metadata: { projectId }
   });
+
+  if (input.html.trim()) {
+    const { data: latest } = await supabase
+      .from("document_versions")
+      .select("version_number")
+      .eq("document_id", document.id)
+      .order("version_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    await supabase.from("document_versions").insert({
+      document_id: document.id,
+      user_id: user.id,
+      version_number: (latest?.version_number ?? 0) + 1,
+      content: { html: input.html, payload: input.payload },
+      change_type: "autosave"
+    });
+  }
 
   return NextResponse.json({ projectId, documentId: document.id });
 }

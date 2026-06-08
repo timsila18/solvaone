@@ -12,12 +12,14 @@ export default async function AdminPage() {
   const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).single();
   if (profile?.role !== "admin") redirect("/dashboard");
 
-  const [usersCount, paidPayments, failedPayments, documentsCount, activity] = await Promise.all([
+  const [usersCount, paidPayments, failedPayments, documentsCount, activity, generations, failedGenerations] = await Promise.all([
     supabase.from("users").select("id", { count: "exact", head: true }),
     supabase.from("payments").select("product,amount,status").eq("status", "paid"),
     supabase.from("payments").select("id,amount,product,created_at", { count: "exact" }).eq("status", "failed").limit(10),
     supabase.from("documents").select("id", { count: "exact", head: true }),
-    supabase.from("audit_logs").select("action,entity_type,created_at").order("created_at", { ascending: false }).limit(12)
+    supabase.from("audit_logs").select("action,entity_type,created_at").order("created_at", { ascending: false }).limit(12),
+    supabase.from("ai_generations").select("product_type,total_tokens,estimated_cost,status,quality_scores").order("created_at", { ascending: false }).limit(1000),
+    supabase.from("ai_generations").select("id,error_message,product_type,created_at", { count: "exact" }).eq("status", "failed").limit(10)
   ]);
 
   const revenue = paidPayments.data?.reduce((sum, payment) => sum + Number(payment.amount), 0) ?? 0;
@@ -28,6 +30,23 @@ export default async function AdminPage() {
     },
     {} as Partial<Record<ProductKey, number>>
   );
+  const generationRows = generations.data ?? [];
+  const totalTokens = generationRows.reduce((sum, item) => sum + Number(item.total_tokens ?? 0), 0);
+  const estimatedAiCost = generationRows.reduce((sum, item) => sum + Number(item.estimated_cost ?? 0), 0);
+  const generationsByProduct = generationRows.reduce(
+    (acc, item) => {
+      acc[item.product_type as ProductKey] = (acc[item.product_type as ProductKey] ?? 0) + 1;
+      return acc;
+    },
+    {} as Partial<Record<ProductKey, number>>
+  );
+  const mostUsedProduct = Object.entries(generationsByProduct).sort((a, b) => b[1] - a[1])[0]?.[0] as ProductKey | undefined;
+  const qualityValues = generationRows
+    .map((item) => Number((item.quality_scores as { completeness?: number } | null)?.completeness ?? 0))
+    .filter(Boolean);
+  const averageQuality = qualityValues.length
+    ? Math.round(qualityValues.reduce((sum, value) => sum + value, 0) / qualityValues.length)
+    : 0;
 
   return (
     <AppShell email={user.email} isAdmin>
@@ -40,6 +59,10 @@ export default async function AdminPage() {
         <Metric label="Total Revenue" value={formatKes(revenue)} />
         <Metric label="Documents Generated" value={String(documentsCount.count ?? 0)} />
         <Metric label="Failed Payments" value={String(failedPayments.count ?? 0)} />
+        <Metric label="AI Generations" value={String(generationRows.length)} />
+        <Metric label="AI Tokens" value={totalTokens.toLocaleString()} />
+        <Metric label="Estimated AI Cost" value={`$${estimatedAiCost.toFixed(4)}`} />
+        <Metric label="Average Quality" value={averageQuality ? `${averageQuality}%` : "0%"} />
       </div>
       <section className="mt-8 grid gap-5 xl:grid-cols-2">
         <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
@@ -62,6 +85,28 @@ export default async function AdminPage() {
           </div>
         </div>
         <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+          <h2 className="text-xl font-black">Generations by Product</h2>
+          <div className="mt-5 space-y-3">
+            {(Object.keys(products) as ProductKey[]).map((key) => (
+              <div key={key}>
+                <div className="flex justify-between text-sm font-bold">
+                  <span>{products[key].title}</span>
+                  <span>{generationsByProduct[key] ?? 0}</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-brand-blue"
+                    style={{ width: generationRows.length ? `${Math.min(100, ((generationsByProduct[key] ?? 0) / generationRows.length) * 100)}%` : "0%" }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-sm font-semibold text-black/55 dark:text-white/55">
+            Most used product: {mostUsedProduct ? products[mostUsedProduct].title : "No generations yet"}
+          </p>
+        </div>
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
           <h2 className="text-xl font-black">User Activity</h2>
           <div className="mt-5 space-y-3">
             {activity.data?.length ? (
@@ -75,6 +120,24 @@ export default async function AdminPage() {
               <p className="text-sm text-black/55 dark:text-white/55">No activity has been recorded yet.</p>
             )}
           </div>
+        </div>
+      </section>
+      <section className="mt-8 rounded-lg border border-black/10 p-5 dark:border-white/10">
+        <h2 className="text-xl font-black">Failed AI Generations</h2>
+        <div className="mt-5 space-y-3">
+          {failedGenerations.data?.length ? (
+            failedGenerations.data.map((item) => (
+              <div key={item.id} className="rounded-lg border border-black/10 p-3 text-sm dark:border-white/10">
+                <div className="flex justify-between gap-3 font-bold">
+                  <span>{products[item.product_type as ProductKey]?.title ?? item.product_type}</span>
+                  <span>{new Date(item.created_at).toLocaleString()}</span>
+                </div>
+                <p className="mt-2 text-black/55 dark:text-white/55">{item.error_message}</p>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-black/55 dark:text-white/55">No failed AI generations recorded.</p>
+          )}
         </div>
       </section>
       <section className="mt-8 rounded-lg border border-black/10 p-5 dark:border-white/10">
