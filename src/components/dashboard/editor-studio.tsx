@@ -1,6 +1,6 @@
 "use client";
 
-import { CreditCard, Download, Loader2, Save, Sparkles, Wand2 } from "lucide-react";
+import { CreditCard, Download, FileText, Loader2, Save, Sparkles, UploadCloud, Wand2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
@@ -30,18 +30,77 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
   const [qualityNotes, setQualityNotes] = useState<string[]>([]);
   const [qualityScores, setQualityScores] = useState<Record<string, number>>({});
   const [status, setStatus] = useState("Draft");
+  const [uploadedCv, setUploadedCv] = useState<{ name: string; size: number; type: string; path?: string; parsed: boolean } | null>(null);
+  const [uploadError, setUploadError] = useState("");
   const templates = templatesForProduct(productKey);
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
   const [isPending, startTransition] = useTransition();
 
   const fields = getFields(productKey);
-  const canGenerate = useMemo(
-    () => Object.values(payload).join(" ").trim().length > 40 || brief.trim().length > 40,
-    [brief, payload]
-  );
+  const canGenerate = useMemo(() => {
+    if (productKey === "cv_revamp") {
+      return (payload.oldCvContent ?? "").trim().length > 40;
+    }
+
+    return Object.values(payload).join(" ").trim().length > 40 || brief.trim().length > 40;
+  }, [brief, payload, productKey]);
 
   function updatePayload(key: string, value: string) {
     setPayload((current) => ({ ...current, [key]: value }));
+  }
+
+  async function handleCvUpload(file: File | null) {
+    if (!file) return;
+
+    setUploadError("");
+    const maxSize = 8 * 1024 * 1024;
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const allowedExtensions = ["txt", "pdf", "doc", "docx"];
+
+    if (!allowedExtensions.includes(extension)) {
+      setUploadError("Upload a CV in TXT, PDF, DOC, or DOCX format.");
+      return;
+    }
+
+    if (file.size > maxSize) {
+      setUploadError("CV upload limit is 8MB. Please upload a smaller file or paste the CV text.");
+      return;
+    }
+
+    setStatus("Uploading CV");
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("/api/cv-uploads", {
+      method: "POST",
+      body: formData
+    });
+    const result = await response.json();
+
+    if (!response.ok) {
+      setStatus("CV upload failed");
+      setUploadError(result.error ?? "CV upload failed. Please try again or paste the CV text.");
+      return;
+    }
+
+    const metadata = result.file as { name: string; size: number; type: string; path: string; parsed: boolean };
+    setUploadedCv(metadata);
+    setPayload((current) => ({
+      ...current,
+      uploadedCvFileName: metadata.name,
+      uploadedCvFileSize: String(metadata.size),
+      uploadedCvFileType: metadata.type,
+      uploadedCvStoragePath: metadata.path,
+      ...(result.extractedText ? { oldCvContent: result.extractedText } : {})
+    }));
+
+    if (result.extractedText) {
+      setStatus("CV upload loaded");
+      return;
+    }
+
+    setStatus("CV upload saved");
+    setUploadError("File saved. Paste the CV text below as well so Solva Intelligence can read and revamp it accurately.");
   }
 
   function saveDraft(nextHtml = html) {
@@ -199,6 +258,57 @@ export function EditorStudio({ userId, productKey }: EditorStudioProps) {
               </span>
             </label>
           ) : null}
+          {productKey === "cv_revamp" ? (
+            <div className="rounded-lg border border-black/10 p-4 dark:border-white/10">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-blue text-white">
+                  <UploadCloud className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black">Upload existing CV</p>
+                  <p className="mt-1 text-xs leading-5 text-black/55 dark:text-white/55">
+                    Add the user&apos;s existing CV for revamp. TXT files are read automatically; PDF, DOC, and DOCX can be attached and the CV text should also be pasted below for accurate AI rewriting.
+                  </p>
+                  <label className="mt-3 flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-black/20 px-4 py-5 text-center transition hover:border-brand-blue hover:bg-brand-blue/5 dark:border-white/20 dark:hover:bg-brand-blue/15">
+                    <FileText className="h-6 w-6 text-brand-blue" />
+                    <span className="mt-2 text-sm font-bold">Choose CV file</span>
+                    <span className="mt-1 text-xs text-black/50 dark:text-white/50">TXT, PDF, DOC, or DOCX up to 8MB</span>
+                    <input
+                      className="sr-only"
+                      type="file"
+                      accept=".txt,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                      onChange={(event) => handleCvUpload(event.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                  {uploadedCv ? (
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-black/5 px-3 py-2 text-xs dark:bg-white/10">
+                      <span className="min-w-0 truncate font-bold">{uploadedCv.name}</span>
+                      <button
+                        type="button"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg hover:bg-black/10 dark:hover:bg-white/15"
+                        aria-label="Remove uploaded CV"
+                        onClick={() => {
+                          setUploadedCv(null);
+                          setUploadError("");
+                          setPayload((current) => {
+                            const next = { ...current };
+                            delete next.uploadedCvFileName;
+                            delete next.uploadedCvFileSize;
+                            delete next.uploadedCvFileType;
+                            delete next.uploadedCvStoragePath;
+                            return next;
+                          });
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : null}
+                  {uploadError ? <p className="mt-2 text-xs font-semibold leading-5 text-black/60 dark:text-white/60">{uploadError}</p> : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             {fields.map((field) => (
               <label key={field.key} className="block text-sm font-bold md:col-span-1">
@@ -325,7 +435,7 @@ function getFields(product: ProductKey) {
   }
   if (product === "cv_revamp") {
     return [
-      { key: "oldCvContent", label: "Old CV content", placeholder: "Paste the current CV content", type: "textarea" },
+      { key: "oldCvContent", label: "CV content to revamp", placeholder: "Paste the current CV content here. TXT uploads fill this automatically.", type: "textarea" },
       { key: "targetJobTitle", label: "Target job title", placeholder: "Procurement Officer", type: "text" },
       { key: "targetIndustry", label: "Target industry", placeholder: "Public sector, NGO, banking", type: "text" },
       { key: "yearsExperience", label: "Years of experience", placeholder: "5 years", type: "text" },
