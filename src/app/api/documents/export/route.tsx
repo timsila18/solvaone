@@ -15,6 +15,25 @@ const styles = StyleSheet.create({
   watermark: { position: "absolute", top: "45%", left: 80, right: 80, textAlign: "center", fontSize: 34, color: "#000000", opacity: 0.08 }
 });
 
+const cvStyles = StyleSheet.create({
+  page: { padding: 0, fontSize: 9.5, lineHeight: 1.35, color: "#000000", fontFamily: "Helvetica", backgroundColor: "#FFFFFF" },
+  header: { backgroundColor: "#000000", color: "#FFFFFF", paddingTop: 30, paddingHorizontal: 34, paddingBottom: 24, borderBottomWidth: 5, borderBottomColor: "#0066FF" },
+  eyebrow: { color: "#0066FF", fontSize: 8, fontWeight: 700, letterSpacing: 1.2, marginBottom: 8, textTransform: "uppercase" },
+  name: { fontSize: 25, fontWeight: 700, marginBottom: 6 },
+  contact: { fontSize: 9.5, color: "#FFFFFF", opacity: 0.9 },
+  body: { paddingHorizontal: 34, paddingTop: 22, paddingBottom: 34 },
+  section: { marginBottom: 13 },
+  sectionTitleRow: { flexDirection: "row", alignItems: "center", marginBottom: 7 },
+  sectionRule: { width: 18, height: 3, backgroundColor: "#0066FF", marginRight: 8 },
+  sectionTitle: { fontSize: 12.5, fontWeight: 700, textTransform: "uppercase" },
+  paragraph: { fontSize: 9.5, marginBottom: 4.5 },
+  bulletRow: { flexDirection: "row", marginBottom: 4 },
+  bulletDot: { width: 10, color: "#0066FF", fontWeight: 700 },
+  bulletText: { flex: 1, fontSize: 9.5 },
+  jobLine: { fontSize: 10, fontWeight: 700, marginTop: 3, marginBottom: 3 },
+  footer: { position: "absolute", bottom: 16, left: 34, right: 34, paddingTop: 6, borderTopWidth: 1, borderTopColor: "#0066FF", fontSize: 7.5, color: "#000000", flexDirection: "row", justifyContent: "space-between" }
+});
+
 function stripHtml(html: string) {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, "")
@@ -32,6 +51,76 @@ function sectionsFromHtml(html: string) {
   const matches = [...html.matchAll(/<h2[^>]*>(.*?)<\/h2>([\s\S]*?)(?=<h2|$)/gi)];
   if (!matches.length) return [{ title: "Document", text: stripHtml(html) }];
   return matches.map((match) => ({ title: stripHtml(match[1]), text: stripHtml(match[2]) }));
+}
+
+function cvHeaderFromHtml(html: string, fallbackTitle: string) {
+  const name = stripHtml(html.match(/<h1[^>]*>(.*?)<\/h1>/i)?.[1] ?? fallbackTitle);
+  const beforeFirstSection = html.split(/<h2/i)[0] ?? "";
+  const contact = stripHtml(beforeFirstSection)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line && line !== name)
+    .join(" | ");
+
+  return { name, contact };
+}
+
+function isCvProduct(product?: string | null) {
+  return product === "cv_builder" || product === "cv_revamp";
+}
+
+function lineStyleForCv(line: string) {
+  if (/section$/i.test(line) || /department$/i.test(line) || /office$/i.test(line)) return cvStyles.jobLine;
+  if (/—| - |present|to date|20\d{2}|19\d{2}/i.test(line) && line.length < 130) return cvStyles.jobLine;
+  return cvStyles.paragraph;
+}
+
+function PremiumCvPdf({ title, html, product }: { title: string; html: string; product?: string | null }) {
+  const sections = sectionsFromHtml(html);
+  const header = cvHeaderFromHtml(html, title);
+  return (
+    <PdfDocument title={title} author="SolvaOne">
+      <Page size="A4" style={cvStyles.page}>
+        <View style={cvStyles.header}>
+          <Text style={cvStyles.eyebrow}>Revamped Professional CV</Text>
+          <Text style={cvStyles.name}>{header.name}</Text>
+          {header.contact ? <Text style={cvStyles.contact}>{header.contact}</Text> : null}
+        </View>
+        <View style={cvStyles.body}>
+          {sections.map((section) => (
+            <View key={section.title} style={cvStyles.section} wrap>
+              <View style={cvStyles.sectionTitleRow}>
+                <View style={cvStyles.sectionRule} />
+                <Text style={cvStyles.sectionTitle}>{section.title}</Text>
+              </View>
+              {section.text
+                .split(/\n+/)
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .map((line, index) => {
+                  const bullet = line.replace(/^[-•]\s*/, "");
+                  const isBullet = bullet !== line;
+                  return isBullet ? (
+                    <View key={`${section.title}-${index}`} style={cvStyles.bulletRow}>
+                      <Text style={cvStyles.bulletDot}>•</Text>
+                      <Text style={cvStyles.bulletText}>{bullet}</Text>
+                    </View>
+                  ) : (
+                    <Text key={`${section.title}-${index}`} style={lineStyleForCv(line)}>
+                      {line}
+                    </Text>
+                  );
+                })}
+            </View>
+          ))}
+        </View>
+        <View style={cvStyles.footer} fixed>
+          <Text>Exported {new Date().toLocaleDateString("en-KE")} by SolvaOne</Text>
+          <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+        </View>
+      </Page>
+    </PdfDocument>
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -56,8 +145,11 @@ export async function GET(request: NextRequest) {
   const hasPaid = await userHasPaidProject(user.id, document.project_id);
   if (!hasPaid) return NextResponse.json({ error: "Confirmed payment is required before downloads." }, { status: 402 });
 
+  const project = Array.isArray(document.projects) ? document.projects[0] : document.projects;
+  const product = project?.product as string | undefined;
   const sections = sectionsFromHtml(document.html);
   const filename = document.title.replace(/[^\w-]+/g, "-").toLowerCase();
+  const cvHeader = cvHeaderFromHtml(document.html, document.title);
 
   if (format === "docx") {
     const file = await Packer.toBuffer(
@@ -67,10 +159,12 @@ export async function GET(request: NextRequest) {
         sections: [
           {
             children: [
-              new Paragraph({ text: "SolvaOne", heading: HeadingLevel.HEADING_1 }),
-              new Paragraph({ children: [new TextRun({ text: document.title, bold: true, size: 32 })] }),
+              new Paragraph({ children: [new TextRun({ text: isCvProduct(product) ? cvHeader.name : document.title, bold: true, size: 36, color: "000000" })] }),
+              ...(isCvProduct(product) && cvHeader.contact
+                ? [new Paragraph({ children: [new TextRun({ text: cvHeader.contact, size: 20, color: "0066FF" })] })]
+                : []),
               ...sections.flatMap((section) => [
-                new Paragraph({ text: section.title, heading: HeadingLevel.HEADING_2 }),
+                new Paragraph({ text: section.title.toUpperCase(), heading: HeadingLevel.HEADING_2 }),
                 ...section.text.split(/\n+/).map((line) => new Paragraph(line))
               ])
             ]
@@ -83,6 +177,13 @@ export async function GET(request: NextRequest) {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "Content-Disposition": `attachment; filename="${filename}.docx"`
       }
+    });
+  }
+
+  if (isCvProduct(product)) {
+    const file = await renderToBuffer(<PremiumCvPdf title={document.title} html={document.html} product={product} />);
+    return new NextResponse(new Uint8Array(file), {
+      headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"` }
     });
   }
 
