@@ -131,7 +131,7 @@ export function CheckoutCTA({ title = "Ready to create your document?", product 
       <div className="mx-auto flex max-w-7xl flex-col justify-between gap-6 px-4 py-12 md:flex-row md:items-center md:px-6">
         <div>
           <h2 className="text-3xl font-black">{title}</h2>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-white/65">Pay securely with M-Pesa, generate with Solva Intelligence, edit, then download PDF or DOCX.</p>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-white/65">Pay securely with M-Pesa, create your document, edit, then download PDF or DOCX.</p>
         </div>
         <ButtonLink href={`/dashboard/projects/new?product=${product}`} variant="secondary">
           Create My Document <ArrowRight className="h-4 w-4" />

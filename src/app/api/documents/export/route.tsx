@@ -17,21 +17,24 @@ const styles = StyleSheet.create({
 
 const cvStyles = StyleSheet.create({
   page: { padding: 0, fontSize: 9.5, lineHeight: 1.35, color: "#000000", fontFamily: "Helvetica", backgroundColor: "#FFFFFF" },
-  header: { backgroundColor: "#000000", color: "#FFFFFF", paddingTop: 30, paddingHorizontal: 34, paddingBottom: 24, borderBottomWidth: 5, borderBottomColor: "#0066FF" },
-  eyebrow: { color: "#0066FF", fontSize: 8, fontWeight: 700, letterSpacing: 1.2, marginBottom: 8, textTransform: "uppercase" },
-  name: { fontSize: 25, fontWeight: 700, marginBottom: 6 },
-  contact: { fontSize: 9.5, color: "#FFFFFF", opacity: 0.9 },
-  body: { paddingHorizontal: 34, paddingTop: 22, paddingBottom: 34 },
-  section: { marginBottom: 13 },
+  header: { paddingTop: 30, paddingHorizontal: 34, paddingBottom: 0 },
+  headerAccent: { width: 46, height: 5, backgroundColor: "#0066FF", marginBottom: 11 },
+  name: { fontSize: 28, fontWeight: 700, marginBottom: 5, color: "#000000" },
+  role: { fontSize: 12, color: "#0066FF", fontWeight: 700, marginBottom: 14 },
+  contactBar: { backgroundColor: "#000000", color: "#FFFFFF", paddingTop: 9, paddingHorizontal: 14, paddingBottom: 5, marginTop: 4 },
+  contactGrid: { flexDirection: "row", flexWrap: "wrap" },
+  contactItem: { fontSize: 8.8, color: "#FFFFFF", marginRight: 14, marginBottom: 4 },
+  body: { paddingHorizontal: 34, paddingTop: 20, paddingBottom: 30 },
+  section: { marginBottom: 12 },
   sectionTitleRow: { flexDirection: "row", alignItems: "center", marginBottom: 7 },
-  sectionRule: { width: 18, height: 3, backgroundColor: "#0066FF", marginRight: 8 },
-  sectionTitle: { fontSize: 12.5, fontWeight: 700, textTransform: "uppercase" },
+  sectionBadge: { width: 17, height: 17, borderWidth: 1.4, borderColor: "#0066FF", marginRight: 8 },
+  sectionTitle: { fontSize: 11.6, fontWeight: 700, textTransform: "uppercase", color: "#000000" },
   paragraph: { fontSize: 9.5, marginBottom: 4.5 },
   bulletRow: { flexDirection: "row", marginBottom: 4 },
   bulletDot: { width: 10, color: "#0066FF", fontWeight: 700 },
   bulletText: { flex: 1, fontSize: 9.5 },
   jobLine: { fontSize: 10, fontWeight: 700, marginTop: 3, marginBottom: 3 },
-  footer: { position: "absolute", bottom: 16, left: 34, right: 34, paddingTop: 6, borderTopWidth: 1, borderTopColor: "#0066FF", fontSize: 7.5, color: "#000000", flexDirection: "row", justifyContent: "space-between" }
+  footer: { position: "absolute", bottom: 16, left: 34, right: 34, paddingTop: 6, borderTopWidth: 1, borderTopColor: "#0066FF", fontSize: 7.5, color: "#000000", flexDirection: "row", justifyContent: "flex-end" }
 });
 
 function stripHtml(html: string) {
@@ -75,22 +78,40 @@ function lineStyleForCv(line: string) {
   return cvStyles.paragraph;
 }
 
-function PremiumCvPdf({ title, html, product }: { title: string; html: string; product?: string | null }) {
+function roleFromTitle(title: string, name: string) {
+  const normalized = title.replace(name, "").replace(/^[-\s]+/, "").trim();
+  return normalized || "Professional CV";
+}
+
+function PremiumCvPdf({ title, html }: { title: string; html: string }) {
   const sections = sectionsFromHtml(html);
   const header = cvHeaderFromHtml(html, title);
+  const role = roleFromTitle(title, header.name);
+  const contactItems = header.contact.split("|").map((item) => item.trim()).filter(Boolean);
   return (
-    <PdfDocument title={title} author="SolvaOne">
+    <PdfDocument title={title} author={header.name}>
       <Page size="A4" style={cvStyles.page}>
         <View style={cvStyles.header}>
-          <Text style={cvStyles.eyebrow}>Revamped Professional CV</Text>
+          <View style={cvStyles.headerAccent} />
           <Text style={cvStyles.name}>{header.name}</Text>
-          {header.contact ? <Text style={cvStyles.contact}>{header.contact}</Text> : null}
+          <Text style={cvStyles.role}>{role}</Text>
+          {contactItems.length ? (
+            <View style={cvStyles.contactBar}>
+              <View style={cvStyles.contactGrid}>
+                {contactItems.map((item) => (
+                  <Text key={item} style={cvStyles.contactItem}>
+                    {item}
+                  </Text>
+                ))}
+              </View>
+            </View>
+          ) : null}
         </View>
         <View style={cvStyles.body}>
           {sections.map((section) => (
             <View key={section.title} style={cvStyles.section} wrap>
               <View style={cvStyles.sectionTitleRow}>
-                <View style={cvStyles.sectionRule} />
+                <View style={cvStyles.sectionBadge} />
                 <Text style={cvStyles.sectionTitle}>{section.title}</Text>
               </View>
               {section.text
@@ -115,7 +136,6 @@ function PremiumCvPdf({ title, html, product }: { title: string; html: string; p
           ))}
         </View>
         <View style={cvStyles.footer} fixed>
-          <Text>Exported {new Date().toLocaleDateString("en-KE")} by SolvaOne</Text>
           <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
         </View>
       </Page>
@@ -154,7 +174,7 @@ export async function GET(request: NextRequest) {
   if (format === "docx") {
     const file = await Packer.toBuffer(
       new Document({
-        creator: "SolvaOne",
+        creator: isCvProduct(product) ? cvHeader.name : "SolvaOne",
         title: document.title,
         sections: [
           {
@@ -181,7 +201,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (isCvProduct(product)) {
-    const file = await renderToBuffer(<PremiumCvPdf title={document.title} html={document.html} product={product} />);
+    const file = await renderToBuffer(<PremiumCvPdf title={document.title} html={document.html} />);
     return new NextResponse(new Uint8Array(file), {
       headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"` }
     });

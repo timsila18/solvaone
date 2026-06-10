@@ -43,7 +43,7 @@ export function PublicFooter() {
         <div>
           <Logo />
           <p className="mt-4 max-w-sm text-sm leading-6 text-white/65">
-            Premium AI document generation by {site.parent}. Built for job seekers, SMEs and professionals in Kenya.
+            Premium document creation by {site.parent}. Built for job seekers, SMEs and professionals in Kenya.
           </p>
         </div>
         <div>

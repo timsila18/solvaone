@@ -116,7 +116,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
     }
 
     setStatus("CV upload saved");
-    setUploadError("File saved. Paste the CV text below as well so Solva Intelligence can read and revamp it accurately.");
+    setUploadError("File saved. Paste the CV text below as well so the revamp can read and improve it accurately.");
   }
 
   function saveDraft(nextHtml = html) {
@@ -141,7 +141,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
   function generateDocument(mode: GenerationMode = "full_document") {
     startTransition(async () => {
       trackEvent("start_document", { product: productKey, mode });
-      setStatus(mode === "full_document" ? "Generating with Solva Intelligence" : "Improving with Solva Intelligence");
+      setStatus(mode === "full_document" ? "Preparing your document" : "Improving your document");
       const saveResponse = await fetch("/api/documents/autosave", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -283,7 +283,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-black">Upload existing CV</p>
                   <p className="mt-1 text-xs leading-5 text-black/55 dark:text-white/55">
-                    Add the user&apos;s existing CV for revamp. TXT files are read automatically; PDF, DOC, and DOCX can be attached and the CV text should also be pasted below for accurate AI rewriting.
+                    Add the user&apos;s existing CV for revamp. TXT files are read automatically; PDF, DOC, and DOCX can be attached and the CV text should also be pasted below for accurate rewriting.
                   </p>
                   <label className="mt-3 flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-black/20 px-4 py-5 text-center transition hover:border-brand-blue hover:bg-brand-blue/5 dark:border-white/20 dark:hover:bg-brand-blue/15">
                     <FileText className="h-6 w-6 text-brand-blue" />
@@ -425,7 +425,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
             setHtml(next);
             saveDraft(next);
           }}
-          dangerouslySetInnerHTML={{ __html: html || "<h2>Start generating your document</h2><p>Your AI output will appear here after generation.</p>" }}
+          dangerouslySetInnerHTML={{ __html: html || "<h2>Start your document</h2><p>Your polished draft will appear here after generation.</p>" }}
         />
       </section>
     </div>
