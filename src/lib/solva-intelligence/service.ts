@@ -97,7 +97,8 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
           { role: "developer", content: prompt.developer },
           { role: "user", content: prompt.user }
         ],
-        temperature: 0.45
+        temperature: 0.45,
+        max_output_tokens: 6000
       } as any);
 
       try {
