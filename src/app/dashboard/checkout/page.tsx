@@ -14,16 +14,30 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   if (!product) redirect("/dashboard");
 
   const supabase = await createSupabaseServerClient();
-  const [{ data: profile }, { data: project }] = await Promise.all([
+  const [{ data: profile }, { data: project }, { data: payment }] = await Promise.all([
     supabase.from("users").select("role").eq("id", user.id).single(),
-    supabase.from("projects").select("id,product").eq("id", params.projectId).eq("user_id", user.id).single()
+    supabase.from("projects").select("id,product").eq("id", params.projectId).eq("user_id", user.id).single(),
+    supabase
+      .from("payments")
+      .select("id,status,result_description")
+      .eq("project_id", params.projectId)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
   ]);
   if (!project) redirect("/dashboard");
   if (productIdToGenerationProduct(product.productId) !== project.product && product.productId !== "cv_cover_bundle") redirect("/dashboard");
 
   return (
     <AppShell email={user.email} isAdmin={profile?.role === "admin" || profile?.role === "super_admin"}>
-      <CheckoutPanel projectId={params.projectId} productId={product.productId as ProductId} />
+      <CheckoutPanel
+        projectId={params.projectId}
+        productId={product.productId as ProductId}
+        initialPaymentId={payment?.id ?? null}
+        initialStatus={(payment?.status as any) ?? "pending"}
+        initialMessage={payment?.result_description ?? null}
+      />
     </AppShell>
   );
 }

@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle2, Clock, CreditCard, Download, FileText, Gift, Plus } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock, CreditCard, Download, FileText, Gift, Lock, Plus } from "lucide-react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { EmptyState, DashboardMetricCard } from "@/components/marketing/sections";
@@ -17,14 +17,20 @@ export default async function DashboardPage() {
   const [{ data: profile }, { data: projects }, { data: payments }, { data: documents }, { data: referrals }, { data: credits }] = await Promise.all([
     supabase.from("users").select("role,referral_code").eq("id", user.id).single(),
     supabase.from("projects").select("*").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(10),
-    supabase.from("payments").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(10),
-    supabase.from("documents").select("id,project_id,title,updated_at").eq("user_id", user.id).order("updated_at", { ascending: false }).limit(20),
+    supabase.from("payments").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("documents").select("id,project_id,title,html,updated_at,projects(id,product,status,title)").eq("user_id", user.id).order("updated_at", { ascending: false }),
     supabase.from("referrals").select("id,status,reward_status").eq("referrer_user_id", user.id).limit(50),
     supabase.from("credits").select("id,status,credit_type,value").eq("user_id", user.id).eq("status", "active").limit(10)
   ]);
 
   const paidProjectIds = new Set((payments ?? []).filter((payment) => payment.status === "successful" || payment.status === "paid").map((payment) => payment.project_id));
-  const paymentByProject = new Map((payments ?? []).map((payment) => [payment.project_id, payment]));
+  const paymentByProject = new Map<string, any>();
+  for (const payment of payments ?? []) {
+    const existing = paymentByProject.get(payment.project_id);
+    if (!existing || payment.status === "successful" || payment.status === "paid") {
+      paymentByProject.set(payment.project_id, payment);
+    }
+  }
   const paidDocuments = (documents ?? []).filter((document) => paidProjectIds.has(document.project_id));
   const activeProject = (projects as ProjectRow[] | null)?.[0];
   const referralCode = profile?.referral_code ?? "PENDING";
@@ -134,19 +140,35 @@ export default async function DashboardPage() {
       </section>
 
       <section className="mt-8 grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <WorkspacePanel title="Purchased documents">
+        <WorkspacePanel
+          title="Documents & downloads"
+          action={<ButtonLink className="h-8 px-3" variant="secondary" href="/dashboard/documents">View all</ButtonLink>}
+        >
           {documents?.length ? (
             <div className="space-y-3">
               {documents.map((document) => {
                 const payment = paymentByProject.get(document.project_id);
                 const paid = paidProjectIds.has(document.project_id);
+                const project = Array.isArray(document.projects) ? document.projects[0] : document.projects;
+                const product = project?.product as ProductKey | undefined;
+                const productId = payment?.product_id ?? payment?.product ?? product ?? "cv_builder";
+                const textLength = (document.html ?? "").replace(/<[^>]*>/g, "").trim().length;
                 return (
                   <div key={document.id} className="flex flex-col justify-between gap-3 rounded-lg border border-black/10 p-4 dark:border-white/10 lg:flex-row lg:items-center">
                     <div>
                       <h3 className="font-black">{document.title}</h3>
-                      <p className="mt-1 text-sm capitalize text-black/50 dark:text-white/50">{payment?.status?.replaceAll("_", " ") ?? "draft"}</p>
+                      <p className="mt-1 text-sm capitalize text-black/50 dark:text-white/50">
+                        {product ? `${products[product].title} - ` : ""}
+                        {payment?.status?.replaceAll("_", " ") ?? "draft"}
+                        {textLength > 20 ? " - generated" : " - needs generation"}
+                      </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      {product ? (
+                        <ButtonLink className="h-8 px-3" variant="secondary" href={`/dashboard/projects/new?product=${product}&projectId=${document.project_id}`}>
+                          {textLength > 20 ? "Edit" : "Generate"}
+                        </ButtonLink>
+                      ) : null}
                       {paid ? (
                         <>
                           <ButtonLink className="h-8 px-3" href={`/api/documents/export?documentId=${document.id}&format=pdf`}><Download className="h-4 w-4" /> PDF</ButtonLink>
@@ -154,11 +176,11 @@ export default async function DashboardPage() {
                           {payment?.id ? <ButtonLink className="h-8 px-3" href={`/api/receipts/download?paymentId=${payment.id}`} variant="secondary">Receipt</ButtonLink> : null}
                         </>
                       ) : payment && ["failed", "cancelled", "timed_out"].includes(payment.status) ? (
-                        <ButtonLink className="h-8 px-3" href={`/dashboard/checkout?projectId=${document.project_id}&productId=${payment.product_id ?? payment.product}`}>Retry payment</ButtonLink>
+                        <ButtonLink className="h-8 px-3" href={`/dashboard/checkout?projectId=${document.project_id}&productId=${productId}`}>Retry payment</ButtonLink>
                       ) : (
-                        <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-black/10 px-3 text-xs font-bold dark:border-white/10">
-                          <CheckCircle2 className="h-4 w-4 text-brand-blue" /> Draft saved
-                        </span>
+                        <ButtonLink className="h-8 px-3" href={`/dashboard/checkout?projectId=${document.project_id}&productId=${productId}`}>
+                          <Lock className="h-4 w-4" /> Pay to download
+                        </ButtonLink>
                       )}
                     </div>
                   </div>
@@ -183,10 +205,13 @@ export default async function DashboardPage() {
   );
 }
 
-function WorkspacePanel({ title, children }: { title: string; children: React.ReactNode }) {
+function WorkspacePanel({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <section className="rounded-lg border border-black/10 p-5 dark:border-white/10">
-      <h2 className="text-xl font-black">{title}</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-xl font-black">{title}</h2>
+        {action}
+      </div>
       <div className="mt-5">{children}</div>
     </section>
   );

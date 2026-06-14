@@ -2,7 +2,7 @@
 
 import { ArrowRight, CheckCircle2, Loader2, Phone, RefreshCw } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trackEvent } from "@/lib/analytics";
 import { pricingProducts, type ProductId } from "@/lib/pricing";
@@ -11,17 +11,24 @@ import { formatKes } from "@/lib/utils";
 type CheckoutPanelProps = {
   projectId: string;
   productId: ProductId;
+  initialPaymentId?: string | null;
+  initialStatus?: Status;
+  initialMessage?: string | null;
 };
 
 type Status = "pending" | "processing" | "successful" | "failed" | "cancelled" | "timed_out" | "paid";
 
-export function CheckoutPanel({ projectId, productId }: CheckoutPanelProps) {
+export function CheckoutPanel({ projectId, productId, initialPaymentId = null, initialStatus = "pending", initialMessage = null }: CheckoutPanelProps) {
   const product = pricingProducts[productId];
   const generationProduct = productId === "cv_cover_bundle" ? "cv_builder" : productId;
   const [phone, setPhone] = useState("");
-  const [paymentId, setPaymentId] = useState<string | null>(null);
-  const [status, setStatus] = useState<Status>("pending");
-  const [message, setMessage] = useState("Enter your Safaricom number to receive the M-Pesa STK prompt.");
+  const [paymentId, setPaymentId] = useState<string | null>(initialPaymentId);
+  const [status, setStatus] = useState<Status>(initialStatus);
+  const [message, setMessage] = useState(
+    initialStatus === "successful" || initialStatus === "paid"
+      ? "Payment confirmed. You can generate, edit, and download your document."
+      : initialMessage ?? "Enter your Safaricom number to receive the M-Pesa STK prompt."
+  );
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -116,12 +123,14 @@ export function CheckoutPanel({ projectId, productId }: CheckoutPanelProps) {
           </Button>
         )}
         {(status === "successful" || status === "paid") && (
-          <a
-            className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand-blue px-5 text-sm font-black text-white transition hover:bg-blue-700"
-            href={`/dashboard/projects/new?product=${generationProduct}&projectId=${projectId}`}
-          >
-            Continue to Generate & Download <ArrowRight className="h-4 w-4" />
-          </a>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <ButtonLink href={`/dashboard/projects/new?product=${generationProduct}&projectId=${projectId}`}>
+              Continue to Generate & Download <ArrowRight className="h-4 w-4" />
+            </ButtonLink>
+            <ButtonLink href="/dashboard/documents" variant="secondary">
+              Open My Documents
+            </ButtonLink>
+          </div>
         )}
       </div>
     </section>
