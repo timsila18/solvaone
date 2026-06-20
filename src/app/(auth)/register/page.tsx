@@ -11,7 +11,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
         <Logo />
         <div className="mt-8 rounded-lg border border-black/10 p-6 shadow-soft dark:border-white/10">
           <h1 className="text-3xl font-black">Create account</h1>
-          <p className="mt-2 text-sm text-black/55 dark:text-white/55">Email verification is required before access. Use at least 10 characters with uppercase, lowercase, number, and symbol.</p>
+          <p className="mt-2 text-sm text-black/55 dark:text-white/55">Create your account with email and password. Use at least 10 characters with uppercase, lowercase, number, and symbol.</p>
           {params.error ? (
             <div className="mt-4 rounded-lg border border-black px-3 py-2 text-sm font-semibold text-black dark:border-white dark:text-white">
               Registration failed. Confirm the email and password are valid.

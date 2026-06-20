@@ -1,4 +1,4 @@
-import { MailCheck } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
 
@@ -9,10 +9,10 @@ export default function VerifyPage() {
         <div className="mb-6 flex justify-center">
           <Logo />
         </div>
-        <MailCheck className="mx-auto h-12 w-12 text-brand-blue" />
-        <h1 className="mt-5 text-3xl font-black">Verify your email</h1>
+        <CheckCircle2 className="mx-auto h-12 w-12 text-brand-blue" />
+        <h1 className="mt-5 text-3xl font-black">Account access is instant</h1>
         <p className="mt-3 text-sm leading-6 text-black/60 dark:text-white/60">
-          Check your inbox and follow the Supabase verification link to activate your SolvaOne account.
+          SolvaOne no longer requires email verification before access. Create an account or login with your email and password.
         </p>
         <ButtonLink className="mt-6" href="/login">
           Back to login

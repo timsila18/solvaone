@@ -80,12 +80,6 @@ export async function loginAction(formData: FormData) {
     redirect("/login?error=credentials");
   }
 
-  if (!data.user?.email_confirmed_at) {
-    await supabase.auth.signOut();
-    await recordAuthAttempt(parsed.data.email, false, "email_unverified");
-    redirect("/auth/verify");
-  }
-
   await recordAuthAttempt(parsed.data.email, true);
   await supabase.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", data.user.id);
   redirect("/dashboard");
@@ -104,19 +98,17 @@ export async function registerAction(formData: FormData) {
     redirect("/register?error=invalid");
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signUp({
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin.auth.admin.createUser({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: {
-      emailRedirectTo: absoluteUrl("/auth/callback"),
-      data: {
-        referral_code: parsed.data.referralCode?.toUpperCase(),
-        terms_accepted: true,
-        privacy_accepted: true,
-        terms_version: "2026-06-08",
-        privacy_version: "2026-06-08"
-      }
+    email_confirm: true,
+    user_metadata: {
+      referral_code: parsed.data.referralCode?.toUpperCase(),
+      terms_accepted: true,
+      privacy_accepted: true,
+      terms_version: "2026-06-08",
+      privacy_version: "2026-06-08"
     }
   });
 
@@ -124,7 +116,19 @@ export async function registerAction(formData: FormData) {
     redirect("/register?error=signup");
   }
 
-  redirect("/auth/verify");
+  const supabase = await createSupabaseServerClient();
+  const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+    email: parsed.data.email,
+    password: parsed.data.password
+  });
+
+  if (loginError || !loginData.user) {
+    redirect("/login?registered=1");
+  }
+
+  await recordAuthAttempt(parsed.data.email, true);
+  await supabase.from("users").update({ last_login_at: new Date().toISOString() }).eq("id", loginData.user.id);
+  redirect("/dashboard");
 }
 
 export async function forgotPasswordAction(formData: FormData) {

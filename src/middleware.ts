@@ -62,12 +62,6 @@ export async function middleware(request: NextRequest) {
     return withSecurityHeaders(NextResponse.redirect(url));
   }
 
-  if (isDashboard && user && !user.email_confirmed_at) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/auth/verify";
-    return withSecurityHeaders(NextResponse.redirect(url));
-  }
-
   if ((isDashboard || isApi) && user) {
     const { data: profile } = await supabase.from("users").select("status").eq("id", user.id).single();
     if (profile?.status && profile.status !== "active") {
