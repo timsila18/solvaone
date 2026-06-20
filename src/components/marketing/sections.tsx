@@ -9,7 +9,7 @@ import { cn, formatKes } from "@/lib/utils";
 export function Hero({
   title,
   subtitle,
-  primaryHref = "/dashboard/projects/new?product=cv_builder",
+  primaryHref = "/register",
   secondaryHref = "/pricing"
 }: {
   title: string;
@@ -18,7 +18,7 @@ export function Hero({
   secondaryHref?: string;
 }) {
   return (
-    <section className="mx-auto grid max-w-7xl gap-10 px-4 pb-14 pt-12 md:px-6 lg:grid-cols-[1fr_0.9fr] lg:items-center lg:pb-20 lg:pt-18">
+    <section className="mx-auto grid max-w-7xl gap-10 px-4 pb-14 pt-8 md:px-6 lg:grid-cols-[1fr_0.9fr] lg:items-center lg:pb-20 lg:pt-12">
       <div>
         <h1 className="max-w-4xl text-5xl font-black leading-[1.03] md:text-7xl">{title}</h1>
         <p className="mt-6 max-w-2xl text-lg font-semibold leading-8 text-black/65 dark:text-white/65">{subtitle}</p>
@@ -74,7 +74,7 @@ export function PricingCard({ productId, highlight = false }: { productId: Produ
           </li>
         ))}
       </ul>
-      <ButtonLink className="mt-6 w-full" href={`/dashboard/projects/new?product=${product.productId === "cv_cover_bundle" ? "cv_builder" : product.productId}`} variant={highlight ? "secondary" : "primary"}>
+      <ButtonLink className="mt-6 w-full" href="/register" variant={highlight ? "secondary" : "primary"}>
         Start now
       </ButtonLink>
     </div>
@@ -97,7 +97,7 @@ export function FAQAccordion({ items = faqs }: { items?: Array<{ question: strin
 export function DocumentPreviewCard({ product, featured = false }: { product: ProductKey; featured?: boolean }) {
   const page = productPages.find((item) => item.key === product)!;
   return (
-    <div className={cn("rounded-lg border border-black/10 bg-white p-4 shadow-soft dark:border-white/10 dark:bg-white/5", featured && "lg:rotate-1")}>
+    <div className={cn("rounded-lg border border-black/10 bg-white p-4 shadow-soft dark:border-white/10 dark:bg-white/5", featured && "lg:translate-y-0")}>
       <div className="rounded-lg border border-black/10 bg-white p-5 text-black dark:border-white/10">
         <div className="flex items-start justify-between gap-4 border-b border-black/10 pb-5">
           <div>
@@ -133,7 +133,7 @@ export function CheckoutCTA({ title = "Ready to create your document?", product 
           <h2 className="text-3xl font-black">{title}</h2>
           <p className="mt-3 max-w-xl text-sm leading-6 text-white/65">Pay securely with M-Pesa, create your document, edit, then download PDF or DOCX.</p>
         </div>
-        <ButtonLink href={`/dashboard/projects/new?product=${product}`} variant="secondary">
+        <ButtonLink href="/register" variant="secondary">
           Create My Document <ArrowRight className="h-4 w-4" />
         </ButtonLink>
       </div>

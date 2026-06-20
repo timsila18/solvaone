@@ -29,7 +29,7 @@ export function PublicNavbar() {
           <ButtonLink className="hidden md:inline-flex" href="/login" variant="secondary">
             Login
           </ButtonLink>
-          <ButtonLink href="/dashboard/projects/new?product=cv_builder">Create My Document</ButtonLink>
+          <ButtonLink href="/register">Create My Document</ButtonLink>
         </div>
       </div>
     </header>
@@ -87,7 +87,7 @@ export function PublicShell({ children }: { children: React.ReactNode }) {
 function MobileStickyCta() {
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-white/95 p-3 backdrop-blur dark:border-white/10 dark:bg-black/90 md:hidden">
-      <ButtonLink className="w-full" href="/dashboard/projects/new?product=cv_builder">
+      <ButtonLink className="w-full" href="/register">
         Create My Document
       </ButtonLink>
     </div>
