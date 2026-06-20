@@ -37,7 +37,7 @@ export default async function LaunchReadinessPage() {
 function buildChecks(): Array<{ name: string; status: Status; note: string }> {
   const has = (name: string) => Boolean(process.env[name]);
   return [
-    { name: "Authentication", status: has("NEXT_PUBLIC_SUPABASE_URL") && has("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ? "Pass" : "Fail", note: "Supabase auth env vars and email verification middleware are required." },
+    { name: "Authentication", status: has("NEXT_PUBLIC_SUPABASE_URL") && has("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ? "Pass" : "Fail", note: "Supabase auth env vars and instant signup are enabled." },
     { name: "Payments", status: has("DARAJA_CONSUMER_KEY") && has("DARAJA_PASSKEY") ? "Pass" : "Warning", note: "Daraja credentials and callback URL must be live and confirmed with Safaricom." },
     { name: "AI Generation", status: has("OPENAI_API_KEY") ? "Pass" : "Fail", note: "OpenAI key, payment gate, usage limits, and prompt safety are enabled." },
     { name: "Downloads", status: "Pass", note: "PDF, DOCX, and receipt exports are server-side and payment gated." },

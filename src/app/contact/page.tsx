@@ -20,8 +20,18 @@ export default function ContactPage() {
             Get help with payments, generated documents, downloads, receipts, or account access.
           </p>
           <div className="mt-8 space-y-4 text-sm font-semibold text-black/60 dark:text-white/60">
-            <p>Email: {site.supportEmail}</p>
-            <p>WhatsApp/Phone: {site.supportPhone}</p>
+            <p>
+              Email:{" "}
+              <a href={`mailto:${site.supportEmail}`} className="text-brand-blue">
+                {site.supportEmail}
+              </a>
+            </p>
+            <p>
+              WhatsApp:{" "}
+              <a href={site.supportWhatsAppUrl} className="text-brand-blue">
+                {site.supportPhone}
+              </a>
+            </p>
             <Link href="/faq" className="text-brand-blue">Read common questions</Link>
           </div>
         </div>

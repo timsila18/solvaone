@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
+import { site } from "@/lib/marketing";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 
 async function createTicket(formData: FormData) {
@@ -43,7 +44,15 @@ export default async function SupportPage() {
     <AppShell email={user.email} isAdmin={profile?.role === "admin" || profile?.role === "super_admin"}>
       <div className="mb-8">
         <h1 className="text-4xl font-black">Support</h1>
-        <p className="mt-2 text-black/55 dark:text-white/55">Submit issues and track ticket status.</p>
+        <p className="mt-2 text-black/55 dark:text-white/55">Submit issues, track ticket status, or contact Solva Business Group directly.</p>
+        <div className="mt-4 flex flex-wrap gap-2 text-sm font-bold">
+          <a className="rounded-lg border border-black/10 px-3 py-2 text-brand-blue dark:border-white/10" href={`mailto:${site.supportEmail}`}>
+            {site.supportEmail}
+          </a>
+          <a className="rounded-lg border border-black/10 px-3 py-2 text-brand-blue dark:border-white/10" href={site.supportWhatsAppUrl}>
+            WhatsApp {site.supportPhone}
+          </a>
+        </div>
       </div>
       <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
         <form action={createTicket} className="rounded-lg border border-black/10 p-5 dark:border-white/10">

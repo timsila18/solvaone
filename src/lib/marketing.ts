@@ -8,8 +8,9 @@ export const site = {
   tagline: "Create. Apply. Grow.",
   parent: "Solva Business Group",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://solvaone.co.ke",
-  supportEmail: "support@solvaone.co.ke",
-  supportPhone: "+254 700 000 000"
+  supportEmail: "solvabusinessgroup@gmail.com",
+  supportPhone: "0723298465",
+  supportWhatsAppUrl: "https://wa.me/254723298465"
 };
 
 export type ProductPage = {
