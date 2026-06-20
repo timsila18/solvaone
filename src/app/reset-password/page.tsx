@@ -11,10 +11,10 @@ export default async function ResetPasswordPage({ searchParams }: { searchParams
         <Logo />
         <div className="mt-8 rounded-lg border border-black/10 p-6 shadow-soft dark:border-white/10">
           <h1 className="text-3xl font-black">Choose a new password</h1>
-          <p className="mt-2 text-sm text-black/55 dark:text-white/55">Use at least 10 characters with uppercase, lowercase, number, and symbol.</p>
+          <p className="mt-2 text-sm text-black/55 dark:text-white/55">Use at least 8 characters with uppercase, lowercase, and a number.</p>
           {params.error ? <p className="mt-4 rounded-lg border border-black px-3 py-2 text-sm font-bold dark:border-white">The reset link is invalid or the password is too weak.</p> : null}
           <form action={resetPasswordAction} className="mt-6 space-y-4">
-            <Input type="password" name="password" placeholder="New password" minLength={10} required />
+            <Input type="password" name="password" placeholder="New password" minLength={8} required />
             <Button className="w-full" type="submit">Update password</Button>
           </form>
         </div>

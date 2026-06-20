@@ -11,7 +11,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
         <Logo />
         <div className="mt-8 rounded-lg border border-black/10 p-6 shadow-soft dark:border-white/10">
           <h1 className="text-3xl font-black">Create account</h1>
-          <p className="mt-2 text-sm text-black/55 dark:text-white/55">Create your account with email and password. Use at least 10 characters with uppercase, lowercase, number, and symbol.</p>
+          <p className="mt-2 text-sm text-black/55 dark:text-white/55">Create your account with email and password. Use at least 8 characters with uppercase, lowercase, and a number.</p>
           {params.error ? (
             <div className="mt-4 rounded-lg border border-black px-3 py-2 text-sm font-semibold text-black dark:border-white dark:text-white">
               Registration failed. Confirm the email and password are valid.
@@ -20,7 +20,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
           <form action={registerAction} className="mt-6 space-y-4">
             <input type="hidden" name="referralCode" value={params.ref ?? ""} />
             <Input type="email" name="email" placeholder="Email address" required />
-            <Input type="password" name="password" placeholder="Password" minLength={10} required />
+            <Input type="password" name="password" placeholder="Password" minLength={8} required />
             <label className="flex gap-2 text-sm font-semibold text-black/65 dark:text-white/65">
               <input type="checkbox" name="acceptTerms" required />
               I accept the Terms and Conditions.

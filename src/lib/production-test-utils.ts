@@ -4,7 +4,7 @@ import { hasPromptInjectionRisk } from "@/lib/solva-intelligence/safety";
 export function runPasswordPolicyChecks() {
   return [
     { name: "weak password rejected", pass: !passwordSchema.safeParse("password").success },
-    { name: "strong password accepted", pass: passwordSchema.safeParse("SolvaOne!2026").success }
+    { name: "strong password accepted", pass: passwordSchema.safeParse("Sq1pin2026").success }
   ];
 }
 

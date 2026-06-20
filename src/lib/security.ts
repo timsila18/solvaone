@@ -12,11 +12,10 @@ export type UserRole = "user" | "admin" | "super_admin";
 
 export const passwordSchema = z
   .string()
-  .min(10, "Use at least 10 characters.")
+  .min(8, "Use at least 8 characters.")
   .regex(/[A-Z]/, "Add an uppercase letter.")
   .regex(/[a-z]/, "Add a lowercase letter.")
-  .regex(/[0-9]/, "Add a number.")
-  .regex(/[^A-Za-z0-9]/, "Add a symbol.");
+  .regex(/[0-9]/, "Add a number.");
 
 export function checkRateLimit(key: string, limit: number, windowMs: number) {
   const now = Date.now();
