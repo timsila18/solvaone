@@ -23,6 +23,7 @@ export type ProductPage = {
   receives: string[];
   faqs: Array<{ question: string; answer: string }>;
   preview: string;
+  seoKeywords: string[];
 };
 
 export const productPages: ProductPage[] = [
@@ -35,6 +36,7 @@ export const productPages: ProductPage[] = [
     benefits: ["ATS-friendly structure", "Achievement-led wording", "Role-aligned skills", "Professional Kenya-ready tone"],
     receives: ["Professional summary", "Work experience bullets", "Skills and keywords", "Editable document"],
     preview: "A clean one-column CV with strong headings, measurable impact, and no unnecessary graphics.",
+    seoKeywords: ["CV builder Kenya", "Professional CV Kenya", "ATS CV Kenya", "CV maker Kenya", "job application CV Kenya"],
     faqs: [
       { question: "Can I edit the CV after generation?", answer: "Yes. You can edit every section and save versions before downloading." },
       { question: "Is it suitable for Kenyan jobs?", answer: "Yes. The prompts are tuned for Kenyan and East African professional applications." }
@@ -49,6 +51,7 @@ export const productPages: ProductPage[] = [
     benefits: ["Stronger professional summary", "Improved bullet points", "ATS keyword suggestions", "Missing information notes"],
     receives: ["Revamped CV", "Improvement summary", "Keyword suggestions", "Recommendations"],
     preview: "A sharper CV rebuilt from existing content, with clutter removed and achievements elevated.",
+    seoKeywords: ["CV revamp Kenya", "CV writing services Kenya", "ATS CV optimization Kenya", "professional CV rewrite Kenya", "CV update Kenya"],
     faqs: [
       { question: "Will it invent experience?", answer: "No. Missing information is marked as To be provided instead of being fabricated." },
       { question: "Can I use it for public sector roles?", answer: "Yes. Select Public Sector Application as your improvement goal." }
@@ -63,6 +66,7 @@ export const productPages: ProductPage[] = [
     benefits: ["Role-specific wording", "Professional salutation", "Evidence-based paragraphs", "Kenyan professional tone"],
     receives: ["Editable cover letter", "Role alignment", "Strong closing paragraph", "Download-ready draft"],
     preview: "A polished one-page letter designed for job applications, internships, NGOs, and management roles.",
+    seoKeywords: ["Cover letter Kenya", "cover letter generator Kenya", "job application letter Kenya", "professional cover letter Kenya", "NGO cover letter Kenya"],
     faqs: [
       { question: "Can I paste a job advert?", answer: "Yes. Add the advert text for tighter role matching." },
       { question: "Does it support graduate applications?", answer: "Yes. Graduate, internship, NGO, and public sector styles are supported." }
@@ -77,6 +81,7 @@ export const productPages: ProductPage[] = [
     benefits: ["Tender-ready structure", "Premium business tone", "Service and project sections", "Compliance-friendly layout"],
     receives: ["Cover page content", "Company overview", "Services", "Compliance and contacts"],
     preview: "A sectioned company profile for SMEs, contractors, suppliers, consultancies, and service businesses.",
+    seoKeywords: ["Company profile Kenya", "Tender company profile Kenya", "company profile for tenders Kenya", "SME company profile Kenya", "business profile Kenya"],
     faqs: [
       { question: "Can it include licenses and projects?", answer: "Yes. Add certifications, licenses, and past projects in the guided form." },
       { question: "Is it suitable for tenders?", answer: "Yes. The structure is designed to feel credible and tender-ready." }
@@ -91,6 +96,7 @@ export const productPages: ProductPage[] = [
     benefits: ["Investor-readable sections", "Kenya SME context", "Financial assumptions", "Implementation roadmap"],
     receives: ["Executive summary", "Market analysis", "Financial plan", "Roadmap and conclusion"],
     preview: "A detailed business plan built for SMEs, startups, founders, and funding conversations.",
+    seoKeywords: ["Business plan Kenya", "business plan writer Kenya", "startup business plan Kenya", "SME business plan Kenya", "business plan for funding Kenya"],
     faqs: [
       { question: "Does it calculate financials automatically?", answer: "It structures the financial plan from the assumptions you provide." },
       { question: "Can I revise sections later?", answer: "Yes. You can improve, shorten, expand, or regenerate sections in the editor." }
@@ -145,20 +151,16 @@ export function productUrl(key: ProductKey) {
 
 export function productMetadata(page: ProductPage): Metadata {
   const product = pricingProducts[page.key];
-  const title = `${product.productName} Kenya`;
-  const description = `${page.headline} ${product.description}`;
+  const title = `${product.productName} Kenya - ${site.name}`;
+  const description = `${page.headline} ${product.description} Pay with M-Pesa, edit online, and download PDF or Word DOCX.`;
   const url = absoluteUrl(productUrl(page.key));
   return {
     title,
     description,
     alternates: { canonical: url },
-    keywords: [
-      `${product.productName} Kenya`,
-      "SolvaOne",
-      "Solva Intelligence",
-      "Professional documents Kenya"
-    ],
-    openGraph: { title, description, url, type: "website" },
-    twitter: { card: "summary_large_image", title, description }
+    keywords: [...page.seoKeywords, "SolvaOne", "Solva Business Group", "Professional documents Kenya"],
+    openGraph: { title, description, url, type: "website", siteName: site.name },
+    twitter: { card: "summary_large_image", title, description },
+    robots: { index: true, follow: true }
   };
 }

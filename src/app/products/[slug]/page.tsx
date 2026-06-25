@@ -6,7 +6,7 @@ import { CheckoutCTA, DocumentPreviewCard, FAQAccordion, ProgressSteps } from "@
 import { ButtonLink } from "@/components/ui/button";
 import { productMetadata, productPages } from "@/lib/marketing";
 import { pricingProducts } from "@/lib/pricing";
-import { formatKes } from "@/lib/utils";
+import { absoluteUrl, formatKes } from "@/lib/utils";
 
 export function generateStaticParams() {
   return productPages.map((page) => ({ slug: page.slug }));
@@ -24,6 +24,46 @@ export default async function ProductLandingPage({ params }: { params: Promise<{
   const page = productPages.find((item) => item.slug === slug);
   if (!page) notFound();
   const product = pricingProducts[page.key];
+  const productUrl = absoluteUrl(`/products/${page.slug}`);
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Service",
+        name: product.productName,
+        description: product.description,
+        provider: {
+          "@type": "Organization",
+          name: "SolvaOne",
+          url: "https://solvaone.co.ke"
+        },
+        areaServed: {
+          "@type": "Country",
+          name: "Kenya"
+        },
+        serviceType: product.productName,
+        offers: {
+          "@type": "Offer",
+          price: product.price,
+          priceCurrency: product.currency,
+          availability: "https://schema.org/InStock",
+          url: productUrl
+        },
+        url: productUrl
+      },
+      {
+        "@type": "FAQPage",
+        mainEntity: page.faqs.map((item) => ({
+          "@type": "Question",
+          name: item.question,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: item.answer
+          }
+        }))
+      }
+    ]
+  };
 
   return (
     <PublicShell>
@@ -71,6 +111,7 @@ export default async function ProductLandingPage({ params }: { params: Promise<{
         <FAQAccordion items={page.faqs} />
       </section>
       <CheckoutCTA title={`Start your ${product.productName.toLowerCase()} today.`} product={page.key} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />
     </PublicShell>
   );
 }

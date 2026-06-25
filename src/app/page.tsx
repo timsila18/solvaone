@@ -7,8 +7,8 @@ import { ButtonLink } from "@/components/ui/button";
 import { faqs, productPages, site } from "@/lib/marketing";
 
 export const metadata: Metadata = {
-  title: "SolvaOne | Create professional documents in minutes",
-  description: "CVs, cover letters, company profiles and business plans powered by Solva Intelligence for Kenya.",
+  title: "CV Builder, Cover Letters, Company Profiles & Business Plans Kenya",
+  description: "Create professional CVs, cover letters, company profiles and business plans in Kenya. Pay with M-Pesa, edit online, and download PDF or Word DOCX.",
   alternates: { canonical: "/" },
   keywords: ["CV builder Kenya", "CV revamp Kenya", "Professional CV Kenya", "Cover letter Kenya", "Company profile Kenya", "Business plan Kenya"]
 };
@@ -94,7 +94,13 @@ export default function HomePage() {
             "@type": "Organization",
             name: site.name,
             url: site.url,
-            parentOrganization: site.parent
+            email: site.supportEmail,
+            telephone: site.supportPhone,
+            parentOrganization: {
+              "@type": "Organization",
+              name: site.parent
+            },
+            sameAs: [site.supportWhatsAppUrl]
           })
         }}
       />

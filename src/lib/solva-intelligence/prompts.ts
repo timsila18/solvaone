@@ -78,9 +78,12 @@ Do not preserve weak formatting from the original CV. Improve arrangement, spaci
       return sharedPrompt(
         input,
         `
-Generate a customized professional cover letter. Inputs may include applicant name, target job title, company, industry, experience summary, key achievements, optional job advert text, tone, and cover letter type.
-Return the letter in clear sections: address_and_salutation, opening_paragraph, evidence_based_body, closing_paragraph. Write a proper salutation, strong opening paragraph, two evidence-based body paragraphs, and confident closing. Use Kenyan professional tone. Avoid generic phrasing.
-The letter should be complete and polished, usually 450-650 words unless the user asks for a shorter version.
+Generate a customized, client-ready professional cover letter. Inputs may include applicant name, target job title, company, industry, experience summary, key achievements, optional job advert text, tone, and cover letter type.
+Return the letter in clear sections: address_and_salutation, opening_paragraph, evidence_based_body, closing_paragraph.
+Write a proper salutation, strong opening paragraph, two evidence-based body paragraphs, and confident closing. Align the applicant's experience to the specific role and organization. Use Kenyan professional tone unless the customer asks for another tone.
+Do not write a generic template. Mention the target role and company/organization when provided. If the company is missing, use "Hiring Manager" and mark company-specific details as "To be provided".
+The letter should be polished, editable, and complete, usually 450-650 words unless the user asks for a shorter version. Use paragraph HTML, not bullet-heavy formatting.
+Quality expectation: completeness >= 88, professionalTone >= 90, structure >= 88.
 `
       );
     case "company_profile":
@@ -88,9 +91,11 @@ The letter should be complete and polished, usually 450-650 words unless the use
         input,
         `
 Generate a premium, credible, tender-ready company profile for Kenyan SMEs, startups, consultancies, contractors, suppliers, cleaning companies, security firms, ICT businesses, restaurants, creative agencies, and service companies.
-Output sections: cover page content, company overview, background, vision, mission, core values, services/products, why choose us, team/management, experience/projects, compliance/certifications, and contact information.
+Output sections in this exact professional order: cover page content, company overview, background, vision, mission, core values, services/products, target clients, why choose us, team/management, experience/projects, compliance/certifications, contact information.
+Each service should include a practical description of what the company offers and the value to the client. For tender readiness, include capability language, reliability, compliance posture, and delivery approach where the customer provided enough context.
 Do not invent certifications, licenses, or past clients. Mark missing details as "To be provided".
-Produce enough depth for tender review, with clear service descriptions and evidence placeholders where supporting details are missing.
+Produce enough depth for tender review, with clear service descriptions and evidence placeholders where supporting details are missing. The tone must feel premium, credible, and usable in PDF/DOCX without sounding like a generic brochure.
+Quality expectation: completeness >= 90, professionalTone >= 90, structure >= 90, tenderReadiness >= 88.
 `
       );
     case "business_plan":
@@ -98,9 +103,12 @@ Produce enough depth for tender review, with clear service descriptions and evid
         input,
         `
 Generate a practical, detailed, investor-readable business plan for Kenyan SMEs and startups.
-Output sections: executive summary, business description, problem statement, proposed solution, products/services, market analysis, target customers, competitor analysis, marketing and sales strategy, operations plan, management team, revenue model, risk analysis, financial plan, implementation roadmap, and conclusion.
+Output sections in this exact professional order: executive summary, business description, problem statement, proposed solution, products/services, business model, market analysis, target customers, competitor analysis, marketing and sales strategy, operations plan, management team, revenue model, risk analysis, financial plan, implementation roadmap, and conclusion.
+Make the plan practical and execution-ready. Tie recommendations to the user's industry, location, products/services, target customers, pricing, revenue streams, competitors, operations, team, funding needs, and business stage.
 Use realistic assumptions only from the user's input. If financial details are missing, mark them as "To be provided" and explain what is needed.
-Keep the plan concise enough to return valid JSON, but substantial: at least 12 structured sections with practical Kenya/East Africa execution detail. Use tables in semantic HTML only where useful.
+Include tables in semantic HTML where useful for startup costs, revenue streams, risks, or implementation roadmap. Do not fabricate exact revenue, profit, staff counts, market share, or funding amounts.
+Keep the plan concise enough to return valid JSON, but substantial: at least 15 structured sections with practical Kenya/East Africa execution detail.
+Quality expectation: completeness >= 90, professionalTone >= 88, structure >= 90, businessClarity >= 88.
 `
       );
   }

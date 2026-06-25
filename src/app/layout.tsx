@@ -9,6 +9,20 @@ export const metadata: Metadata = {
     template: "%s | SolvaOne"
   },
   description: "Premium AI document generation for careers and businesses by Solva Business Group.",
+  keywords: [
+    "CV builder Kenya",
+    "CV revamp Kenya",
+    "Professional CV Kenya",
+    "Cover letter Kenya",
+    "Company profile Kenya",
+    "Tender company profile Kenya",
+    "Business plan Kenya",
+    "SolvaOne"
+  ],
+  applicationName: "SolvaOne",
+  authors: [{ name: "Solva Business Group" }],
+  creator: "Solva Business Group",
+  publisher: "Solva Business Group",
   alternates: {
     canonical: "/"
   },
@@ -23,7 +37,8 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "SolvaOne | Create. Apply. Grow.",
     description: "Premium document generation for job seekers, SMEs and professionals in Kenya."
-  }
+  },
+  robots: { index: true, follow: true }
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

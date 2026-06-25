@@ -7,12 +7,14 @@ import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/serve
 
 const styles = StyleSheet.create({
   page: { padding: 44, fontSize: 10.5, lineHeight: 1.45, color: "#000000", fontFamily: "Helvetica" },
-  brand: { color: "#0066FF", fontSize: 12, fontWeight: 700, marginBottom: 14 },
-  title: { fontSize: 22, marginBottom: 16, fontWeight: 700 },
-  sectionTitle: { fontSize: 14, marginTop: 14, marginBottom: 7, fontWeight: 700 },
+  title: { fontSize: 24, marginBottom: 7, fontWeight: 700 },
+  titleRule: { width: 58, height: 4, backgroundColor: "#0066FF", marginBottom: 18 },
+  sectionTitle: { fontSize: 13.5, marginTop: 14, marginBottom: 7, paddingBottom: 4, borderBottomWidth: 1, borderBottomColor: "#0066FF", fontWeight: 700 },
   body: { marginBottom: 5 },
-  footer: { position: "absolute", bottom: 24, left: 44, right: 44, fontSize: 8, color: "#000000", flexDirection: "row", justifyContent: "space-between" },
-  watermark: { position: "absolute", top: "45%", left: 80, right: 80, textAlign: "center", fontSize: 34, color: "#000000", opacity: 0.08 }
+  bulletRow: { flexDirection: "row", marginBottom: 4 },
+  bulletDot: { width: 10, color: "#0066FF", fontWeight: 700 },
+  bulletText: { flex: 1, fontSize: 10.5 },
+  footer: { position: "absolute", bottom: 24, left: 44, right: 44, fontSize: 8, color: "#000000", flexDirection: "row", justifyContent: "flex-end" }
 });
 
 const cvStyles = StyleSheet.create({
@@ -283,22 +285,28 @@ export async function GET(request: NextRequest) {
   }
 
   const file = await renderToBuffer(
-    <PdfDocument title={document.title} author="SolvaOne">
+    <PdfDocument title={document.title} author={document.title}>
       <Page size="A4" style={styles.page}>
-        <Text style={styles.brand}>SolvaOne | Create. Apply. Grow.</Text>
         <Text style={styles.title}>{document.title}</Text>
+        <View style={styles.titleRule} />
         {sections.map((section) => (
           <View key={section.title} wrap>
             <Text style={styles.sectionTitle}>{section.title}</Text>
-            {section.text.split(/\n+/).map((line, index) => (
-              <Text key={`${section.title}-${index}`} style={styles.body}>
-                {line}
-              </Text>
-            ))}
+            {sectionLines(section.text).map((line, index) =>
+              isBulletLine(line) ? (
+                <View key={`${section.title}-${index}`} style={styles.bulletRow}>
+                  <Text style={styles.bulletDot}>•</Text>
+                  <Text style={styles.bulletText}>{cleanBullet(line)}</Text>
+                </View>
+              ) : (
+                <Text key={`${section.title}-${index}`} style={styles.body}>
+                  {line}
+                </Text>
+              )
+            )}
           </View>
         ))}
         <View style={styles.footer} fixed>
-          <Text>Exported {new Date().toLocaleDateString("en-KE")} by SolvaOne</Text>
           <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
         </View>
       </Page>
