@@ -245,6 +245,7 @@ export async function userHasPaidProject(userId: string, projectId: string) {
     .eq("user_id", userId)
     .eq("project_id", projectId)
     .in("status", ["successful", "paid"])
+    .limit(1)
     .maybeSingle();
   return Boolean(data);
 }

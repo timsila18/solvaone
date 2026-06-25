@@ -94,11 +94,17 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
         model,
         input: [
           { role: "system", content: prompt.system },
-          { role: "developer", content: prompt.developer },
+          {
+            role: "developer",
+            content:
+              attempt === 1
+                ? prompt.developer
+                : `${prompt.developer}\n\nREPAIR MODE: The previous response was not valid JSON for the required schema. Return one complete valid JSON object only. Do not include markdown fences, commentary, or trailing text.`
+          },
           { role: "user", content: prompt.user }
         ],
-        temperature: 0.45,
-        max_output_tokens: 6000
+        temperature: attempt === 1 ? 0.35 : 0.15,
+        max_output_tokens: 12000
       } as any);
 
       try {

@@ -53,13 +53,8 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
   const [isPending, startTransition] = useTransition();
 
   const fields = getFields(productKey);
-  const canGenerate = useMemo(() => {
-    if (productKey === "cv_revamp") {
-      return (payload.oldCvContent ?? "").trim().length > 40 || Boolean(payload.uploadedCvStoragePath);
-    }
-
-    return Object.values(payload).join(" ").trim().length > 40 || brief.trim().length > 40;
-  }, [brief, payload, productKey]);
+  const readiness = useMemo(() => getGenerationReadiness(productKey, payload, brief), [brief, payload, productKey]);
+  const canGenerate = readiness.ready;
 
   function updatePayload(key: string, value: string) {
     setPayload((current) => ({ ...current, [key]: value }));
@@ -186,24 +181,20 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
 
   function goToCheckout() {
     startTransition(async () => {
-      let activeProjectId = projectId;
-      if (!activeProjectId) {
-        setStatus("Saving");
-        const saveResponse = await fetch("/api/documents/autosave", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, payload, html })
-        });
-        const saved = await saveResponse.json();
-        if (!saveResponse.ok) {
-          setStatus(saved.error ?? "Save failed");
-          return;
-        }
-        activeProjectId = saved.projectId;
-        setProjectId(saved.projectId);
-        setDocumentId(saved.documentId);
+      setStatus("Saving before checkout");
+      const saveResponse = await fetch("/api/documents/autosave", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, payload, html })
+      });
+      const saved = await saveResponse.json();
+      if (!saveResponse.ok) {
+        setStatus(saved.error ?? "Save failed");
+        return;
       }
-      router.push(`/dashboard/checkout?projectId=${activeProjectId}&productId=${productKey}`);
+      setProjectId(saved.projectId);
+      setDocumentId(saved.documentId);
+      router.push(`/dashboard/checkout?projectId=${saved.projectId}&productId=${productKey}`);
     });
   }
 
@@ -231,6 +222,11 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
     }
 
     const response = await fetch(`/api/documents/export?documentId=${documentId}&format=${format}`);
+    if (!response.ok) {
+      const message = await response.json().catch(() => ({ error: "Download failed. Please try again." }));
+      setStatus(message.error ?? "Download failed. Please try again.");
+      return;
+    }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -358,7 +354,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
             />
           </label>
           <div className="flex flex-wrap gap-3">
-            <Button onClick={goToCheckout} disabled={isPending}>
+            <Button onClick={goToCheckout} disabled={isPending || !canGenerate}>
               <CreditCard className="h-4 w-4" /> Pay & Generate
             </Button>
             <Button onClick={() => saveDraft()} disabled={isPending}>
@@ -373,9 +369,9 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
             </Button>
           </div>
           <p className="text-sm font-semibold text-black/55 dark:text-white/55">Status: {status}</p>
-          {productKey === "cv_revamp" && !canGenerate ? (
+          {!canGenerate ? (
             <p className="text-sm font-semibold text-black/55 dark:text-white/55">
-              Upload a readable DOCX or TXT CV, or paste the current CV content, to enable generation.
+              {readiness.message}
             </p>
           ) : null}
           {Object.keys(qualityScores).length ? (
@@ -506,4 +502,55 @@ function getFields(product: ProductKey) {
     { key: "financialFunding", label: "Financial assumptions and funding", placeholder: "Assumptions, funding needs, business stage", type: "textarea" },
     ...common
   ];
+}
+
+function hasText(value: string | undefined, minLength = 12) {
+  return (value ?? "").trim().length >= minLength;
+}
+
+function getGenerationReadiness(product: ProductKey, payload: Record<string, string>, brief: string) {
+  if (product === "cv_revamp") {
+    const hasCv = hasText(payload.oldCvContent, 40) || Boolean(payload.uploadedCvStoragePath);
+    return {
+      ready: hasCv,
+      message: "Upload a readable DOCX or TXT CV, or paste the current CV content, to enable generation."
+    };
+  }
+
+  if (product === "cv_builder") {
+    const ready = hasText(payload.personalDetails, 12) && hasText(payload.targetJobTitle, 3) && (hasText(payload.workExperience, 20) || hasText(payload.education, 12) || hasText(brief, 30));
+    return {
+      ready,
+      message: "Add personal details, target job title, and either work experience, education, or clear additional instructions to generate the CV."
+    };
+  }
+
+  if (product === "cover_letter") {
+    const ready = hasText(payload.applicantName, 2) && hasText(payload.targetJobTitle, 3) && (hasText(payload.company, 2) || hasText(payload.industry, 3)) && (hasText(payload.experienceSummary, 20) || hasText(payload.keyAchievements, 20) || hasText(payload.jobAdvertText, 40));
+    return {
+      ready,
+      message: "Add applicant name, target role, company or industry, and experience, achievements, or a job advert to generate the cover letter."
+    };
+  }
+
+  if (product === "company_profile") {
+    const ready = hasText(payload.companyName, 2) && hasText(payload.industry, 3) && hasText(payload.servicesProducts, 20);
+    return {
+      ready,
+      message: "Add company name, industry, and services/products to generate the company profile."
+    };
+  }
+
+  if (product === "business_plan") {
+    const ready = hasText(payload.businessName, 2) && hasText(payload.industryLocation, 3) && hasText(payload.productsServices, 20) && (hasText(payload.targetMarket, 12) || hasText(payload.businessModel, 12));
+    return {
+      ready,
+      message: "Add business name, industry/location, products/services, and target market or business model to generate the business plan."
+    };
+  }
+
+  return {
+    ready: Object.values(payload).join(" ").trim().length > 40 || brief.trim().length > 40,
+    message: "Add enough document details to generate."
+  };
 }

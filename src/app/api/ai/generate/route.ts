@@ -30,6 +30,35 @@ async function hasPaidGenerationAccess(projectId: string, userId: string) {
   return userHasPaidProject(userId, projectId);
 }
 
+function textValue(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function hasText(payload: Record<string, unknown>, key: string, minLength = 12) {
+  return textValue(payload, key).length >= minLength;
+}
+
+function validateProductInput(product: z.infer<typeof schema>["product"], payload: Record<string, unknown>, brief = "") {
+  if (product === "cv_builder") {
+    return hasText(payload, "personalDetails", 12) && hasText(payload, "targetJobTitle", 3) && (hasText(payload, "workExperience", 20) || hasText(payload, "education", 12) || brief.trim().length >= 30);
+  }
+
+  if (product === "cover_letter") {
+    return hasText(payload, "applicantName", 2) && hasText(payload, "targetJobTitle", 3) && (hasText(payload, "company", 2) || hasText(payload, "industry", 3)) && (hasText(payload, "experienceSummary", 20) || hasText(payload, "keyAchievements", 20) || hasText(payload, "jobAdvertText", 40));
+  }
+
+  if (product === "company_profile") {
+    return hasText(payload, "companyName", 2) && hasText(payload, "industry", 3) && hasText(payload, "servicesProducts", 20);
+  }
+
+  if (product === "business_plan") {
+    return hasText(payload, "businessName", 2) && hasText(payload, "industryLocation", 3) && hasText(payload, "productsServices", 20) && (hasText(payload, "targetMarket", 12) || hasText(payload, "businessModel", 12));
+  }
+
+  return true;
+}
+
 export async function POST(request: Request) {
   const ip = clientIpFromHeaders(request.headers);
   const limited = checkRateLimit(`ai:${ip}`, 10, 60 * 1000);
@@ -80,6 +109,10 @@ export async function POST(request: Request) {
 
     if (parsed.data.product === "cv_revamp" && typeof generationPayload.oldCvContent !== "string") {
       return NextResponse.json({ error: "Upload a readable DOCX or TXT CV, or paste the CV text before generation." }, { status: 400 });
+    }
+
+    if (!validateProductInput(parsed.data.product, generationPayload, parsed.data.brief ?? "")) {
+      return NextResponse.json({ error: "Add the required document details before generation." }, { status: 400 });
     }
 
     if (hasPromptInjectionRisk(generationPayload) || hasPromptInjectionRisk({ brief: parsed.data.brief ?? "", sectionHtml: parsed.data.sectionHtml ?? "" })) {

@@ -22,7 +22,7 @@ export const qualityScoresSchema = z.object({
   ats: z.number().min(0).max(100).optional(),
   tenderReadiness: z.number().min(0).max(100).optional(),
   businessClarity: z.number().min(0).max(100).optional(),
-  notes: z.array(z.string()).min(1)
+  notes: z.array(z.string()).default([])
 });
 
 export const generatedSectionSchema = z.object({
