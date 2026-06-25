@@ -43,7 +43,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
           size: Number(initialPayload.uploadedCvFileSize ?? 0),
           type: initialPayload.uploadedCvFileType ?? "CV",
           path: initialPayload.uploadedCvStoragePath,
-          parsed: Boolean(initialPayload.oldCvContent)
+          parsed: Boolean(initialPayload.oldCvContent || initialPayload.uploadedCvStoragePath)
         }
       : null
   );
@@ -55,7 +55,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
   const fields = getFields(productKey);
   const canGenerate = useMemo(() => {
     if (productKey === "cv_revamp") {
-      return (payload.oldCvContent ?? "").trim().length > 40;
+      return (payload.oldCvContent ?? "").trim().length > 40 || Boolean(payload.uploadedCvStoragePath);
     }
 
     return Object.values(payload).join(" ").trim().length > 40 || brief.trim().length > 40;
@@ -112,11 +112,12 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
 
     if (result.extractedText) {
       setStatus("CV upload loaded");
+      setUploadError(result.parseWarning ?? "");
       return;
     }
 
     setStatus("CV upload saved");
-    setUploadError("File saved. Paste the CV text below as well so the revamp can read and improve it accurately.");
+    setUploadError(result.parseWarning ?? "File saved. Paste the CV text below so the revamp can read and improve it accurately.");
   }
 
   function saveDraft(nextHtml = html) {
@@ -283,7 +284,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-black">Upload existing CV</p>
                   <p className="mt-1 text-xs leading-5 text-black/55 dark:text-white/55">
-                    Add the user&apos;s existing CV for revamp. TXT files are read automatically; PDF, DOC, and DOCX can be attached and the CV text should also be pasted below for accurate rewriting.
+                    Add the user&apos;s existing CV for revamp. DOCX and TXT files are read automatically; PDF and legacy DOC files can be attached, then paste the CV text below for accurate rewriting.
                   </p>
                   <label className="mt-3 flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-black/20 px-4 py-5 text-center transition hover:border-brand-blue hover:bg-brand-blue/5 dark:border-white/20 dark:hover:bg-brand-blue/15">
                     <FileText className="h-6 w-6 text-brand-blue" />
@@ -372,6 +373,11 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
             </Button>
           </div>
           <p className="text-sm font-semibold text-black/55 dark:text-white/55">Status: {status}</p>
+          {productKey === "cv_revamp" && !canGenerate ? (
+            <p className="text-sm font-semibold text-black/55 dark:text-white/55">
+              Upload a readable DOCX or TXT CV, or paste the current CV content, to enable generation.
+            </p>
+          ) : null}
           {Object.keys(qualityScores).length ? (
             <div className="rounded-lg border border-black/10 p-3 dark:border-white/10">
               <p className="text-sm font-black">Quality</p>
@@ -451,7 +457,7 @@ function getFields(product: ProductKey) {
   }
   if (product === "cv_revamp") {
     return [
-      { key: "oldCvContent", label: "CV content to revamp", placeholder: "Paste the current CV content here. TXT uploads fill this automatically.", type: "textarea" },
+      { key: "oldCvContent", label: "CV content to revamp", placeholder: "Paste the current CV content here. DOCX and TXT uploads fill this automatically.", type: "textarea" },
       { key: "targetJobTitle", label: "Target job title", placeholder: "Procurement Officer", type: "text" },
       { key: "targetIndustry", label: "Target industry", placeholder: "Public sector, NGO, banking", type: "text" },
       { key: "yearsExperience", label: "Years of experience", placeholder: "5 years", type: "text" },

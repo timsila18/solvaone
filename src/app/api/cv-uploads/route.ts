@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkRateLimit, clientIpFromHeaders, rateLimitResponse } from "@/lib/security";
+import { extractTextFromCvFile } from "@/lib/cv-extraction";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/supabase/server";
 
@@ -64,16 +65,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  let extractedText = "";
-  if (extension === "txt") {
-    extractedText = (await file.text()).slice(0, 20000);
-  }
+  const extraction = await extractTextFromCvFile(file.name, inferredType, bytes);
 
   await admin.from("audit_logs").insert({
     user_id: user.id,
     action: "cv.upload",
     entity_type: "storage_object",
-    metadata: { bucket: "cv-uploads", path, fileName: file.name, fileSize: file.size, contentType: inferredType }
+    metadata: {
+      bucket: "cv-uploads",
+      path,
+      fileName: file.name,
+      fileSize: file.size,
+      contentType: inferredType,
+      parsed: Boolean(extraction.text),
+      parseWarning: extraction.warning
+    }
   });
 
   return NextResponse.json({
@@ -82,8 +88,9 @@ export async function POST(request: Request) {
       size: file.size,
       type: inferredType,
       path,
-      parsed: Boolean(extractedText)
+      parsed: Boolean(extraction.text)
     },
-    extractedText
+    extractedText: extraction.text,
+    parseWarning: extraction.warning
   });
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertAiUsageAllowed } from "@/lib/ai-usage";
+import { extractTextFromStoredCv } from "@/lib/cv-extraction";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { userHasPaidProject } from "@/lib/payments";
 import { checkRateLimit, clientIpFromHeaders, rateLimitResponse } from "@/lib/security";
@@ -44,19 +45,50 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid generation payload" }, { status: 400 });
   }
 
-  if (hasPromptInjectionRisk(parsed.data.payload) || hasPromptInjectionRisk({ brief: parsed.data.brief ?? "", sectionHtml: parsed.data.sectionHtml ?? "" })) {
-    return NextResponse.json({ error: "The input contains unsafe instructions. Please remove prompt override or secret-request language." }, { status: 400 });
-  }
-
   if (!(await hasPaidGenerationAccess(parsed.data.projectId, user.id))) {
     return NextResponse.json({ error: "A successful payment is required before generation." }, { status: 402 });
   }
 
   try {
     await assertAiUsageAllowed(user.id, parsed.data.projectId);
+    let generationPayload = parsed.data.payload;
+
+    if (
+      parsed.data.product === "cv_revamp" &&
+      (typeof generationPayload.oldCvContent !== "string" || generationPayload.oldCvContent.trim().length < 40) &&
+      typeof generationPayload.uploadedCvStoragePath === "string"
+    ) {
+      const extraction = await extractTextFromStoredCv(
+        user.id,
+        generationPayload.uploadedCvStoragePath,
+        typeof generationPayload.uploadedCvFileName === "string" ? generationPayload.uploadedCvFileName : "uploaded-cv.docx",
+        typeof generationPayload.uploadedCvFileType === "string" ? generationPayload.uploadedCvFileType : ""
+      );
+
+      if (extraction.text) {
+        generationPayload = {
+          ...generationPayload,
+          oldCvContent: extraction.text,
+          uploadedCvParseWarning: extraction.warning ?? ""
+        };
+      }
+    }
+
+    if (parsed.data.product === "cv_revamp" && typeof generationPayload.oldCvContent === "string" && generationPayload.oldCvContent.trim().length < 40) {
+      return NextResponse.json({ error: "Upload a readable DOCX or TXT CV, or paste the CV text before generation." }, { status: 400 });
+    }
+
+    if (parsed.data.product === "cv_revamp" && typeof generationPayload.oldCvContent !== "string") {
+      return NextResponse.json({ error: "Upload a readable DOCX or TXT CV, or paste the CV text before generation." }, { status: 400 });
+    }
+
+    if (hasPromptInjectionRisk(generationPayload) || hasPromptInjectionRisk({ brief: parsed.data.brief ?? "", sectionHtml: parsed.data.sectionHtml ?? "" })) {
+      return NextResponse.json({ error: "The input contains unsafe instructions. Please remove prompt override or secret-request language." }, { status: 400 });
+    }
+
     const payload = parsed.data.brief
-      ? { ...parsed.data.payload, sourceBrief: parsed.data.brief }
-      : parsed.data.payload;
+      ? { ...generationPayload, sourceBrief: parsed.data.brief }
+      : generationPayload;
 
     const result = await generateWithSolvaIntelligence({
       userId: user.id,
