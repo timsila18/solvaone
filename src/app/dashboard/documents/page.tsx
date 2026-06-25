@@ -139,7 +139,7 @@ export default async function DocumentsPage() {
                           <Download className="h-4 w-4" /> PDF
                         </ButtonLink>
                         <ButtonLink className="h-9 px-3" variant="secondary" href={`/api/documents/export?documentId=${document.id}&format=docx`}>
-                          DOCX
+                          Word (DOCX)
                         </ButtonLink>
                         {payment?.id ? (
                           <ButtonLink className="h-9 px-3" variant="secondary" href={`/api/receipts/download?paymentId=${payment.id}`}>

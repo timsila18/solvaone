@@ -414,7 +414,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
               <Download className="h-4 w-4" /> PDF
             </Button>
             <Button variant="secondary" className="h-8 px-3" onClick={() => download("docx")}>
-              <Download className="h-4 w-4" /> DOCX
+              <Download className="h-4 w-4" /> Word
             </Button>
           </div>
         </div>

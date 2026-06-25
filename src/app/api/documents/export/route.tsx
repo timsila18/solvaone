@@ -1,4 +1,4 @@
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
+import { BorderStyle, Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { NextRequest, NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { Page, Text, View, Document as PdfDocument, StyleSheet } from "@react-pdf/renderer";
@@ -46,6 +46,10 @@ function stripHtml(html: string) {
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -81,6 +85,78 @@ function lineStyleForCv(line: string) {
 function roleFromTitle(title: string, name: string) {
   const normalized = title.replace(name, "").replace(/^[-\s]+/, "").trim();
   return normalized || "Professional CV";
+}
+
+function sectionLines(text: string) {
+  return text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function isBulletLine(line: string) {
+  return /^[-*•]\s+/.test(line);
+}
+
+function cleanBullet(line: string) {
+  return line.replace(/^[-*•]\s+/, "").trim();
+}
+
+function docxParagraph(line: string, isCv: boolean) {
+  const bullet = isBulletLine(line);
+  return new Paragraph({
+    children: [new TextRun({ text: bullet ? cleanBullet(line) : line, size: isCv ? 20 : 22, color: "000000" })],
+    bullet: bullet ? { level: 0 } : undefined,
+    indent: bullet ? { left: 360 } : undefined,
+    spacing: { after: isCv ? 90 : 120 }
+  });
+}
+
+function docxSectionTitle(title: string, isCv: boolean) {
+  return new Paragraph({
+    text: title.toUpperCase(),
+    heading: HeadingLevel.HEADING_2,
+    spacing: { before: isCv ? 220 : 280, after: 120 },
+    border: {
+      bottom: {
+        color: isCv ? "0066FF" : "000000",
+        space: 1,
+        style: BorderStyle.SINGLE,
+        size: 6
+      }
+    }
+  });
+}
+
+function buildDocxChildren(input: { title: string; html: string; product?: string; sections: Array<{ title: string; text: string }> }) {
+  const isCv = isCvProduct(input.product);
+  const header = cvHeaderFromHtml(input.html, input.title);
+
+  if (isCv) {
+    return [
+      new Paragraph({
+        children: [new TextRun({ text: header.name, bold: true, size: 40, color: "000000" })],
+        spacing: { after: 80 }
+      }),
+      ...(header.contact
+        ? [
+            new Paragraph({
+              children: [new TextRun({ text: header.contact, size: 20, color: "0066FF" })],
+              spacing: { after: 120 }
+            })
+          ]
+        : []),
+      ...input.sections.flatMap((section) => [docxSectionTitle(section.title, true), ...sectionLines(section.text).map((line) => docxParagraph(line, true))])
+    ];
+  }
+
+  return [
+    new Paragraph({
+      children: [new TextRun({ text: input.title, bold: true, size: 36, color: "000000" })],
+      spacing: { after: 180 }
+    }),
+    ...input.sections.flatMap((section) => [docxSectionTitle(section.title, false), ...sectionLines(section.text).map((line) => docxParagraph(line, false))])
+  ];
 }
 
 function PremiumCvPdf({ title, html }: { title: string; html: string }) {
@@ -168,26 +244,25 @@ export async function GET(request: NextRequest) {
   const project = Array.isArray(document.projects) ? document.projects[0] : document.projects;
   const product = project?.product as string | undefined;
   const sections = sectionsFromHtml(document.html);
-  const filename = document.title.replace(/[^\w-]+/g, "-").toLowerCase();
+  const filename = document.title.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "solvaone-document";
   const cvHeader = cvHeaderFromHtml(document.html, document.title);
 
   if (format === "docx") {
+    const isCv = isCvProduct(product);
     const file = await Packer.toBuffer(
       new Document({
-        creator: isCvProduct(product) ? cvHeader.name : "SolvaOne",
+        creator: isCv ? cvHeader.name : "SolvaOne",
         title: document.title,
         sections: [
           {
-            children: [
-              new Paragraph({ children: [new TextRun({ text: isCvProduct(product) ? cvHeader.name : document.title, bold: true, size: 36, color: "000000" })] }),
-              ...(isCvProduct(product) && cvHeader.contact
-                ? [new Paragraph({ children: [new TextRun({ text: cvHeader.contact, size: 20, color: "0066FF" })] })]
-                : []),
-              ...sections.flatMap((section) => [
-                new Paragraph({ text: section.title.toUpperCase(), heading: HeadingLevel.HEADING_2 }),
-                ...section.text.split(/\n+/).map((line) => new Paragraph(line))
-              ])
-            ]
+            properties: {
+              page: {
+                margin: isCv
+                  ? { top: 720, right: 720, bottom: 720, left: 720 }
+                  : { top: 900, right: 900, bottom: 900, left: 900 }
+              }
+            },
+            children: buildDocxChildren({ title: document.title, html: document.html, product, sections })
           }
         ]
       })
