@@ -24,7 +24,7 @@ export function Hero({
         <p className="mt-6 max-w-2xl text-lg font-semibold leading-8 text-black/65 dark:text-white/65">{subtitle}</p>
         <p className="mt-4 text-sm font-black text-brand-blue">Built for job seekers, SMEs and professionals in Kenya.</p>
         <div className="mt-8 flex flex-wrap gap-3">
-          <ButtonLink href={primaryHref}>Create My Document <ArrowRight className="h-4 w-4" /></ButtonLink>
+          <ButtonLink href={primaryHref}>Sign Up & Start Creating <ArrowRight className="h-4 w-4" /></ButtonLink>
           <ButtonLink href={secondaryHref} variant="secondary">View Pricing</ButtonLink>
         </div>
         <div className="mt-8 grid max-w-xl gap-3 sm:grid-cols-3">
@@ -75,7 +75,7 @@ export function PricingCard({ productId, highlight = false }: { productId: Produ
         ))}
       </ul>
       <ButtonLink className="mt-6 w-full" href="/register" variant={highlight ? "secondary" : "primary"}>
-        Start now
+        Sign up to start
       </ButtonLink>
     </div>
   );
@@ -134,7 +134,7 @@ export function CheckoutCTA({ title = "Ready to create your document?", product 
           <p className="mt-3 max-w-xl text-sm leading-6 text-white/65">Pay securely with M-Pesa, create your document, edit, then download PDF or DOCX.</p>
         </div>
         <ButtonLink href="/register" variant="secondary">
-          Create My Document <ArrowRight className="h-4 w-4" />
+          Sign Up to Create <ArrowRight className="h-4 w-4" />
         </ButtonLink>
       </div>
     </section>

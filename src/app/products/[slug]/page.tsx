@@ -72,7 +72,7 @@ export default async function ProductLandingPage({ params }: { params: Promise<{
           <h1 className="text-5xl font-black leading-[1.04] md:text-6xl">{page.headline}</h1>
           <p className="mt-6 text-lg font-semibold leading-8 text-black/65 dark:text-white/65">{page.solution}</p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <ButtonLink href="/register">Create My Document</ButtonLink>
+            <ButtonLink href="/register">Sign Up to Create or Revamp</ButtonLink>
             <span className="text-lg font-black">{formatKes(product.price)}</span>
           </div>
         </div>
