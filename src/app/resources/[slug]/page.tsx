@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { PublicShell } from "@/components/marketing/public-shell";
 import { CheckoutCTA } from "@/components/marketing/sections";
-import { resourcePosts } from "@/lib/marketing";
+import { resourcePosts, site } from "@/lib/marketing";
 
 const articleBodies: Record<string, Array<{ heading: string; paragraphs: string[]; bullets?: string[] }>> = {
   "professional-cv-kenya": [
@@ -134,7 +134,7 @@ export default async function ResourcePostPage({ params }: { params: Promise<{ s
               "@type": "Organization",
               name: "SolvaOne"
             },
-            mainEntityOfPage: `https://solvaone.co.ke/resources/${post.slug}`
+            mainEntityOfPage: `${site.url}/resources/${post.slug}`
           })
         }}
       />

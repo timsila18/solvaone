@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import { AnalyticsScripts } from "@/components/analytics/analytics-scripts";
+import { getPublicSiteUrl } from "@/lib/utils";
 import "./globals.css";
 
+const publicSiteUrl = getPublicSiteUrl();
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://solvaone.co.ke"),
+  metadataBase: new URL(publicSiteUrl),
   title: {
     default: "SolvaOne | Create. Apply. Grow.",
     template: "%s | SolvaOne"
@@ -29,7 +32,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "SolvaOne | Create. Apply. Grow.",
     description: "CVs, cover letters, company profiles and business plans powered by Solva Intelligence.",
-    url: "https://solvaone.co.ke",
+    url: publicSiteUrl,
     siteName: "SolvaOne",
     type: "website"
   },

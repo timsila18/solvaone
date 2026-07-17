@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import type { ProductKey } from "@/lib/types";
 import { pricingProducts } from "@/lib/pricing";
-import { absoluteUrl } from "@/lib/utils";
+import { absoluteUrl, getPublicSiteUrl } from "@/lib/utils";
 
 export const site = {
   name: "SolvaOne",
   tagline: "Create. Apply. Grow.",
   parent: "Solva Business Group",
-  url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://solvaone.co.ke",
+  url: getPublicSiteUrl(),
   supportEmail: "solvabusinessgroup@gmail.com",
   supportPhone: "0723298465",
   supportWhatsAppUrl: "https://wa.me/254723298465"

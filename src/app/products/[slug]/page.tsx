@@ -4,7 +4,7 @@ import { CheckCircle2 } from "lucide-react";
 import { PublicShell } from "@/components/marketing/public-shell";
 import { CheckoutCTA, DocumentPreviewCard, FAQAccordion, ProgressSteps } from "@/components/marketing/sections";
 import { ButtonLink } from "@/components/ui/button";
-import { productMetadata, productPages } from "@/lib/marketing";
+import { productMetadata, productPages, site } from "@/lib/marketing";
 import { pricingProducts } from "@/lib/pricing";
 import { absoluteUrl, formatKes } from "@/lib/utils";
 
@@ -35,7 +35,7 @@ export default async function ProductLandingPage({ params }: { params: Promise<{
         provider: {
           "@type": "Organization",
           name: "SolvaOne",
-          url: "https://solvaone.co.ke"
+          url: site.url
         },
         areaServed: {
           "@type": "Country",
