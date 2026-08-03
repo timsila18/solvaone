@@ -50,6 +50,26 @@ Use SolvaOne premium CV standards:
 - Do a final human CV writer review pass before returning the JSON, but do not summarize or shorten.
 `;
 
+const companyProfileStandard = `
+Use SolvaOne premium company profile standards:
+- Produce a tender-ready Kenyan SME profile with practical, credible language.
+- Include cover page content, company overview, background, vision, mission, core values, services, why choose us, team/management, experience/projects, compliance/certifications, and contacts.
+- Target 1,400-2,200 useful words across 12+ sections.
+- Do not invent certifications, licenses, clients, contracts, revenue, awards, or registration numbers. Use "To be provided" where details are missing.
+- Services must explain what the business does, who it serves, and why clients should trust it.
+- The profile should feel suitable for tenders, suppliers, clients, and institutional buyers.
+`;
+
+const businessPlanStandard = `
+Use SolvaOne premium business plan standards:
+- Produce a practical Kenya/East Africa SME business plan suitable for execution, funding conversations, and internal planning.
+- Include executive summary, business description, problem, solution, products/services, business model, market analysis, target customers, competitors, marketing and sales, operations, team, revenue model, risks, financial assumptions, implementation roadmap, and conclusion.
+- Target 1,700-2,600 useful words across 15+ sections.
+- Use tables where useful for risks, financial assumptions, startup costs, or implementation roadmap.
+- Do not invent exact revenue, profit, market share, staff numbers, funding approval, permits, or certifications. Use "To be provided" for missing details.
+- Make it practical, not motivational fluff.
+`;
+
 const cases = [
   {
     id: "cv-revamp",
@@ -107,6 +127,69 @@ Build a detailed ATS-optimized professional CV from the structured intake. Mode:
       jobAdvertText:
         "Accounts Assistant to support invoice processing, supplier payments, petty cash, reconciliations, QuickBooks, Excel reporting, filing, and communication with clients and vendors.",
       tone: "Professional, direct, confident"
+    }
+  },
+  {
+    id: "company-profile",
+    name: "Company Profile",
+    instruction: `${companyProfileStandard}
+Create a premium company profile for a Kenyan cleaning and facilities services SME.`,
+    payload: {
+      companyName: "BluePeak Facilities Services Ltd",
+      yearFounded: "2022",
+      location: "Nairobi, Kenya",
+      industry: "Cleaning, sanitation, and facilities support services",
+      servicesProducts:
+        "Office cleaning, post-construction cleaning, carpet and upholstery cleaning, washroom hygiene, compound maintenance, pest control coordination, waste handling support, and scheduled facilities care.",
+      targetClients:
+        "SMEs, offices, schools, clinics, apartment blocks, retail shops, restaurants, churches, county offices, and contractors needing cleaning support.",
+      vision: "To become a trusted facilities support partner for clean, healthy, and productive workspaces across Kenya.",
+      mission:
+        "To deliver reliable, well-supervised, and affordable cleaning and facilities support services through trained teams, quality checks, and responsive customer service.",
+      coreValues: "Integrity, reliability, hygiene, accountability, safety, responsiveness, professionalism.",
+      teamDetails:
+        "Founder-led team with site supervisors, trained cleaners, casual support staff for large jobs, and customer support coordination. Exact team size to be provided.",
+      pastProjects:
+        "Routine office cleaning for SMEs, post-renovation cleanup for retail premises, move-in cleaning for apartments, and washroom hygiene support. Client names to be provided.",
+      certificationsLicenses:
+        "Business registration, KRA PIN, county permit, health and safety training records to be provided.",
+      contactDetails: "Nairobi, Kenya. Phone and email to be provided.",
+      preferredTone: "Premium, credible, tender-ready",
+      profileLength: "Detailed"
+    }
+  },
+  {
+    id: "business-plan",
+    name: "Business Plan",
+    instruction: `${businessPlanStandard}
+Create a practical business plan for a Kenyan agribusiness retail startup.`,
+    payload: {
+      businessName: "Mavuno Fresh Produce Hub",
+      industry: "Fresh produce aggregation, retail, and small-scale distribution",
+      location: "Kiambu and Nairobi, Kenya",
+      businessModel:
+        "Source fresh vegetables and fruits from smallholder farmers, aggregate at a small hub, sell through walk-in retail, WhatsApp orders, restaurants, and estate deliveries.",
+      productsServices:
+        "Tomatoes, onions, potatoes, sukuma wiki, spinach, cabbages, bananas, fruits, mixed vegetable packs, restaurant supply packs, and subscription vegetable baskets.",
+      targetMarket:
+        "Urban households, small restaurants, food kiosks, offices, hostels, estate groups, and health-conscious customers seeking fresh, fairly priced produce.",
+      startupCosts:
+        "Cold storage to be provided, weighing scale, crates, licenses, rent deposit, branding, delivery motorbike partnership, working capital for stock.",
+      pricing:
+        "Competitive retail pricing with margin by item, restaurant wholesale pricing, delivery fee for small orders, and subscription baskets.",
+      revenueStreams:
+        "Walk-in sales, WhatsApp orders, estate delivery, restaurant supply, subscription baskets, and seasonal bulk orders.",
+      competitors:
+        "Open-air markets, supermarkets, estate vendors, online grocery sellers, and direct farm suppliers.",
+      marketingStrategy:
+        "WhatsApp catalogues, estate group marketing, referral offers, freshness guarantee, restaurant visits, posters, Google Business Profile, and TikTok/Instagram content.",
+      operationsPlan:
+        "Morning sourcing, sorting, grading, pricing, retail display, order packing, delivery coordination, daily stock reconciliation, waste tracking, and supplier payment follow-up.",
+      team: "Founder/operator, sales assistant, part-time rider partner, supplier coordinator role to be provided.",
+      financialAssumptions:
+        "Daily sales targets, average basket value, gross margin, wastage rate, rent, transport, licenses, and working capital to be provided.",
+      fundingNeeds: "Funding needed for stock, crates, branding, licenses, rent, and delivery setup. Amount to be provided.",
+      businessStage: "Startup/pre-launch"
     }
   }
 ];
@@ -168,21 +251,26 @@ async function runCase(testCase) {
     const words = draftText.split(/\s+/).filter(Boolean).length;
     const sections = parsed.sections?.length ?? 0;
     const bullets = (draftText.match(/\n- /g) || []).length;
-    const needsCvDepth = testCase.id !== "cover-letter" && (words < 1100 || sections < 9 || bullets < 30);
+    const isCv = testCase.id === "cv-revamp" || testCase.id === "cv-builder";
+    const needsCvDepth = isCv && (words < 1100 || sections < 9 || bullets < 30);
     const needsCoverFocus = testCase.id === "cover-letter" && (words < 330 || words > 620);
+    const needsProfileDepth = testCase.id === "company-profile" && (words < 1200 || sections < 12);
+    const needsPlanDepth = testCase.id === "business-plan" && (words < 1500 || sections < 15);
 
-    if (!needsCvDepth && !needsCoverFocus) break;
+    if (!needsCvDepth && !needsCoverFocus && !needsProfileDepth && !needsPlanDepth) break;
 
     qualityFeedback = [
       "QUALITY RETRY:",
       needsCvDepth ? `The CV is still too thin: ${words} words, ${sections} sections, ${bullets} bullets. Rewrite as a fuller premium CV with 1,100+ words, 9-12 sections, 30+ substantial bullets, richer role scope, stronger achievements, and useful To be provided prompts without fake facts.` : "",
-      needsCoverFocus ? `The cover letter length is off: ${words} words. Rewrite as a focused one-page letter of 430-520 words.` : ""
+      needsCoverFocus ? `The cover letter length is off: ${words} words. Rewrite as a focused one-page letter of 430-520 words.` : "",
+      needsProfileDepth ? `The company profile is too thin: ${words} words and ${sections} sections. Rewrite with 1,200+ useful words, 12+ tender-ready sections, richer services, credibility language, and To be provided prompts.` : "",
+      needsPlanDepth ? `The business plan is too thin: ${words} words and ${sections} sections. Rewrite with 1,500+ useful words, 15+ practical sections, operational detail, market analysis, risk table, financial assumptions, and implementation roadmap.` : ""
     ].filter(Boolean).join("\n");
   }
 
   if (!parsed) throw new Error(`No output for ${testCase.name}`);
 
-  if (testCase.id !== "cover-letter") {
+  if (testCase.id === "cv-revamp" || testCase.id === "cv-builder") {
     const review = await client.responses.create({
       model,
       input: [
