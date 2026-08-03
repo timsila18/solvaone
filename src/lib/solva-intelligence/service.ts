@@ -9,6 +9,8 @@ import { solvaOutputSchema, type GenerateDocumentInput, type SolvaOutput } from 
 const MAX_GENERATIONS_PER_HOUR = 10;
 const CV_MIN_SECTION_COUNT = 9;
 const CV_MIN_TEXT_LENGTH = 9000;
+const CV_MIN_WORD_COUNT = 1100;
+const CV_MIN_BULLET_COUNT = 30;
 
 function isCvProduct(product: string) {
   return product === "cv_builder" || product === "cv_revamp";
@@ -31,19 +33,24 @@ function textFromHtml(html: string) {
     .trim();
 }
 
+function wordCount(text: string) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
 function cvDepthIssue(input: GenerateDocumentInput, output: SolvaOutput) {
   if (!isCvProduct(input.product) || (input.mode && input.mode !== "full_document")) return null;
 
   const combinedText = output.sections.map((section) => `${section.title} ${textFromHtml(section.html)}`).join(" ");
   const sectionCount = output.sections.length;
   const bulletCount = output.sections.reduce((count, section) => count + (section.html.match(/<li\b|(^|\n)\s*[-*\u2022]/gi)?.length ?? 0), 0);
+  const words = wordCount(combinedText);
 
-  if (sectionCount < CV_MIN_SECTION_COUNT || combinedText.length < CV_MIN_TEXT_LENGTH || bulletCount < 24) {
+  if (sectionCount < CV_MIN_SECTION_COUNT || combinedText.length < CV_MIN_TEXT_LENGTH || words < CV_MIN_WORD_COUNT || bulletCount < CV_MIN_BULLET_COUNT) {
     return [
       "The CV is too short for SolvaOne's premium standard.",
-      `Current depth: ${sectionCount} sections, ${combinedText.length} text characters, ${bulletCount} bullets.`,
-      `Required minimum: ${CV_MIN_SECTION_COUNT}+ sections, ${CV_MIN_TEXT_LENGTH}+ text characters, and 24+ useful bullets.`,
-      "Rewrite into a richer ATS-optimized CV targeting at least 3 full A4 pages.",
+      `Current depth: ${sectionCount} sections, ${words} words, ${combinedText.length} text characters, ${bulletCount} bullets.`,
+      `Required minimum: ${CV_MIN_SECTION_COUNT}+ sections, ${CV_MIN_WORD_COUNT}+ words, ${CV_MIN_TEXT_LENGTH}+ text characters, and ${CV_MIN_BULLET_COUNT}+ useful bullets.`,
+      "Rewrite into a richer ATS-optimized CV targeting at least 3 full A4 pages in the premium PDF/DOCX layout.",
       "Do not add fake employers, dates, qualifications, certifications, referees, awards, or exact metrics.",
       "Expand truthfully with role scope, professional summary depth, core competencies, career highlights, richer work bullets, technical tools, projects, leadership/volunteer details where provided, and missing-information prompts where details are absent."
     ].join("\n");
@@ -73,7 +80,8 @@ async function runHumanCvWriterReview(input: GenerateDocumentInput, draft: Solva
           "Keep the CV unbranded. Do not mention AI, SolvaOne, or the generation platform.",
           "Preserve truthfulness. Do not invent employers, dates, qualifications, certifications, referees, awards, or exact metrics.",
           "Strengthen bullets using: Action + Scope + Tool/Method + Result/Business Value.",
-          "Keep or improve the 3-page premium depth standard, 9-12 useful sections, and 24+ useful bullets.",
+          "Do not summarize or shorten the CV. The polished version must be at least as detailed as the draft.",
+          "Keep or improve the 3-page premium depth standard: 1,500+ words, 9-12 useful sections, and 30+ useful bullets.",
           "If facts are missing, use To be provided and list the missing detail in missingInformation.",
           "Return one complete JSON object only. No markdown fences."
         ].join("\n")
@@ -98,7 +106,7 @@ async function runHumanCvWriterReview(input: GenerateDocumentInput, draft: Solva
 
   const polished = parseSolvaJson((reviewResponse as { output_text?: string }).output_text ?? "");
   const depthIssue = cvDepthIssue(input, polished);
-  if (depthIssue) throw new Error(depthIssue);
+  if (depthIssue) return { output: draft, response: reviewResponse };
   return { output: polished, response: reviewResponse };
 }
 

@@ -23,10 +23,12 @@ Premium CV depth standard:
 - For full CV Builder and CV Revamp documents, target at least 3 full A4 pages of useful CV content in the exported PDF/DOCX.
 - Do not pad with generic filler. Expand with role-relevant, truthful detail: stronger profile narrative, core competencies, keyword-rich skills, role scope, achievement-led bullets, selected projects, leadership/volunteer work, tools, compliance/regulatory exposure, training, and missing-information prompts.
 - Produce 9-12 CV sections where the user's information supports them. Use "To be provided" only for genuinely missing details that matter.
-- Professional Summary: 140-190 words, written as a polished executive-style profile without sounding inflated.
-- Core Competencies / ATS Keywords: 18-30 role-aligned keywords grouped logically, not dumped randomly. If jobAdvertText is provided, extract the most important hard skills, soft skills, tools, credentials, sector terms, and responsibility phrases, then weave them naturally into the summary, skills, and experience.
-- Professional Experience: for each role, include a short scope paragraph plus 6-8 achievement/value bullets where enough information is provided. Every bullet should follow the premium formula: Action + Scope + Tool/Method + Result/Business Value. If the source CV is thin, rewrite duties into stronger truthful contribution statements and add "To be provided" prompts for measurable results.
-- Add Selected Achievements / Career Highlights as a separate section when experience exists, with 5-8 bullets drawn only from supplied facts or clearly marked where figures are needed.
+- Minimum useful depth for a paid CV: 1,500-2,200 words, 9-12 sections, and at least 30 substantial bullets where the user's background supports it.
+- Professional Summary: 170-230 words, written as a polished executive-style profile without sounding inflated.
+- Core Competencies / ATS Keywords: 24-36 role-aligned keywords grouped logically, not dumped randomly. If jobAdvertText is provided, extract the most important hard skills, soft skills, tools, credentials, sector terms, and responsibility phrases, then weave them naturally into the summary, skills, and experience.
+- Professional Experience: for each role, include a 70-100 word scope paragraph plus 7-9 achievement/value bullets where enough information is provided. Every bullet should be 22-38 words and follow the premium formula: Action + Scope + Tool/Method + Result/Business Value. If the source CV is thin, rewrite duties into stronger truthful contribution statements and add "To be provided" prompts for measurable results.
+- Add Selected Achievements / Career Highlights as a separate section when experience exists, with 6-9 bullets drawn only from supplied facts or clearly marked where figures are needed.
+- Add Professional Strengths or Value Proposition with 5-7 role-specific paragraphs/bullets explaining how the candidate works, communicates, solves problems, and adds value.
 - Add Technical Skills, Professional Strengths, Certifications/Training, Education, Projects, Leadership/Volunteer Experience, and Referees only where relevant. Keep user-facing CV sections unbranded.
 - Support role-specific modes: Graduate CV, Professional CV, Executive CV, Technical CV, NGO CV, Public Service CV, International CV, Sales/Marketing CV, and Accounting/Admin CV. Adjust vocabulary, sections, and emphasis to the chosen mode.
 - Before returning JSON, perform a Human CV Writer Review pass: improve clarity, seniority, confidence, grammar, impact, ATS structure, repetition, and unnecessary filler. The final output should be the polished version after this review, not the rough first draft.
@@ -100,7 +102,7 @@ Generate a customized, client-ready professional cover letter. Inputs may includ
 Return the letter in clear sections: address_and_salutation, opening_paragraph, evidence_based_body, closing_paragraph.
 Write a proper salutation, strong opening paragraph, two evidence-based body paragraphs, and confident closing. Align the applicant's experience to the specific role and organization. Use Kenyan professional tone unless the customer asks for another tone.
 Do not write a generic template. Mention the target role and company/organization when provided. If the company is missing, use "Hiring Manager" and mark company-specific details as "To be provided".
-The letter should be polished, editable, and complete, usually 450-650 words unless the user asks for a shorter version. Use paragraph HTML, not bullet-heavy formatting.
+The letter should be polished, editable, complete, and one-page friendly: usually 350-500 words unless the user asks for a longer version. Use paragraph HTML, not bullet-heavy formatting.
 Quality expectation: completeness >= 88, professionalTone >= 90, structure >= 88.
 `
       );
