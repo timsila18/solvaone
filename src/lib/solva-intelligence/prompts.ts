@@ -17,6 +17,19 @@ Do not invent employers, qualifications, certifications, referees, licenses, rev
 Use semantic HTML only inside section html. No markdown. No scripts. No inline event handlers.
 `;
 
+const premiumCvDepthStandard = `
+Premium CV depth standard:
+- For full CV Builder and CV Revamp documents, target at least 3 full A4 pages of useful CV content in the exported PDF/DOCX.
+- Do not pad with generic filler. Expand with role-relevant, truthful detail: stronger profile narrative, core competencies, keyword-rich skills, role scope, achievement-led bullets, selected projects, leadership/volunteer work, tools, compliance/regulatory exposure, training, and missing-information prompts.
+- Produce 9-12 CV sections where the user's information supports them. Use "To be provided" only for genuinely missing details that matter.
+- Professional Summary: 140-190 words, written as a polished executive-style profile without sounding inflated.
+- Core Competencies / ATS Keywords: 18-30 role-aligned keywords grouped logically, not dumped randomly.
+- Professional Experience: for each role, include a short scope paragraph plus 6-8 achievement/value bullets where enough information is provided. If the source CV is thin, rewrite duties into stronger truthful contribution statements and add "To be provided" prompts for measurable results.
+- Add Selected Achievements / Career Highlights as a separate section when experience exists, with 5-8 bullets drawn only from supplied facts or clearly marked where figures are needed.
+- Add Technical Skills, Professional Strengths, Certifications/Training, Education, Projects, Leadership/Volunteer Experience, and Referees only where relevant. Keep user-facing CV sections unbranded.
+- The CV must feel complete and worth paying for while remaining ATS-readable, clean, truthful, and recruiter-friendly.
+`;
+
 const baseSystem = `
 You are the premium document generation engine for SolvaOne by Solva Business Group.
 Brand promise: Create. Apply. Grow.
@@ -57,7 +70,8 @@ Build a premium ATS-optimized detailed CV as the default arrangement. The CV mus
 Use this default section order unless the customer clearly asks otherwise: Name and contact details, Target role headline, Professional summary, Core competencies / ATS keywords, Professional experience, Selected achievements or projects, Education, Certifications and training, Technical skills where relevant, Leadership / volunteer experience where provided, Referees.
 Generate a strong professional summary, achievement-based work experience, improved job descriptions, role-aligned skills, ATS-friendly keywords, clean section structure, and Kenya/East Africa professional tone.
 CV styles: Graduate CV, Professional CV, Executive CV, Technical CV, Government/Public Service CV. Even when a style is selected, keep the CV ATS-readable with clear text sections and no decorative clutter.
-Produce at least 7 CV sections where information is available. Each work experience role should have 4-6 strong bullets. Convert duties into value-focused bullets without inventing employers, dates, metrics, qualifications, or certifications.
+${premiumCvDepthStandard}
+Convert duties into value-focused bullets without inventing employers, dates, metrics, qualifications, or certifications.
 If information is missing, include concise "To be provided" placeholders in the relevant section and list the missing items in missingInformation.
 `
       );
@@ -70,6 +84,7 @@ Use this default arrangement unless the customer clearly asks otherwise: Name an
 Rewrite professionally, improve weak bullet points, convert duties into achievements where the user supplied enough context, improve grammar and structure, strengthen professional summary, add relevant keywords, remove clutter, and suggest missing sections.
 Output must include: revamped CV, summary of improvements made, ATS keyword suggestions, and missing information recommendations.
 Improvement goals include ATS Optimization, Executive Upgrade, Graduate Upgrade, Career Change, Public Sector Application, and International Application.
+${premiumCvDepthStandard}
 Produce a complete CV with professional summary, core skills, work experience, education/training, technical tools where relevant, certifications where provided, and referees/missing information. Keep user-facing CV sections unbranded.
 Do not preserve weak formatting from the original CV. Improve arrangement, spacing, wording, and hierarchy while keeping all facts faithful to the original content.
 `

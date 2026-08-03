@@ -7,6 +7,50 @@ import { hasPromptInjectionRisk, sanitizePayload, sectionsToHtml, stripUnsafeHtm
 import { solvaOutputSchema, type GenerateDocumentInput, type SolvaOutput } from "./types";
 
 const MAX_GENERATIONS_PER_HOUR = 10;
+const CV_MIN_SECTION_COUNT = 9;
+const CV_MIN_TEXT_LENGTH = 9000;
+
+function isCvProduct(product: string) {
+  return product === "cv_builder" || product === "cv_revamp";
+}
+
+function textFromHtml(html: string) {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<li[^>]*>/gi, "\n- ")
+    .replace(/<\/(p|div|section|h1|h2|h3|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cvDepthIssue(input: GenerateDocumentInput, output: SolvaOutput) {
+  if (!isCvProduct(input.product) || (input.mode && input.mode !== "full_document")) return null;
+
+  const combinedText = output.sections.map((section) => `${section.title} ${textFromHtml(section.html)}`).join(" ");
+  const sectionCount = output.sections.length;
+  const bulletCount = output.sections.reduce((count, section) => count + (section.html.match(/<li\b|(^|\n)\s*[-*\u2022]/gi)?.length ?? 0), 0);
+
+  if (sectionCount < CV_MIN_SECTION_COUNT || combinedText.length < CV_MIN_TEXT_LENGTH || bulletCount < 24) {
+    return [
+      "The CV is too short for SolvaOne's premium standard.",
+      `Current depth: ${sectionCount} sections, ${combinedText.length} text characters, ${bulletCount} bullets.`,
+      `Required minimum: ${CV_MIN_SECTION_COUNT}+ sections, ${CV_MIN_TEXT_LENGTH}+ text characters, and 24+ useful bullets.`,
+      "Rewrite into a richer ATS-optimized CV targeting at least 3 full A4 pages.",
+      "Do not add fake employers, dates, qualifications, certifications, referees, awards, or exact metrics.",
+      "Expand truthfully with role scope, professional summary depth, core competencies, career highlights, richer work bullets, technical tools, projects, leadership/volunteer details where provided, and missing-information prompts where details are absent."
+    ].join("\n");
+  }
+
+  return null;
+}
 
 async function enforceRateLimit(userId: string) {
   const supabase = await createSupabaseServerClient();
@@ -89,7 +133,7 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
     let output: SolvaOutput | null = null;
     let rawResponse: unknown = null;
 
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
       rawResponse = await client.responses.create({
         model,
         input: [
@@ -99,19 +143,28 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
             content:
               attempt === 1
                 ? prompt.developer
-                : `${prompt.developer}\n\nREPAIR MODE: The previous response was not valid JSON for the required schema. Return one complete valid JSON object only. Do not include markdown fences, commentary, or trailing text.`
+                : `${prompt.developer}\n\nREPAIR MODE: The previous response was invalid, too thin, or did not meet the required schema/depth standard. Return one complete valid JSON object only. Do not include markdown fences, commentary, or trailing text.`
           },
-          { role: "user", content: prompt.user }
+          {
+            role: "user",
+            content:
+              attempt === 1
+                ? prompt.user
+                : `${prompt.user}\n\nQUALITY RETRY INSTRUCTIONS:\n${output ? cvDepthIssue(input, output) ?? "Return valid JSON that fully satisfies the schema." : "Return valid JSON that fully satisfies the schema."}`
+          }
         ],
         temperature: attempt === 1 ? 0.35 : 0.15,
-        max_output_tokens: 12000
+        max_output_tokens: isCvProduct(input.product) && (!input.mode || input.mode === "full_document") ? 18000 : 12000
       } as any);
 
       try {
         output = parseSolvaJson((rawResponse as { output_text?: string }).output_text ?? "");
+        const depthIssue = cvDepthIssue(input, output);
+        if (depthIssue && attempt < 3) continue;
+        if (depthIssue) throw new Error(depthIssue);
         break;
       } catch (error) {
-        if (attempt === 2) throw error;
+        if (attempt === 3) throw error;
       }
     }
 

@@ -20,8 +20,8 @@ export const pricingProducts: Record<ProductId, PricingProduct> = {
     category: "career",
     price: 299,
     currency: "KES",
-    description: "Create a detailed ATS-friendly CV with Solva Intelligence.",
-    features: ["Guided CV builder", "ATS keywords", "Editable document", "PDF and DOCX download"],
+    description: "Create a detailed ATS-friendly CV targeting a rich 3-page professional format.",
+    features: ["Guided CV builder", "3-page depth target", "ATS keywords", "PDF and DOCX download"],
     isActive: true
   },
   cv_revamp: {
@@ -30,8 +30,8 @@ export const pricingProducts: Record<ProductId, PricingProduct> = {
     category: "career",
     price: 499,
     currency: "KES",
-    description: "Rewrite and upgrade an existing CV professionally.",
-    features: ["Old CV cleanup", "Achievement bullets", "ATS improvement", "Missing information notes"],
+    description: "Rewrite and upgrade an existing CV into a detailed ATS-friendly professional version.",
+    features: ["Old CV cleanup", "3-page depth target", "Achievement bullets", "ATS improvement"],
     isActive: true
   },
   cover_letter: {
