@@ -52,6 +52,56 @@ function cvDepthIssue(input: GenerateDocumentInput, output: SolvaOutput) {
   return null;
 }
 
+function shouldRunCvWriterReview(input: GenerateDocumentInput) {
+  return isCvProduct(input.product) && (!input.mode || input.mode === "full_document");
+}
+
+async function runHumanCvWriterReview(input: GenerateDocumentInput, draft: SolvaOutput, client: ReturnType<typeof createOpenAIClient>, model: string) {
+  const reviewResponse = await client.responses.create({
+    model,
+    input: [
+      {
+        role: "system",
+        content:
+          "You are a senior professional CV writer and ATS reviewer for Kenya and East Africa. Return only valid JSON matching the supplied document schema."
+      },
+      {
+        role: "developer",
+        content: [
+          "Review and polish the supplied CV JSON.",
+          "Improve clarity, seniority, confidence, grammar, impact, ATS structure, repetition, and unnecessary filler.",
+          "Keep the CV unbranded. Do not mention AI, SolvaOne, or the generation platform.",
+          "Preserve truthfulness. Do not invent employers, dates, qualifications, certifications, referees, awards, or exact metrics.",
+          "Strengthen bullets using: Action + Scope + Tool/Method + Result/Business Value.",
+          "Keep or improve the 3-page premium depth standard, 9-12 useful sections, and 24+ useful bullets.",
+          "If facts are missing, use To be provided and list the missing detail in missingInformation.",
+          "Return one complete JSON object only. No markdown fences."
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: JSON.stringify(
+          {
+            product: input.product,
+            title: input.title,
+            payload: input.payload,
+            draft
+          },
+          null,
+          2
+        )
+      }
+    ],
+    temperature: 0.18,
+    max_output_tokens: 18000
+  } as any);
+
+  const polished = parseSolvaJson((reviewResponse as { output_text?: string }).output_text ?? "");
+  const depthIssue = cvDepthIssue(input, polished);
+  if (depthIssue) throw new Error(depthIssue);
+  return { output: polished, response: reviewResponse };
+}
+
 async function enforceRateLimit(userId: string) {
   const supabase = await createSupabaseServerClient();
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -85,15 +135,25 @@ function parseSolvaJson(raw: string): SolvaOutput {
   return solvaOutputSchema.parse(parsed);
 }
 
-function fallbackScores(output: SolvaOutput) {
+function inputCvScores(input: GenerateDocumentInput) {
+  const report = input.payload.cvQualityReport as { scores?: Record<string, number> } | undefined;
+  return report?.scores ?? {};
+}
+
+function fallbackScores(output: SolvaOutput, input: GenerateDocumentInput) {
   const sectionCount = output.sections.length;
   const totalLength = output.sections.reduce((sum, section) => sum + section.html.length, 0);
   const completeness = Math.min(100, 55 + sectionCount * 5 + Math.floor(totalLength / 1200));
+  const cvScores = inputCvScores(input);
   return {
     ...output.qualityScores,
     completeness: output.qualityScores.completeness || completeness,
     professionalTone: output.qualityScores.professionalTone || 85,
-    structure: output.qualityScores.structure || Math.min(95, 60 + sectionCount * 5)
+    structure: output.qualityScores.structure || Math.min(95, 60 + sectionCount * 5),
+    ats: output.qualityScores.ats || cvScores.atsReadiness,
+    achievementStrength: output.qualityScores.achievementStrength || cvScores.achievementStrength,
+    recruiterReadability: output.qualityScores.recruiterReadability || cvScores.recruiterReadability,
+    careerClarity: output.qualityScores.careerClarity || cvScores.careerClarity
   };
 }
 
@@ -132,6 +192,7 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
     const client = createOpenAIClient();
     let output: SolvaOutput | null = null;
     let rawResponse: unknown = null;
+    let usageTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       rawResponse = await client.responses.create({
@@ -156,6 +217,12 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
         temperature: attempt === 1 ? 0.35 : 0.15,
         max_output_tokens: isCvProduct(input.product) && (!input.mode || input.mode === "full_document") ? 18000 : 12000
       } as any);
+      const attemptUsage = extractTokenUsage(rawResponse);
+      usageTotals = {
+        inputTokens: usageTotals.inputTokens + attemptUsage.inputTokens,
+        outputTokens: usageTotals.outputTokens + attemptUsage.outputTokens,
+        totalTokens: usageTotals.totalTokens + attemptUsage.totalTokens
+      };
 
       try {
         output = parseSolvaJson((rawResponse as { output_text?: string }).output_text ?? "");
@@ -170,10 +237,22 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
 
     if (!output) throw new Error("Solva Intelligence returned an empty response.");
 
-    const qualityScores = fallbackScores(output);
+    if (shouldRunCvWriterReview(input)) {
+      const polished = await runHumanCvWriterReview({ ...input, payload }, output, client, model);
+      output = polished.output;
+      rawResponse = polished.response;
+      const reviewUsage = extractTokenUsage(polished.response);
+      usageTotals = {
+        inputTokens: usageTotals.inputTokens + reviewUsage.inputTokens,
+        outputTokens: usageTotals.outputTokens + reviewUsage.outputTokens,
+        totalTokens: usageTotals.totalTokens + reviewUsage.totalTokens
+      };
+    }
+
+    const qualityScores = fallbackScores(output, { ...input, payload });
     const safeSections = output.sections.map((section) => ({ ...section, html: stripUnsafeHtml(section.html) }));
     const html = sectionsToHtml(safeSections);
-    const usage = extractTokenUsage(rawResponse);
+    const usage = usageTotals.totalTokens > 0 ? usageTotals : extractTokenUsage(rawResponse);
     const estimatedCost = estimateCost(model, usage.inputTokens, usage.outputTokens);
     const versionNumber = await nextVersionNumber(input.documentId);
 

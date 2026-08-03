@@ -227,6 +227,7 @@ export async function GET(request: NextRequest) {
 
   const documentId = request.nextUrl.searchParams.get("documentId");
   const format = request.nextUrl.searchParams.get("format");
+  const variant = request.nextUrl.searchParams.get("variant") === "ats" ? "ats" : "premium";
   if (!documentId || (format !== "pdf" && format !== "docx")) {
     return NextResponse.json({ error: "Invalid export request" }, { status: 400 });
   }
@@ -246,7 +247,8 @@ export async function GET(request: NextRequest) {
   const project = Array.isArray(document.projects) ? document.projects[0] : document.projects;
   const product = project?.product as string | undefined;
   const sections = sectionsFromHtml(document.html);
-  const filename = document.title.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "solvaone-document";
+  const filenameBase = document.title.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "solvaone-document";
+  const filename = isCvProduct(product) ? `${filenameBase}-${variant}` : filenameBase;
   const cvHeader = cvHeaderFromHtml(document.html, document.title);
 
   if (format === "docx") {
@@ -277,7 +279,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  if (isCvProduct(product)) {
+  if (isCvProduct(product) && variant !== "ats") {
     const file = await renderToBuffer(<PremiumCvPdf title={document.title} html={document.html} />);
     return new NextResponse(new Uint8Array(file), {
       headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"` }

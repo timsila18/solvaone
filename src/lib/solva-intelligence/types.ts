@@ -20,6 +20,9 @@ export const qualityScoresSchema = z.object({
   professionalTone: z.number().min(0).max(100),
   structure: z.number().min(0).max(100),
   ats: z.number().min(0).max(100).optional(),
+  achievementStrength: z.number().min(0).max(100).optional(),
+  recruiterReadability: z.number().min(0).max(100).optional(),
+  careerClarity: z.number().min(0).max(100).optional(),
   tenderReadiness: z.number().min(0).max(100).optional(),
   businessClarity: z.number().min(0).max(100).optional(),
   notes: z.array(z.string()).default([])

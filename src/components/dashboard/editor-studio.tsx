@@ -1,6 +1,6 @@
 "use client";
 
-import { CreditCard, Download, FileText, Loader2, Save, Sparkles, UploadCloud, Wand2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CreditCard, Download, FileText, Loader2, Save, Sparkles, UploadCloud, Wand2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,15 @@ import { templatesForProduct } from "@/lib/template-registry";
 import { formatKes } from "@/lib/utils";
 import type { GenerationMode } from "@/lib/solva-intelligence/types";
 import { pricingProducts } from "@/lib/pricing";
+import { analyzeCvInput, cvModes } from "@/lib/solva-intelligence/cv-quality";
+
+type FieldConfig = {
+  key: string;
+  label: string;
+  placeholder: string;
+  type: "text" | "textarea" | "select";
+  options?: string[];
+};
 
 type EditorStudioProps = {
   userId: string;
@@ -53,8 +62,9 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
   const [isPending, startTransition] = useTransition();
 
   const fields = getFields(productKey);
+  const cvQualityReport = useMemo(() => analyzeCvInput(productKey, payload, brief), [brief, payload, productKey]);
   const readiness = useMemo(() => getGenerationReadiness(productKey, payload, brief), [brief, payload, productKey]);
-  const canGenerate = readiness.ready;
+  const canGenerate = readiness.ready && (!cvQualityReport.isCv || cvQualityReport.readyForPremiumGeneration);
 
   function updatePayload(key: string, value: string) {
     setPayload((current) => ({ ...current, [key]: value }));
@@ -215,13 +225,13 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
     });
   }
 
-  async function download(format: "pdf" | "docx") {
+  async function download(format: "pdf" | "docx", variant: "premium" | "ats" = "premium") {
     if (!documentId) {
       saveDraft();
       return;
     }
 
-    const response = await fetch(`/api/documents/export?documentId=${documentId}&format=${format}`);
+    const response = await fetch(`/api/documents/export?documentId=${documentId}&format=${format}&variant=${variant}`);
     if (!response.ok) {
       const message = await response.json().catch(() => ({ error: "Download failed. Please try again." }));
       setStatus(message.error ?? "Download failed. Please try again.");
@@ -333,6 +343,19 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
                     onChange={(event) => updatePayload(field.key, event.target.value)}
                     placeholder={field.placeholder}
                   />
+                ) : field.type === "select" ? (
+                  <select
+                    className="mt-2 h-11 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-black outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-white/15 dark:bg-white/10 dark:text-white"
+                    value={payload[field.key] ?? ""}
+                    onChange={(event) => updatePayload(field.key, event.target.value)}
+                  >
+                    <option value="">{field.placeholder}</option>
+                    {(field.options ?? []).map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
                   <Input
                     className="mt-2"
@@ -353,6 +376,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
               placeholder="Add any extra context, constraints, tender details, job advert text, or style instructions."
             />
           </label>
+          {cvQualityReport.isCv ? <CvQualityPanel report={cvQualityReport} /> : null}
           <div className="flex flex-wrap gap-3">
             <Button onClick={goToCheckout} disabled={isPending || !canGenerate}>
               <CreditCard className="h-4 w-4" /> Pay & Generate
@@ -371,7 +395,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
           <p className="text-sm font-semibold text-black/55 dark:text-white/55">Status: {status}</p>
           {!canGenerate ? (
             <p className="text-sm font-semibold text-black/55 dark:text-white/55">
-              {readiness.message}
+              {!readiness.ready ? readiness.message : "Answer the CV Quality Engine questions above before generation so the final CV is strong enough to feel worth paying for."}
             </p>
           ) : null}
           {Object.keys(qualityScores).length ? (
@@ -411,9 +435,14 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
               <Wand2 className="h-4 w-4" /> Grammar
             </Button>
             <Button variant="secondary" className="h-8 px-3" onClick={() => download("pdf")}>
-              <Download className="h-4 w-4" /> PDF
+              <Download className="h-4 w-4" /> Premium PDF
             </Button>
-            <Button variant="secondary" className="h-8 px-3" onClick={() => download("docx")}>
+            {productKey === "cv_builder" || productKey === "cv_revamp" ? (
+              <Button variant="secondary" className="h-8 px-3" onClick={() => download("pdf", "ats")}>
+                <Download className="h-4 w-4" /> ATS PDF
+              </Button>
+            ) : null}
+            <Button variant="secondary" className="h-8 px-3" onClick={() => download("docx", "ats")}>
               <Download className="h-4 w-4" /> Word
             </Button>
           </div>
@@ -434,14 +463,81 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
   );
 }
 
-function getFields(product: ProductKey) {
-  const common = [{ key: "preferredTone", label: "Preferred tone", placeholder: "Professional, executive, warm, public sector", type: "text" }];
+function CvQualityPanel({ report }: { report: ReturnType<typeof analyzeCvInput> }) {
+  const scoreItems = [
+    ["ATS readiness", report.scores.atsReadiness],
+    ["Achievement strength", report.scores.achievementStrength],
+    ["Completeness", report.scores.completeness],
+    ["Recruiter readability", report.scores.recruiterReadability],
+    ["Career clarity", report.scores.careerClarity]
+  ];
+
+  return (
+    <div className="rounded-lg border border-black/10 p-4 dark:border-white/10">
+      <div className="flex items-start gap-3">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${report.readyForPremiumGeneration ? "bg-brand-blue text-white" : "bg-black text-white"}`}>
+          {report.readyForPremiumGeneration ? <CheckCircle2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+        </div>
+        <div>
+          <p className="text-sm font-black">CV Quality Engine</p>
+          <p className="mt-1 text-xs leading-5 text-black/55 dark:text-white/55">
+            {report.readyForPremiumGeneration
+              ? "This CV has enough substance for premium generation. Pasting a job advert can still improve ATS matching."
+              : "This CV is not strong enough yet. Add the missing details below so the final CV feels worth paying for."}
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {scoreItems.map(([label, score]) => (
+          <div key={label} className="rounded-lg bg-black/5 px-3 py-2 text-xs font-bold dark:bg-white/10">
+            <span className="block text-black/50 dark:text-white/50">{label}</span>
+            <span className="text-lg text-black dark:text-white">{score}%</span>
+          </div>
+        ))}
+      </div>
+      {report.detectedWeakAreas.length ? (
+        <div className="mt-4">
+          <p className="text-xs font-black uppercase text-brand-blue">Needs attention</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {report.detectedWeakAreas.map((issue) => (
+              <span key={issue.key} className="rounded-lg border border-black/10 px-2 py-1 text-xs font-bold dark:border-white/10">
+                {issue.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {report.followUpQuestions.length ? (
+        <div className="mt-4">
+          <p className="text-xs font-black uppercase text-brand-blue">Smart questions to answer</p>
+          <ul className="mt-2 space-y-2 text-xs leading-5 text-black/60 dark:text-white/60">
+            {report.followUpQuestions.map((question) => (
+              <li key={question}>- {question}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {report.extractedAtsKeywords.length ? (
+        <div className="mt-4">
+          <p className="text-xs font-black uppercase text-brand-blue">Detected ATS keywords</p>
+          <p className="mt-2 text-xs leading-5 text-black/60 dark:text-white/60">{report.extractedAtsKeywords.slice(0, 18).join(", ")}</p>
+        </div>
+      ) : null}
+      <p className="mt-4 text-xs font-semibold leading-5 text-black/55 dark:text-white/55">{report.guidance.join(" ")}</p>
+    </div>
+  );
+}
+
+function getFields(product: ProductKey): FieldConfig[] {
+  const common: FieldConfig[] = [{ key: "preferredTone", label: "Preferred tone", placeholder: "Professional, executive, warm, public sector", type: "text" }];
   if (product === "cv_builder") {
     return [
       { key: "personalDetails", label: "Personal details", placeholder: "Name, phone, email, location, LinkedIn", type: "textarea" },
       { key: "targetJobTitle", label: "Target job title", placeholder: "Human Resource Officer", type: "text" },
       { key: "industry", label: "Industry", placeholder: "HR, ICT, finance, NGO, public sector", type: "text" },
+      { key: "cvMode", label: "CV mode", placeholder: "Choose the best CV mode", type: "select", options: cvModes },
       { key: "experienceLevel", label: "Experience level", placeholder: "Graduate, mid-level, executive", type: "text" },
+      { key: "jobAdvertText", label: "Job advert text for ATS matching", placeholder: "Paste the job advert here so keywords can be matched naturally.", type: "textarea" },
       { key: "workExperience", label: "Work experience", placeholder: "Roles, employers, dates, responsibilities, achievements", type: "textarea" },
       { key: "education", label: "Education", placeholder: "Schools, degrees, dates", type: "textarea" },
       { key: "skills", label: "Skills", placeholder: "Technical and soft skills", type: "textarea" },
@@ -457,8 +553,10 @@ function getFields(product: ProductKey) {
       { key: "targetJobTitle", label: "Target job title", placeholder: "Procurement Officer", type: "text" },
       { key: "targetIndustry", label: "Target industry", placeholder: "Public sector, NGO, banking", type: "text" },
       { key: "yearsExperience", label: "Years of experience", placeholder: "5 years", type: "text" },
+      { key: "cvMode", label: "CV mode", placeholder: "Choose the best CV mode", type: "select", options: cvModes },
       { key: "cvStyle", label: "Preferred CV style", placeholder: "Graduate, professional, executive, technical, public service", type: "text" },
-      { key: "improvementGoal", label: "Improvement goal", placeholder: "ATS Optimization, Executive Upgrade, Career Change", type: "text" },
+      { key: "improvementGoal", label: "Improvement goal", placeholder: "ATS Optimization, Executive Upgrade, Career Change", type: "select", options: ["ATS Optimization", "Executive Upgrade", "Graduate Upgrade", "Career Change", "Public Sector Application", "International Application"] },
+      { key: "jobAdvertText", label: "Job advert text for ATS matching", placeholder: "Paste the job advert here so keywords can be matched naturally.", type: "textarea" },
       ...common
     ];
   }

@@ -8,6 +8,7 @@ import { checkRateLimit, clientIpFromHeaders, rateLimitResponse } from "@/lib/se
 import { generateWithSolvaIntelligence } from "@/lib/solva-intelligence/service";
 import { hasPromptInjectionRisk } from "@/lib/solva-intelligence/safety";
 import { generationModeSchema } from "@/lib/solva-intelligence/types";
+import { analyzeCvInput } from "@/lib/solva-intelligence/cv-quality";
 
 const schema = z.object({
   projectId: z.string().uuid(),
@@ -57,6 +58,10 @@ function validateProductInput(product: z.infer<typeof schema>["product"], payloa
   }
 
   return true;
+}
+
+function isFullCvGeneration(product: z.infer<typeof schema>["product"], mode?: z.infer<typeof generationModeSchema>) {
+  return (product === "cv_builder" || product === "cv_revamp") && (!mode || mode === "full_document");
 }
 
 export async function POST(request: Request) {
@@ -115,13 +120,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Add the required document details before generation." }, { status: 400 });
     }
 
+    const cvQualityReport = analyzeCvInput(parsed.data.product, generationPayload, parsed.data.brief ?? "");
+    if (isFullCvGeneration(parsed.data.product, parsed.data.mode) && !cvQualityReport.readyForPremiumGeneration) {
+      return NextResponse.json(
+        {
+          error: "This CV needs more detail before premium generation. Answer the CV Quality Engine questions, then generate again.",
+          cvQualityReport
+        },
+        { status: 400 }
+      );
+    }
+
     if (hasPromptInjectionRisk(generationPayload) || hasPromptInjectionRisk({ brief: parsed.data.brief ?? "", sectionHtml: parsed.data.sectionHtml ?? "" })) {
       return NextResponse.json({ error: "The input contains unsafe instructions. Please remove prompt override or secret-request language." }, { status: 400 });
     }
 
-    const payload = parsed.data.brief
-      ? { ...generationPayload, sourceBrief: parsed.data.brief }
-      : generationPayload;
+    const payload = {
+      ...generationPayload,
+      ...(parsed.data.brief ? { sourceBrief: parsed.data.brief } : {}),
+      ...(cvQualityReport.isCv ? { cvQualityReport } : {})
+    };
 
     const result = await generateWithSolvaIntelligence({
       userId: user.id,

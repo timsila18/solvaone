@@ -7,7 +7,7 @@ Return ONLY valid JSON with this shape:
   "title": "Document title",
   "executiveSummary": "Brief summary of the document quality and direction",
   "sections": [{"id":"section_id","title":"Section Title","html":"<p>Semantic HTML content...</p>","improvementNotes":["..."]}],
-  "qualityScores": {"completeness":0-100,"professionalTone":0-100,"structure":0-100,"ats":0-100,"tenderReadiness":0-100,"businessClarity":0-100,"notes":["..."]},
+  "qualityScores": {"completeness":0-100,"professionalTone":0-100,"structure":0-100,"ats":0-100,"achievementStrength":0-100,"recruiterReadability":0-100,"careerClarity":0-100,"tenderReadiness":0-100,"businessClarity":0-100,"notes":["..."]},
   "improvementNotes": ["User-friendly improvement notes"],
   "missingInformation": ["To be provided: ..."],
   "atsKeywords": ["keyword"],
@@ -19,14 +19,17 @@ Use semantic HTML only inside section html. No markdown. No scripts. No inline e
 
 const premiumCvDepthStandard = `
 Premium CV depth standard:
+- Start by reading cvQualityReport when present. Address every detected weak area inside the final CV or in missingInformation. Use the follow-up questions as guidance for "To be provided" prompts when the user has not supplied enough detail.
 - For full CV Builder and CV Revamp documents, target at least 3 full A4 pages of useful CV content in the exported PDF/DOCX.
 - Do not pad with generic filler. Expand with role-relevant, truthful detail: stronger profile narrative, core competencies, keyword-rich skills, role scope, achievement-led bullets, selected projects, leadership/volunteer work, tools, compliance/regulatory exposure, training, and missing-information prompts.
 - Produce 9-12 CV sections where the user's information supports them. Use "To be provided" only for genuinely missing details that matter.
 - Professional Summary: 140-190 words, written as a polished executive-style profile without sounding inflated.
-- Core Competencies / ATS Keywords: 18-30 role-aligned keywords grouped logically, not dumped randomly.
-- Professional Experience: for each role, include a short scope paragraph plus 6-8 achievement/value bullets where enough information is provided. If the source CV is thin, rewrite duties into stronger truthful contribution statements and add "To be provided" prompts for measurable results.
+- Core Competencies / ATS Keywords: 18-30 role-aligned keywords grouped logically, not dumped randomly. If jobAdvertText is provided, extract the most important hard skills, soft skills, tools, credentials, sector terms, and responsibility phrases, then weave them naturally into the summary, skills, and experience.
+- Professional Experience: for each role, include a short scope paragraph plus 6-8 achievement/value bullets where enough information is provided. Every bullet should follow the premium formula: Action + Scope + Tool/Method + Result/Business Value. If the source CV is thin, rewrite duties into stronger truthful contribution statements and add "To be provided" prompts for measurable results.
 - Add Selected Achievements / Career Highlights as a separate section when experience exists, with 5-8 bullets drawn only from supplied facts or clearly marked where figures are needed.
 - Add Technical Skills, Professional Strengths, Certifications/Training, Education, Projects, Leadership/Volunteer Experience, and Referees only where relevant. Keep user-facing CV sections unbranded.
+- Support role-specific modes: Graduate CV, Professional CV, Executive CV, Technical CV, NGO CV, Public Service CV, International CV, Sales/Marketing CV, and Accounting/Admin CV. Adjust vocabulary, sections, and emphasis to the chosen mode.
+- Before returning JSON, perform a Human CV Writer Review pass: improve clarity, seniority, confidence, grammar, impact, ATS structure, repetition, and unnecessary filler. The final output should be the polished version after this review, not the rough first draft.
 - The CV must feel complete and worth paying for while remaining ATS-readable, clean, truthful, and recruiter-friendly.
 `;
 
