@@ -30,9 +30,10 @@ type EditorStudioProps = {
   initialBrief?: string;
   initialPayload?: Record<string, string>;
   initialHtml?: string;
+  hasPaidAccess?: boolean;
 };
 
-export function EditorStudio({ userId, productKey, initialProjectId = null, initialDocumentId = null, initialTitle, initialBrief = "", initialPayload = {}, initialHtml = "" }: EditorStudioProps) {
+export function EditorStudio({ userId, productKey, initialProjectId = null, initialDocumentId = null, initialTitle, initialBrief = "", initialPayload = {}, initialHtml = "", hasPaidAccess = false }: EditorStudioProps) {
   const router = useRouter();
   const product = products[productKey];
   const pricing = pricingProducts[productKey];
@@ -64,7 +65,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
   const fields = getFields(productKey);
   const cvQualityReport = useMemo(() => analyzeCvInput(productKey, payload, brief), [brief, payload, productKey]);
   const readiness = useMemo(() => getGenerationReadiness(productKey, payload, brief), [brief, payload, productKey]);
-  const canGenerate = readiness.ready && (!cvQualityReport.isCv || cvQualityReport.readyForPremiumGeneration);
+  const canGenerate = readiness.ready && (hasPaidAccess || !cvQualityReport.isCv || cvQualityReport.readyForPremiumGeneration);
 
   function updatePayload(key: string, value: string) {
     setPayload((current) => ({ ...current, [key]: value }));
@@ -395,7 +396,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
           <p className="text-sm font-semibold text-black/55 dark:text-white/55">Status: {status}</p>
           {!canGenerate ? (
             <p className="text-sm font-semibold text-black/55 dark:text-white/55">
-              {!readiness.ready ? readiness.message : "Answer the CV Quality Engine questions above before generation so the final CV is strong enough to feel worth paying for."}
+              {!readiness.ready ? readiness.message : hasPaidAccess ? "You can generate now. The document will include improvement notes for anything still missing." : "Answer the CV Quality Engine questions above before payment so the final CV is strong enough to feel worth paying for."}
             </p>
           ) : null}
           {Object.keys(qualityScores).length ? (

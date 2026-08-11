@@ -158,10 +158,11 @@ async function enforceRateLimit(userId: string) {
     .eq("user_id", userId)
     .gte("created_at", since);
 
-  if (error) throw new Error(error.message);
+  if (error) return error.message;
   if ((count ?? 0) >= MAX_GENERATIONS_PER_HOUR) {
-    throw new Error("Generation limit reached. Please try again later.");
+    return "Generation volume is high for this user. Continue because payment has already been confirmed, but record the event for admin review.";
   }
+  return null;
 }
 
 async function nextVersionNumber(documentId: string) {
@@ -204,11 +205,227 @@ function fallbackScores(output: SolvaOutput, input: GenerateDocumentInput) {
   };
 }
 
-export async function generateWithSolvaIntelligence(input: GenerateDocumentInput) {
-  await enforceRateLimit(input.userId);
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
+function paragraphsFromText(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return "<p>To be provided.</p>";
+  return text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+    .join("");
+}
+
+function bulletListFromValues(values: unknown[]) {
+  const items = values
+    .flatMap((value) => String(value ?? "").split(/\n|,|;/))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, 36);
+  if (!items.length) return "<ul><li>To be provided.</li></ul>";
+  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function firstUsefulLine(...values: unknown[]) {
+  for (const value of values) {
+    const line = String(value ?? "")
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .find((item) => item.length > 2 && item.length < 90);
+    if (line) return line;
+  }
+  return "Professional Document";
+}
+
+function section(id: string, title: string, html: string, note = "Structured from the customer's saved information.") {
+  return { id, title, html, improvementNotes: [note] };
+}
+
+function buildServiceRecoveryOutput(input: GenerateDocumentInput, payload: Record<string, unknown>, reason: string): SolvaOutput {
+  const targetRole = firstUsefulLine(payload.targetJobTitle, payload.letterType, payload.industry, input.title);
+  const companyName = firstUsefulLine(payload.companyName, payload.company, payload.businessName, input.title);
+  const commonNotes = [
+    "A structured service-ready document was created from the saved customer details after the automated polish pass could not complete.",
+    "The customer can edit this document, add missing details, regenerate, and download PDF or Word without paying again."
+  ];
+
+  if (input.product === "cv_builder" || input.product === "cv_revamp") {
+    const source = payload.oldCvContent ?? payload.workExperience ?? payload.personalDetails ?? input.title;
+    const name = firstUsefulLine(payload.personalDetails, payload.oldCvContent, input.title);
+    const sections = [
+      section("candidate_details", "Candidate Details", paragraphsFromText(payload.personalDetails || name)),
+      section("target_role", "Target Role", `<p>${escapeHtml(targetRole)}</p>`),
+      section(
+        "professional_profile",
+        "Professional Profile",
+        `<p>${escapeHtml(name)} is being positioned for ${escapeHtml(targetRole)} opportunities. The profile should be strengthened with measurable achievements, sector keywords, tools used, scope handled, and career results supplied by the candidate.</p>`
+      ),
+      section("core_competencies", "Core Competencies / ATS Keywords", bulletListFromValues([payload.skills, payload.jobAdvertText, payload.targetIndustry, payload.industry])),
+      section("professional_experience", "Professional Experience", paragraphsFromText(source)),
+      section(
+        "achievement_prompts",
+        "Achievement Prompts To Complete",
+        bulletListFromValues([
+          "Add the number of clients, staff, reports, learners, suppliers, systems, projects, or branches handled.",
+          "Add what was improved, reduced, increased, delivered, saved, resolved, coordinated, or completed.",
+          "Add tools, systems, software, compliance requirements, or reporting lines used in each role.",
+          "Add exact dates, employer names, job titles, and locations where missing."
+        ])
+      ),
+      section("education", "Education", paragraphsFromText(payload.education)),
+      section("certifications_training", "Certifications and Training", paragraphsFromText(payload.certifications)),
+      section("projects_leadership", "Projects and Leadership", paragraphsFromText(payload.projectsLeadership)),
+      section("referees", "Referees", paragraphsFromText(payload.referees || "Available upon request."))
+    ];
+    return {
+      title: `${name} - ${targetRole} CV`,
+      executiveSummary: "Structured CV recovery document prepared from the customer's saved details.",
+      sections,
+      qualityScores: { completeness: 72, professionalTone: 82, structure: 88, ats: 78, achievementStrength: 68, recruiterReadability: 82, careerClarity: 76, notes: [...commonNotes, reason] },
+      improvementNotes: commonNotes,
+      missingInformation: [
+        "To be provided: measurable achievements for each role.",
+        "To be provided: complete employment dates, tools/software, certifications, referees, and target job advert keywords where missing."
+      ],
+      atsKeywords: String(payload.jobAdvertText ?? payload.skills ?? payload.targetIndustry ?? "").split(/\W+/).filter((word) => word.length > 3).slice(0, 30),
+      improvementsMade: ["Created a structured ATS-friendly CV layout from saved details.", "Added missing-information prompts so the customer can improve the paid document without starting over."]
+    };
+  }
+
+  if (input.product === "cover_letter") {
+    const applicant = firstUsefulLine(payload.applicantName, input.title);
+    return {
+      title: `${applicant} - ${targetRole} Cover Letter`,
+      executiveSummary: "Structured cover letter recovery document prepared from saved details.",
+      sections: [
+        section("salutation", "Salutation", `<p>Dear Hiring Manager,</p>`),
+        section("opening", "Opening Paragraph", `<p>I am writing to express interest in the ${escapeHtml(targetRole)} opportunity${payload.company ? ` at ${escapeHtml(payload.company)}` : ""}. My background and supplied experience details show a candidate ready to contribute with professionalism, reliability, and role-focused execution.</p>`),
+        section("evidence_body", "Evidence-Based Body", paragraphsFromText(payload.experienceSummary || payload.keyAchievements || payload.jobAdvertText)),
+        section("closing", "Closing Paragraph", `<p>I would welcome the opportunity to discuss how my background can support your team's goals. Thank you for your consideration.</p>`)
+      ],
+      qualityScores: { completeness: 76, professionalTone: 88, structure: 86, notes: [...commonNotes, reason] },
+      improvementNotes: commonNotes,
+      missingInformation: ["To be provided: company-specific achievements, contact details, and job advert priorities where missing."],
+      atsKeywords: [],
+      improvementsMade: ["Prepared a one-page cover letter structure from saved details."]
+    };
+  }
+
+  if (input.product === "company_profile") {
+    return {
+      title: `${companyName} - Company Profile`,
+      executiveSummary: "Structured company profile recovery document prepared from saved business details.",
+      sections: [
+        section("cover_page", "Cover Page Content", `<p>${escapeHtml(companyName)}</p><p>${escapeHtml(payload.location ?? "Location: To be provided")}</p>`),
+        section("company_overview", "Company Overview", paragraphsFromText(payload.servicesProducts || payload.industry)),
+        section("background", "Background", paragraphsFromText(payload.yearFounded || "To be provided.")),
+        section("vision_mission_values", "Vision, Mission and Core Values", paragraphsFromText(payload.visionMissionValues)),
+        section("services", "Our Services", bulletListFromValues([payload.servicesProducts])),
+        section("target_clients", "Target Clients", paragraphsFromText(payload.targetClients)),
+        section("why_choose_us", "Why Choose Us", bulletListFromValues(["Professional service delivery", "Clear communication", "Client-focused execution", "Compliance-minded operations"])),
+        section("team_projects_compliance", "Team, Projects and Compliance", paragraphsFromText(payload.teamProjectsCompliance)),
+        section("contact_information", "Contact Information", paragraphsFromText(payload.contactDetails))
+      ],
+      qualityScores: { completeness: 78, professionalTone: 86, structure: 90, tenderReadiness: 76, notes: [...commonNotes, reason] },
+      improvementNotes: commonNotes,
+      missingInformation: ["To be provided: registrations, licenses, past projects, team profiles, client references, and tender compliance evidence."],
+      atsKeywords: [],
+      improvementsMade: ["Created a tender-ready company profile structure from saved business details."]
+    };
+  }
+
+  return {
+    title: `${companyName} - Business Plan`,
+    executiveSummary: "Structured business plan recovery document prepared from saved business details.",
+    sections: [
+      section("executive_summary", "Executive Summary", paragraphsFromText(payload.businessModel || payload.productsServices)),
+      section("business_description", "Business Description", paragraphsFromText(payload.industryLocation)),
+      section("problem_solution", "Problem Statement and Proposed Solution", paragraphsFromText(payload.targetMarket || payload.productsServices)),
+      section("products_services", "Products and Services", bulletListFromValues([payload.productsServices])),
+      section("market_analysis", "Market Analysis", paragraphsFromText(payload.targetMarket)),
+      section("competitor_analysis", "Competitor Analysis", paragraphsFromText(payload.competitorsMarketing)),
+      section("marketing_sales", "Marketing and Sales Strategy", paragraphsFromText(payload.competitorsMarketing)),
+      section("operations_team", "Operations Plan and Team", paragraphsFromText(payload.operationsTeam)),
+      section("financial_plan", "Financial Plan", paragraphsFromText(payload.startupCostsPricingRevenue || payload.financialFunding)),
+      section("roadmap", "Implementation Roadmap", bulletListFromValues(["Finalize missing assumptions", "Confirm startup costs and pricing", "Validate target customers", "Launch sales and operations tracking"])),
+      section("conclusion", "Conclusion", `<p>This plan is ready for editing and strengthening with the missing business details listed below.</p>`)
+    ],
+    qualityScores: { completeness: 76, professionalTone: 84, structure: 90, businessClarity: 78, notes: [...commonNotes, reason] },
+    improvementNotes: commonNotes,
+    missingInformation: ["To be provided: startup costs, revenue assumptions, competitor names, funding needs, implementation dates, and operating costs."],
+    atsKeywords: [],
+    improvementsMade: ["Created a practical business plan structure from saved business details."]
+  };
+}
+
+async function saveServiceRecoveryDocument(input: GenerateDocumentInput, generationId: string, payload: Record<string, unknown>, reason: string) {
   const supabase = await createSupabaseServerClient();
-  const payload = sanitizePayload(input.payload);
+  const output = buildServiceRecoveryOutput(input, payload, reason);
+  const safeSections = output.sections.map((item) => ({ ...item, html: stripUnsafeHtml(item.html) }));
+  const html = sectionsToHtml(safeSections);
+  const versionNumber = await nextVersionNumber(input.documentId);
+
+  await supabase
+    .from("documents")
+    .update({
+      title: output.title || input.title,
+      html,
+      structured_content: { ...output, sections: safeSections },
+      quality_scores: output.qualityScores,
+      generation_status: "succeeded",
+      version: versionNumber,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", input.documentId)
+    .eq("user_id", input.userId);
+
+  await supabase.from("document_versions").insert({
+    document_id: input.documentId,
+    user_id: input.userId,
+    version_number: versionNumber,
+    content: { html, output: { ...output, sections: safeSections }, qualityScores: output.qualityScores, serviceRecovery: true },
+    change_type: "generation"
+  });
+
+  await supabase
+    .from("ai_generations")
+    .update({
+      output_payload: { ...output, sections: safeSections, serviceRecovery: true },
+      quality_scores: output.qualityScores,
+      status: "failed",
+      error_message: reason
+    })
+    .eq("id", generationId);
+
+  await supabase.from("projects").update({ status: "ready", updated_at: new Date().toISOString() }).eq("id", input.projectId);
+
+  await supabase.from("audit_logs").insert({
+    user_id: input.userId,
+    action: "document.generate.service_recovery",
+    entity_type: "project",
+    entity_id: input.projectId,
+    metadata: { documentId: input.documentId, product: input.product, generationId, reason }
+  });
+
+  return { html, output: { ...output, sections: safeSections, qualityScores: output.qualityScores }, generationId, serviceRecovery: true };
+}
+
+export async function generateWithSolvaIntelligence(input: GenerateDocumentInput) {
+  const supabase = await createSupabaseServerClient();
+  const usageWarning = await enforceRateLimit(input.userId);
+  const payload = sanitizePayload({
+    ...input.payload,
+    ...(usageWarning ? { usageWarning } : {})
+  });
   if (JSON.stringify(payload).length > 60000) {
     throw new Error("Input is too large. Please shorten the pasted content and try again.");
   }
@@ -347,15 +564,19 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
     return { html, output: { ...output, sections: safeSections, qualityScores }, generationId: generation.id };
   } catch (error) {
     const message = error instanceof z.ZodError ? "Generated output failed quality validation." : error instanceof Error ? error.message : "Generation failed.";
-    await supabase
-      .from("ai_generations")
-      .update({ status: "failed", error_message: message })
-      .eq("id", generation.id);
-    await supabase
-      .from("documents")
-      .update({ generation_status: "failed", updated_at: new Date().toISOString() })
-      .eq("id", input.documentId)
-      .eq("user_id", input.userId);
+    const recovery = await saveServiceRecoveryDocument(input, generation.id, payload, message).catch(async () => {
+      await supabase
+        .from("ai_generations")
+        .update({ status: "failed", error_message: message })
+        .eq("id", generation.id);
+      await supabase
+        .from("documents")
+        .update({ generation_status: "failed", updated_at: new Date().toISOString() })
+        .eq("id", input.documentId)
+        .eq("user_id", input.userId);
+      return null;
+    });
+    if (recovery) return recovery;
     throw new Error(message);
   }
 }

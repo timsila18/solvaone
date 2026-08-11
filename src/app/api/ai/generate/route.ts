@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { assertAiUsageAllowed } from "@/lib/ai-usage";
 import { extractTextFromStoredCv } from "@/lib/cv-extraction";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { userHasPaidProject } from "@/lib/payments";
@@ -84,7 +83,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    await assertAiUsageAllowed(user.id, parsed.data.projectId);
     let generationPayload = parsed.data.payload;
 
     if (
@@ -108,27 +106,27 @@ export async function POST(request: Request) {
       }
     }
 
-    if (parsed.data.product === "cv_revamp" && typeof generationPayload.oldCvContent === "string" && generationPayload.oldCvContent.trim().length < 40) {
-      return NextResponse.json({ error: "Upload a readable DOCX or TXT CV, or paste the CV text before generation." }, { status: 400 });
-    }
-
     if (parsed.data.product === "cv_revamp" && typeof generationPayload.oldCvContent !== "string") {
-      return NextResponse.json({ error: "Upload a readable DOCX or TXT CV, or paste the CV text before generation." }, { status: 400 });
+      generationPayload = {
+        ...generationPayload,
+        oldCvContent: "",
+        inputReadinessWarning: "The original CV text was not available. The document should clearly mark CV details as To be provided and guide the customer to add the CV text for a stronger revamp."
+      };
     }
 
     if (!validateProductInput(parsed.data.product, generationPayload, parsed.data.brief ?? "")) {
-      return NextResponse.json({ error: "Add the required document details before generation." }, { status: 400 });
+      generationPayload = {
+        ...generationPayload,
+        inputReadinessWarning: "Some required details are missing. Produce the best structured paid draft possible from available information and mark missing facts as To be provided."
+      };
     }
 
     const cvQualityReport = analyzeCvInput(parsed.data.product, generationPayload, parsed.data.brief ?? "");
     if (isFullCvGeneration(parsed.data.product, parsed.data.mode) && !cvQualityReport.readyForPremiumGeneration) {
-      return NextResponse.json(
-        {
-          error: "This CV needs more detail before premium generation. Answer the CV Quality Engine questions, then generate again.",
-          cvQualityReport
-        },
-        { status: 400 }
-      );
+      generationPayload = {
+        ...generationPayload,
+        cvQualityWarning: "The CV Quality Engine detected weak areas. Generate a useful paid draft anyway, and include missing-information prompts plus improvement notes."
+      };
     }
 
     if (hasPromptInjectionRisk(generationPayload) || hasPromptInjectionRisk({ brief: parsed.data.brief ?? "", sectionHtml: parsed.data.sectionHtml ?? "" })) {

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { EditorStudio } from "@/components/dashboard/editor-studio";
+import { userHasPaidProject } from "@/lib/payments";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { products, type ProductKey } from "@/lib/types";
 
@@ -40,6 +41,7 @@ export default async function NewProjectPage({ searchParams }: { searchParams: P
     : { data: null };
 
   const content = (document?.content ?? {}) as DocumentContent;
+  const hasPaidAccess = project ? await userHasPaidProject(user.id, project.id) : false;
 
   return (
     <AppShell email={user.email} isAdmin={profile?.role === "admin" || profile?.role === "super_admin"}>
@@ -52,6 +54,7 @@ export default async function NewProjectPage({ searchParams }: { searchParams: P
         initialBrief={content.brief ?? project?.source_brief ?? ""}
         initialPayload={content.payload ?? {}}
         initialHtml={document?.html ?? ""}
+        hasPaidAccess={hasPaidAccess}
       />
     </AppShell>
   );
