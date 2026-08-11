@@ -11,6 +11,8 @@ const CV_MIN_SECTION_COUNT = 9;
 const CV_MIN_TEXT_LENGTH = 9000;
 const CV_MIN_WORD_COUNT = 1100;
 const CV_MIN_BULLET_COUNT = 30;
+const CV_RECOVERABLE_TEXT_LENGTH = 6500;
+const CV_RECOVERABLE_WORD_COUNT = 900;
 
 function isCvProduct(product: string) {
   return product === "cv_builder" || product === "cv_revamp";
@@ -57,6 +59,43 @@ function cvDepthIssue(input: GenerateDocumentInput, output: SolvaOutput) {
   }
 
   return null;
+}
+
+function cvDepthStats(output: SolvaOutput) {
+  const combinedText = output.sections.map((section) => `${section.title} ${textFromHtml(section.html)}`).join(" ");
+  return {
+    sectionCount: output.sections.length,
+    bulletCount: output.sections.reduce((count, section) => count + (section.html.match(/<li\b|(^|\n)\s*[-*\u2022]/gi)?.length ?? 0), 0),
+    words: wordCount(combinedText),
+    textLength: combinedText.length
+  };
+}
+
+function isRecoverableCvDepth(input: GenerateDocumentInput, output: SolvaOutput) {
+  if (!isCvProduct(input.product) || (input.mode && input.mode !== "full_document")) return true;
+  const stats = cvDepthStats(output);
+  return stats.sectionCount >= CV_MIN_SECTION_COUNT && stats.bulletCount >= CV_MIN_BULLET_COUNT && stats.words >= CV_RECOVERABLE_WORD_COUNT && stats.textLength >= CV_RECOVERABLE_TEXT_LENGTH;
+}
+
+function markRecoverableCvDepth(output: SolvaOutput, issue: string) {
+  return {
+    ...output,
+    improvementNotes: [
+      ...output.improvementNotes,
+      "The CV has been delivered successfully. For an even stronger version, add measurable achievements, exact tools used, reporting scope, and leadership or project examples, then use Improve Section or Regenerate."
+    ],
+    missingInformation: Array.from(
+      new Set([
+        ...output.missingInformation,
+        "To be provided: measurable achievements such as numbers handled, revenue, clients served, reports produced, team size, projects completed, or turnaround improvements.",
+        "To be provided: exact tools, systems, certifications, referees, and role-specific keywords from the target job advert where available."
+      ])
+    ),
+    qualityScores: {
+      ...output.qualityScores,
+      notes: [...output.qualityScores.notes, issue, "Delivered as a recoverable premium draft to avoid blocking a paid customer after a valid generation."]
+    }
+  };
 }
 
 function shouldRunCvWriterReview(input: GenerateDocumentInput) {
@@ -236,6 +275,10 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
         output = parseSolvaJson((rawResponse as { output_text?: string }).output_text ?? "");
         const depthIssue = cvDepthIssue(input, output);
         if (depthIssue && attempt < 3) continue;
+        if (depthIssue && isRecoverableCvDepth(input, output)) {
+          output = markRecoverableCvDepth(output, depthIssue);
+          break;
+        }
         if (depthIssue) throw new Error(depthIssue);
         break;
       } catch (error) {
