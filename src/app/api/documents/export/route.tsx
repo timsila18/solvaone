@@ -5,6 +5,8 @@ import { Page, Text, View, Document as PdfDocument, StyleSheet } from "@react-pd
 import { userHasPaidProject } from "@/lib/payments";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 
+type PlainSection = { title: string; text: string };
+
 const styles = StyleSheet.create({
   page: { padding: 44, fontSize: 10.5, lineHeight: 1.45, color: "#000000", fontFamily: "Helvetica" },
   title: { fontSize: 24, marginBottom: 7, fontWeight: 700 },
@@ -18,24 +20,24 @@ const styles = StyleSheet.create({
 });
 
 const cvStyles = StyleSheet.create({
-  page: { padding: 0, fontSize: 9.5, lineHeight: 1.35, color: "#000000", fontFamily: "Helvetica", backgroundColor: "#FFFFFF" },
-  header: { paddingTop: 30, paddingHorizontal: 34, paddingBottom: 0 },
-  headerAccent: { width: 46, height: 5, backgroundColor: "#0066FF", marginBottom: 11 },
-  name: { fontSize: 28, fontWeight: 700, marginBottom: 5, color: "#000000" },
-  role: { fontSize: 12, color: "#0066FF", fontWeight: 700, marginBottom: 14 },
-  contactBar: { backgroundColor: "#000000", color: "#FFFFFF", paddingTop: 9, paddingHorizontal: 14, paddingBottom: 5, marginTop: 4 },
+  page: { padding: 0, fontSize: 9.4, lineHeight: 1.36, color: "#000000", fontFamily: "Helvetica", backgroundColor: "#FFFFFF" },
+  header: { backgroundColor: "#000000", paddingTop: 30, paddingHorizontal: 34, paddingBottom: 18 },
+  headerAccent: { width: 52, height: 4, backgroundColor: "#0066FF", marginBottom: 12 },
+  name: { fontSize: 26, fontWeight: 700, marginBottom: 6, color: "#FFFFFF" },
+  role: { fontSize: 11.5, color: "#FFFFFF", fontWeight: 700, marginBottom: 12 },
+  contactBar: { borderTopWidth: 1, borderTopColor: "#0066FF", paddingTop: 8 },
   contactGrid: { flexDirection: "row", flexWrap: "wrap" },
-  contactItem: { fontSize: 8.8, color: "#FFFFFF", marginRight: 14, marginBottom: 4 },
-  body: { paddingHorizontal: 34, paddingTop: 20, paddingBottom: 30 },
-  section: { marginBottom: 12 },
-  sectionTitleRow: { flexDirection: "row", alignItems: "center", marginBottom: 7 },
-  sectionBadge: { width: 17, height: 17, borderWidth: 1.4, borderColor: "#0066FF", marginRight: 8 },
-  sectionTitle: { fontSize: 11.6, fontWeight: 700, textTransform: "uppercase", color: "#000000" },
-  paragraph: { fontSize: 9.5, marginBottom: 4.5 },
-  bulletRow: { flexDirection: "row", marginBottom: 4 },
-  bulletDot: { width: 10, color: "#0066FF", fontWeight: 700 },
-  bulletText: { flex: 1, fontSize: 9.5 },
-  jobLine: { fontSize: 10, fontWeight: 700, marginTop: 3, marginBottom: 3 },
+  contactItem: { fontSize: 8.6, color: "#FFFFFF", marginRight: 12, marginBottom: 4, maxWidth: 245 },
+  body: { paddingHorizontal: 34, paddingTop: 18, paddingBottom: 30 },
+  section: { marginBottom: 10 },
+  sectionTitleRow: { flexDirection: "row", alignItems: "center", marginBottom: 6, paddingBottom: 3, borderBottomWidth: 1, borderBottomColor: "#0066FF" },
+  sectionBadge: { width: 7, height: 16, backgroundColor: "#0066FF", marginRight: 8 },
+  sectionTitle: { fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#000000" },
+  paragraph: { fontSize: 9.3, marginBottom: 4.2 },
+  bulletRow: { flexDirection: "row", marginBottom: 3.8 },
+  bulletDot: { width: 10, color: "#0066FF", fontWeight: 700, fontSize: 9.3 },
+  bulletText: { flex: 1, fontSize: 9.3 },
+  jobLine: { fontSize: 9.8, fontWeight: 700, marginTop: 3, marginBottom: 3 },
   footer: { position: "absolute", bottom: 16, left: 34, right: 34, paddingTop: 6, borderTopWidth: 1, borderTopColor: "#0066FF", fontSize: 7.5, color: "#000000", flexDirection: "row", justifyContent: "flex-end" }
 });
 
@@ -43,8 +45,9 @@ function stripHtml(html: string) {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<(br|hr)\s*\/?>/gi, "\n")
     .replace(/<li[^>]*>/gi, "\n- ")
-    .replace(/<\/(p|div|section|h1|h2|h3)>/gi, "\n")
+    .replace(/<\/(p|div|section|h1|h2|h3|li)>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
@@ -52,36 +55,51 @@ function stripHtml(html: string) {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"")
     .replace(/&#39;/g, "'")
+    .replace(/\b(Email|Phone|Mobile|Tel|LinkedIn|Location|Address|Portfolio|Website):/gi, "\n$1:")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-function sectionsFromHtml(html: string) {
-  const matches = [...html.matchAll(/<h2[^>]*>(.*?)<\/h2>([\s\S]*?)(?=<h2|$)/gi)];
-  if (!matches.length) return [{ title: "Document", text: stripHtml(html) }];
-  return matches.map((match) => ({ title: stripHtml(match[1]), text: stripHtml(match[2]) }));
+function isInternalCvSection(title: string) {
+  return /application strengthening|missing evidence|missing information|improvement notes|achievement prompts|details to collect|quality notes/i.test(title);
 }
 
-function cvHeaderFromHtml(html: string, fallbackTitle: string) {
-  const name = stripHtml(html.match(/<h1[^>]*>(.*?)<\/h1>/i)?.[1] ?? fallbackTitle);
-  const beforeFirstSection = html.split(/<h2/i)[0] ?? "";
-  const contact = stripHtml(beforeFirstSection)
+function presentableLine(line: string) {
+  return !/to be provided|additional detail recommended|structured service-ready|automated polish|service recovery/i.test(line);
+}
+
+function visibleLines(text: string) {
+  return text
     .split(/\n+/)
     .map((line) => line.trim())
-    .filter((line) => line && line !== name)
-    .join(" | ");
+    .filter((line) => line && presentableLine(line));
+}
 
-  return { name, contact };
+function sectionsFromHtml(html: string) {
+  const matches = [...html.matchAll(/<h2[^>]*>(.*?)<\/h2>([\s\S]*?)(?=<h2|$)/gi)];
+  const sections = matches.length ? matches.map((match) => ({ title: stripHtml(match[1]), text: stripHtml(match[2]) })) : [{ title: "Document", text: stripHtml(html) }];
+  return sections.filter((section) => !isInternalCvSection(section.title));
 }
 
 function isCvProduct(product?: string | null) {
   return product === "cv_builder" || product === "cv_revamp";
 }
 
-function lineStyleForCv(line: string) {
-  if (/section$/i.test(line) || /department$/i.test(line) || /office$/i.test(line)) return cvStyles.jobLine;
-  if (/—| - |present|to date|20\d{2}|19\d{2}/i.test(line) && line.length < 130) return cvStyles.jobLine;
-  return cvStyles.paragraph;
+function cvHeaderFromHtml(html: string, fallbackTitle: string) {
+  const sections = sectionsFromHtml(html);
+  const contactSection = sections.find((section) => /contact|candidate details|personal details/i.test(section.title));
+  const contactLines = visibleLines(contactSection?.text ?? "");
+  const titleName = fallbackTitle.split(/\s+-\s+/)[0]?.trim() || fallbackTitle;
+  const h1 = stripHtml(html.match(/<h1[^>]*>(.*?)<\/h1>/i)?.[1] ?? "");
+  const name =
+    contactLines.find((line) => !/email|phone|mobile|tel|linkedin|location|address|website|portfolio/i.test(line) && line.length <= 80) ||
+    h1 ||
+    titleName;
+  const contact = contactLines
+    .filter((line) => line !== name)
+    .filter((line) => /@|\+?\d{7,}|linkedin|location|address|website|portfolio|nairobi|kenya|mombasa|kisumu|nakuru|eldoret/i.test(line))
+    .join(" | ");
+  return { name, contact };
 }
 
 function roleFromTitle(title: string, name: string) {
@@ -90,18 +108,21 @@ function roleFromTitle(title: string, name: string) {
 }
 
 function sectionLines(text: string) {
-  return text
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  return visibleLines(text);
 }
 
 function isBulletLine(line: string) {
-  return /^[-*•]\s+/.test(line);
+  return /^[-*\u2022]\s+/.test(line);
 }
 
 function cleanBullet(line: string) {
-  return line.replace(/^[-*•]\s+/, "").trim();
+  return line.replace(/^[-*\u2022]\s+/, "").trim();
+}
+
+function lineStyleForCv(line: string) {
+  if (/section$|department$|office$/i.test(line)) return cvStyles.jobLine;
+  if (/ - |present|to date|20\d{2}|19\d{2}/i.test(line) && line.length < 130) return cvStyles.jobLine;
+  return cvStyles.paragraph;
 }
 
 function docxParagraph(line: string, isCv: boolean) {
@@ -119,53 +140,37 @@ function docxSectionTitle(title: string, isCv: boolean) {
     text: title.toUpperCase(),
     heading: HeadingLevel.HEADING_2,
     spacing: { before: isCv ? 220 : 280, after: 120 },
-    border: {
-      bottom: {
-        color: isCv ? "0066FF" : "000000",
-        space: 1,
-        style: BorderStyle.SINGLE,
-        size: 6
-      }
-    }
+    border: { bottom: { color: isCv ? "0066FF" : "000000", space: 1, style: BorderStyle.SINGLE, size: 6 } }
   });
 }
 
-function buildDocxChildren(input: { title: string; html: string; product?: string; sections: Array<{ title: string; text: string }> }) {
+function buildDocxChildren(input: { title: string; html: string; product?: string; sections: PlainSection[] }) {
   const isCv = isCvProduct(input.product);
   const header = cvHeaderFromHtml(input.html, input.title);
+  const cvSections = isCv ? input.sections.filter((section) => !/contact|candidate details|personal details/i.test(section.title)) : input.sections;
 
   if (isCv) {
     return [
-      new Paragraph({
-        children: [new TextRun({ text: header.name, bold: true, size: 40, color: "000000" })],
-        spacing: { after: 80 }
-      }),
+      new Paragraph({ children: [new TextRun({ text: header.name, bold: true, size: 40, color: "000000" })], spacing: { after: 80 } }),
       ...(header.contact
-        ? [
-            new Paragraph({
-              children: [new TextRun({ text: header.contact, size: 20, color: "0066FF" })],
-              spacing: { after: 120 }
-            })
-          ]
+        ? [new Paragraph({ children: [new TextRun({ text: header.contact, size: 20, color: "0066FF" })], spacing: { after: 120 } })]
         : []),
-      ...input.sections.flatMap((section) => [docxSectionTitle(section.title, true), ...sectionLines(section.text).map((line) => docxParagraph(line, true))])
+      ...cvSections.flatMap((section) => [docxSectionTitle(section.title, true), ...sectionLines(section.text).map((line) => docxParagraph(line, true))])
     ];
   }
 
   return [
-    new Paragraph({
-      children: [new TextRun({ text: input.title, bold: true, size: 36, color: "000000" })],
-      spacing: { after: 180 }
-    }),
+    new Paragraph({ children: [new TextRun({ text: input.title, bold: true, size: 36, color: "000000" })], spacing: { after: 180 } }),
     ...input.sections.flatMap((section) => [docxSectionTitle(section.title, false), ...sectionLines(section.text).map((line) => docxParagraph(line, false))])
   ];
 }
 
 function PremiumCvPdf({ title, html }: { title: string; html: string }) {
-  const sections = sectionsFromHtml(html);
+  const sections = sectionsFromHtml(html).filter((section) => !/contact|candidate details|personal details/i.test(section.title));
   const header = cvHeaderFromHtml(html, title);
   const role = roleFromTitle(title, header.name);
   const contactItems = header.contact.split("|").map((item) => item.trim()).filter(Boolean);
+
   return (
     <PdfDocument title={title} author={header.name}>
       <Page size="A4" style={cvStyles.page}>
@@ -192,24 +197,18 @@ function PremiumCvPdf({ title, html }: { title: string; html: string }) {
                 <View style={cvStyles.sectionBadge} />
                 <Text style={cvStyles.sectionTitle}>{section.title}</Text>
               </View>
-              {section.text
-                .split(/\n+/)
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .map((line, index) => {
-                  const bullet = line.replace(/^[-•]\s*/, "");
-                  const isBullet = bullet !== line;
-                  return isBullet ? (
-                    <View key={`${section.title}-${index}`} style={cvStyles.bulletRow}>
-                      <Text style={cvStyles.bulletDot}>•</Text>
-                      <Text style={cvStyles.bulletText}>{bullet}</Text>
-                    </View>
-                  ) : (
-                    <Text key={`${section.title}-${index}`} style={lineStyleForCv(line)}>
-                      {line}
-                    </Text>
-                  );
-                })}
+              {sectionLines(section.text).map((line, index) =>
+                isBulletLine(line) ? (
+                  <View key={`${section.title}-${index}`} style={cvStyles.bulletRow}>
+                    <Text style={cvStyles.bulletDot}>-</Text>
+                    <Text style={cvStyles.bulletText}>{cleanBullet(line)}</Text>
+                  </View>
+                ) : (
+                  <Text key={`${section.title}-${index}`} style={lineStyleForCv(line)}>
+                    {line}
+                  </Text>
+                )
+              )}
             </View>
           ))}
         </View>
@@ -247,7 +246,7 @@ export async function GET(request: NextRequest) {
   const project = Array.isArray(document.projects) ? document.projects[0] : document.projects;
   const product = project?.product as string | undefined;
   const sections = sectionsFromHtml(document.html);
-  const filenameBase = document.title.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "solvaone-document";
+  const filenameBase = document.title.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "document";
   const filename = isCvProduct(product) ? `${filenameBase}-${variant}` : filenameBase;
   const cvHeader = cvHeaderFromHtml(document.html, document.title);
 
@@ -259,13 +258,7 @@ export async function GET(request: NextRequest) {
         title: document.title,
         sections: [
           {
-            properties: {
-              page: {
-                margin: isCv
-                  ? { top: 720, right: 720, bottom: 720, left: 720 }
-                  : { top: 900, right: 900, bottom: 900, left: 900 }
-              }
-            },
+            properties: { page: { margin: isCv ? { top: 720, right: 720, bottom: 720, left: 720 } : { top: 900, right: 900, bottom: 900, left: 900 } } },
             children: buildDocxChildren({ title: document.title, html: document.html, product, sections })
           }
         ]
@@ -287,27 +280,30 @@ export async function GET(request: NextRequest) {
   }
 
   const file = await renderToBuffer(
-    <PdfDocument title={document.title} author={document.title}>
+    <PdfDocument title={document.title} author={isCvProduct(product) ? cvHeader.name : document.title}>
       <Page size="A4" style={styles.page}>
-        <Text style={styles.title}>{document.title}</Text>
+        <Text style={styles.title}>{isCvProduct(product) ? cvHeader.name : document.title}</Text>
         <View style={styles.titleRule} />
-        {sections.map((section) => (
-          <View key={section.title} wrap>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            {sectionLines(section.text).map((line, index) =>
-              isBulletLine(line) ? (
-                <View key={`${section.title}-${index}`} style={styles.bulletRow}>
-                  <Text style={styles.bulletDot}>•</Text>
-                  <Text style={styles.bulletText}>{cleanBullet(line)}</Text>
-                </View>
-              ) : (
-                <Text key={`${section.title}-${index}`} style={styles.body}>
-                  {line}
-                </Text>
-              )
-            )}
-          </View>
-        ))}
+        {isCvProduct(product) && cvHeader.contact ? <Text style={styles.body}>{cvHeader.contact}</Text> : null}
+        {sections
+          .filter((section) => !isCvProduct(product) || !/contact|candidate details|personal details/i.test(section.title))
+          .map((section) => (
+            <View key={section.title} wrap>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              {sectionLines(section.text).map((line, index) =>
+                isBulletLine(line) ? (
+                  <View key={`${section.title}-${index}`} style={styles.bulletRow}>
+                    <Text style={styles.bulletDot}>-</Text>
+                    <Text style={styles.bulletText}>{cleanBullet(line)}</Text>
+                  </View>
+                ) : (
+                  <Text key={`${section.title}-${index}`} style={styles.body}>
+                    {line}
+                  </Text>
+                )
+              )}
+            </View>
+          ))}
         <View style={styles.footer} fixed>
           <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
         </View>

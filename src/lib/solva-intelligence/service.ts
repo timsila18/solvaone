@@ -121,7 +121,7 @@ async function runHumanCvWriterReview(input: GenerateDocumentInput, draft: Solva
           "Strengthen bullets using: Action + Scope + Tool/Method + Result/Business Value.",
           "Do not summarize or shorten the CV. The polished version must be at least as detailed as the draft.",
           "Keep or improve the 3-page premium depth standard: 1,500+ words, 9-12 useful sections, and 30+ useful bullets.",
-          "If facts are missing, use To be provided and list the missing detail in missingInformation.",
+          "If facts are missing, list the missing detail in missingInformation metadata. Do not create visible employer-facing CV sections that reveal the document is unfinished.",
           "Return one complete JSON object only. No markdown fences."
         ].join("\n")
       },
@@ -216,7 +216,7 @@ function escapeHtml(value: unknown) {
 
 function paragraphsFromText(value: unknown) {
   const text = String(value ?? "").trim();
-  if (!text) return "<p>To be provided.</p>";
+  if (!text) return "";
   return text
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
@@ -231,7 +231,7 @@ function bulletListFromValues(values: unknown[]) {
     .map((value) => value.trim())
     .filter(Boolean)
     .slice(0, 36);
-  if (!items.length) return "<ul><li>To be provided.</li></ul>";
+  if (!items.length) return "";
   return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
@@ -247,14 +247,18 @@ function firstUsefulLine(...values: unknown[]) {
 }
 
 function section(id: string, title: string, html: string, note = "Structured from the customer's saved information.") {
-  return { id, title, html, improvementNotes: [note] };
+  return { id, title, html: html || "<p>Available upon request.</p>", improvementNotes: [note] };
+}
+
+function optionalSection(id: string, title: string, html: string, note = "Structured from the customer's saved information.") {
+  return html ? section(id, title, html, note) : null;
 }
 
 function buildServiceRecoveryOutput(input: GenerateDocumentInput, payload: Record<string, unknown>, reason: string): SolvaOutput {
   const targetRole = firstUsefulLine(payload.targetJobTitle, payload.letterType, payload.industry, input.title);
   const companyName = firstUsefulLine(payload.companyName, payload.company, payload.businessName, input.title);
   const commonNotes = [
-    "A structured service-ready document was created from the saved customer details after the automated polish pass could not complete.",
+    "A structured document was created from the saved customer details after the premium polish pass could not complete.",
     "The customer can edit this document, add missing details, regenerate, and download PDF or Word without paying again."
   ];
 
@@ -267,25 +271,15 @@ function buildServiceRecoveryOutput(input: GenerateDocumentInput, payload: Recor
       section(
         "professional_profile",
         "Professional Profile",
-        `<p>${escapeHtml(name)} is being positioned for ${escapeHtml(targetRole)} opportunities. The profile should be strengthened with measurable achievements, sector keywords, tools used, scope handled, and career results supplied by the candidate.</p>`
+        `<p>${escapeHtml(name)} is a professional candidate positioned for ${escapeHtml(targetRole)} opportunities, with experience and background details organized into a clean, recruiter-friendly CV structure. The profile emphasizes transferable strengths, role alignment, professional discipline, and readiness to contribute in structured organizational environments.</p>`
       ),
       section("core_competencies", "Core Competencies / ATS Keywords", bulletListFromValues([payload.skills, payload.jobAdvertText, payload.targetIndustry, payload.industry])),
       section("professional_experience", "Professional Experience", paragraphsFromText(source)),
-      section(
-        "achievement_prompts",
-        "Achievement Prompts To Complete",
-        bulletListFromValues([
-          "Add the number of clients, staff, reports, learners, suppliers, systems, projects, or branches handled.",
-          "Add what was improved, reduced, increased, delivered, saved, resolved, coordinated, or completed.",
-          "Add tools, systems, software, compliance requirements, or reporting lines used in each role.",
-          "Add exact dates, employer names, job titles, and locations where missing."
-        ])
-      ),
-      section("education", "Education", paragraphsFromText(payload.education)),
-      section("certifications_training", "Certifications and Training", paragraphsFromText(payload.certifications)),
-      section("projects_leadership", "Projects and Leadership", paragraphsFromText(payload.projectsLeadership)),
+      optionalSection("education", "Education", paragraphsFromText(payload.education)),
+      optionalSection("certifications_training", "Certifications and Training", paragraphsFromText(payload.certifications)),
+      optionalSection("projects_leadership", "Projects and Leadership", paragraphsFromText(payload.projectsLeadership)),
       section("referees", "Referees", paragraphsFromText(payload.referees || "Available upon request."))
-    ];
+    ].filter(Boolean) as SolvaOutput["sections"];
     return {
       title: `${name} - ${targetRole} CV`,
       executiveSummary: "Structured CV recovery document prepared from the customer's saved details.",
