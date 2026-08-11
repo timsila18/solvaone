@@ -86,11 +86,33 @@ async function paymentRateLimit(userId: string) {
 }
 
 export async function initiateDarajaStkPush(input: StkPushInput) {
-  await paymentRateLimit(input.userId);
   const product = getPricingProduct(input.productId);
   if (!product || !product.isActive) throw new Error("Product is not available for purchase.");
 
   const phone = normalizeSafaricomPhone(input.phone);
+  const supabase = await createSupabaseServerClient();
+  const { data: existingPayment } = await supabase
+    .from("payments")
+    .select("id,checkout_request_id,status,created_at")
+    .eq("user_id", input.userId)
+    .eq("project_id", input.projectId)
+    .eq("product_id", input.productId)
+    .eq("phone_number", phone)
+    .in("status", ["processing", "successful", "paid"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingPayment?.status === "successful" || existingPayment?.status === "paid") {
+    return existingPayment;
+  }
+
+  const processingAgeMs = existingPayment?.created_at ? Date.now() - new Date(existingPayment.created_at).getTime() : Number.POSITIVE_INFINITY;
+  if (existingPayment?.status === "processing" && processingAgeMs < 3 * 60 * 1000) {
+    return existingPayment;
+  }
+
+  await paymentRateLimit(input.userId);
   const { shortcode, passkey, callbackUrl } = getDarajaConfig();
   const token = await getAccessToken();
   const ts = timestamp();
@@ -120,7 +142,6 @@ export async function initiateDarajaStkPush(input: StkPushInput) {
     throw new Error(darajaPayload.errorMessage ?? darajaPayload.ResponseDescription ?? "M-Pesa STK push failed.");
   }
 
-  const supabase = await createSupabaseServerClient();
   const { data: payment, error } = await supabase
     .from("payments")
     .insert({
@@ -138,7 +159,7 @@ export async function initiateDarajaStkPush(input: StkPushInput) {
       merchant_request_id: darajaPayload.MerchantRequestID,
       raw_request: darajaPayload
     })
-    .select("id,checkout_request_id")
+    .select("id,checkout_request_id,status,created_at")
     .single();
 
   if (error) throw new Error(error.message);

@@ -8,11 +8,11 @@ import { solvaOutputSchema, type GenerateDocumentInput, type SolvaOutput } from 
 
 const MAX_GENERATIONS_PER_HOUR = 10;
 const CV_MIN_SECTION_COUNT = 9;
-const CV_MIN_TEXT_LENGTH = 9000;
-const CV_MIN_WORD_COUNT = 1100;
+const CV_MIN_TEXT_LENGTH = 10500;
+const CV_MIN_WORD_COUNT = 1400;
 const CV_MIN_BULLET_COUNT = 30;
-const CV_RECOVERABLE_TEXT_LENGTH = 6500;
-const CV_RECOVERABLE_WORD_COUNT = 900;
+const CV_RECOVERABLE_TEXT_LENGTH = 8000;
+const CV_RECOVERABLE_WORD_COUNT = 1100;
 
 function isCvProduct(product: string) {
   return product === "cv_builder" || product === "cv_revamp";
@@ -54,6 +54,8 @@ function cvDepthIssue(input: GenerateDocumentInput, output: SolvaOutput) {
       `Required minimum: ${CV_MIN_SECTION_COUNT}+ sections, ${CV_MIN_WORD_COUNT}+ words, ${CV_MIN_TEXT_LENGTH}+ text characters, and ${CV_MIN_BULLET_COUNT}+ useful bullets.`,
       "Rewrite into a richer ATS-optimized CV targeting at least 3 full A4 pages in the premium PDF/DOCX layout.",
       "Do not add fake employers, dates, qualifications, certifications, referees, awards, or exact metrics.",
+      "Never invent percentages, quantities, money, client counts, team sizes, project counts, KPIs, or any measurable result. Use supplied figures only; otherwise describe value qualitatively.",
+      "Balance compact sections so the final page is substantially filled without repetition, padding, or unsupported content.",
       "Expand truthfully with role scope, professional summary depth, core competencies, career highlights, richer work bullets, technical tools, projects, leadership/volunteer details where provided, and missing-information prompts where details are absent."
     ].join("\n");
   }
@@ -118,9 +120,11 @@ async function runHumanCvWriterReview(input: GenerateDocumentInput, draft: Solva
           "Improve clarity, seniority, confidence, grammar, impact, ATS structure, repetition, and unnecessary filler.",
           "Keep the CV unbranded. Do not mention AI, SolvaOne, or the generation platform.",
           "Preserve truthfulness. Do not invent employers, dates, qualifications, certifications, referees, awards, or exact metrics.",
+          "Never invent percentages, quantities, money, client counts, team sizes, project counts, KPIs, or measurable outcomes. Retain a metric only when it is supported by the customer's payload or source CV; otherwise rewrite it as a truthful qualitative contribution.",
           "Strengthen bullets using: Action + Scope + Tool/Method + Result/Business Value.",
           "Do not summarize or shorten the CV. The polished version must be at least as detailed as the draft.",
           "Keep or improve the 3-page premium depth standard: 1,500+ words, 9-12 useful sections, and 30+ useful bullets.",
+          "Arrange the final CV as 3-4 balanced A4 pages. Avoid leaving a sparse final page by positioning compact factual sections thoughtfully or merging compatible short sections, without repetition or filler.",
           "If facts are missing, list the missing detail in missingInformation metadata. Do not create visible employer-facing CV sections that reveal the document is unfinished.",
           "Return one complete JSON object only. No markdown fences."
         ].join("\n")

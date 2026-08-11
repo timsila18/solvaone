@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       productId: parsed.data.productId as ProductId,
       phone: parsed.data.phone
     });
-    return NextResponse.json({ paymentId: payment.id, checkoutRequestId: payment.checkout_request_id, status: "processing" });
+    return NextResponse.json({ paymentId: payment.id, checkoutRequestId: payment.checkout_request_id, status: payment.status });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Payment initiation failed.";
     return NextResponse.json({ error: message }, { status: 500 });
