@@ -4,12 +4,12 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { clientIpFromHeaders, passwordSchema } from "@/lib/security";
+import { clientIpFromHeaders, logSystemEvent, passwordSchema } from "@/lib/security";
 import { absoluteUrl } from "@/lib/utils";
 import { headers } from "next/headers";
 
 const authSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8),
   referralCode: z.string().max(40).optional()
 });
@@ -86,8 +86,10 @@ export async function loginAction(formData: FormData) {
 }
 
 export async function registerAction(formData: FormData) {
+  const rawEmail = formData.get("email");
+  const email = typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : rawEmail;
   const parsed = registerSchema.safeParse({
-    email: formData.get("email"),
+    email,
     password: formData.get("password"),
     referralCode: formData.get("referralCode") || undefined,
     acceptTerms: formData.get("acceptTerms"),
@@ -95,25 +97,58 @@ export async function registerAction(formData: FormData) {
   });
 
   if (!parsed.success) {
+    const fields = parsed.error.flatten().fieldErrors;
+    if (fields.email?.length) redirect("/register?error=email");
+    if (fields.password?.length) redirect("/register?error=password");
+    if (fields.acceptTerms?.length || fields.acceptPrivacy?.length) redirect("/register?error=consent");
     redirect("/register?error=invalid");
   }
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin.auth.admin.createUser({
-    email: parsed.data.email,
-    password: parsed.data.password,
-    email_confirm: true,
-    user_metadata: {
-      referral_code: parsed.data.referralCode?.toUpperCase(),
-      terms_accepted: true,
-      privacy_accepted: true,
-      terms_version: "2026-06-08",
-      privacy_version: "2026-06-08"
-    }
-  });
+  let error: { code?: string; status?: number; message: string } | null = null;
+  try {
+    const admin = createSupabaseAdminClient();
+    const result = await admin.auth.admin.createUser({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      email_confirm: true,
+      user_metadata: {
+        referral_code: parsed.data.referralCode?.toUpperCase(),
+        terms_accepted: true,
+        privacy_accepted: true,
+        terms_version: "2026-06-08",
+        privacy_version: "2026-06-08"
+      }
+    });
+    error = result.error;
+  } catch (registrationError) {
+    error = {
+      message: registrationError instanceof Error ? registrationError.message : "Registration service unavailable"
+    };
+  }
 
   if (error) {
-    redirect("/register?error=signup");
+    const normalizedMessage = error.message.toLowerCase();
+    const isExistingAccount =
+      normalizedMessage.includes("already") ||
+      normalizedMessage.includes("registered") ||
+      normalizedMessage.includes("exists");
+    const isPasswordError = normalizedMessage.includes("password");
+
+    console.error("[register] Supabase account creation failed", {
+      code: error.code,
+      status: error.status,
+      message: error.message
+    });
+    await logSystemEvent({
+      category: "auth.registration_failed",
+      level: "error",
+      message: "Supabase rejected an account registration request.",
+      metadata: { code: error.code ?? null, status: error.status ?? null, reason: error.message }
+    });
+
+    if (isExistingAccount) redirect("/register?error=existing");
+    if (isPasswordError) redirect("/register?error=password");
+    redirect("/register?error=unavailable");
   }
 
   const supabase = await createSupabaseServerClient();
