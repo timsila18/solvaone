@@ -145,48 +145,83 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
     });
   }
 
+  async function parseResponse(response: Response) {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) return null;
+    return response.json().catch(() => null);
+  }
+
+  async function recoverDocument(documentIdToRecover: string) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await fetch(`/api/documents/status?documentId=${encodeURIComponent(documentIdToRecover)}`, {
+        cache: "no-store"
+      });
+      const recovered = await parseResponse(response);
+      if (response.ok && recovered?.html?.trim()) {
+        setHtml(recovered.html);
+        setQualityScores(recovered.qualityScores ?? recovered.output?.qualityScores ?? {});
+        setQualityNotes(recovered.output?.qualityScores?.notes ?? recovered.output?.improvementNotes ?? []);
+        setStatus("Ready - your paid document was recovered");
+        return true;
+      }
+      if (recovered?.status === "failed") return false;
+      if (attempt < 5) await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    }
+    return false;
+  }
+
   function generateDocument(mode: GenerationMode = "full_document") {
     startTransition(async () => {
-      trackEvent("start_document", { product: productKey, mode });
-      setStatus(mode === "full_document" ? "Preparing your document" : "Improving your document");
-      const saveResponse = await fetch("/api/documents/autosave", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, payload, html })
-      });
-      const saved = await saveResponse.json();
-      if (!saveResponse.ok) {
-        setStatus(saved.error ?? "Save failed");
-        return;
-      }
-      setProjectId(saved.projectId);
-      setDocumentId(saved.documentId);
+      let savedDocumentId = documentId;
+      try {
+        trackEvent("start_document", { product: productKey, mode });
+        setStatus(mode === "full_document" ? "Preparing your document - please keep this page open" : "Improving your document");
+        const saveResponse = await fetch("/api/documents/autosave", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, payload, html })
+        });
+        const saved = await parseResponse(saveResponse);
+        if (!saveResponse.ok || !saved?.documentId) {
+          setStatus(saved?.error ?? "We could not save the draft. Your payment remains valid; refresh and try again.");
+          return;
+        }
+        savedDocumentId = saved.documentId;
+        setProjectId(saved.projectId);
+        setDocumentId(saved.documentId);
 
-      const response = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: saved.projectId,
-          documentId: saved.documentId,
-          product: productKey,
-          templateId,
-          title,
-          brief,
-          payload,
-          mode,
-          sectionHtml: html
-        })
-      });
-      const responsePayload = await response.json();
-      if (!response.ok) {
-        setStatus(responsePayload.error ?? "Generation failed");
-        return;
+        const response = await fetch("/api/ai/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId: saved.projectId,
+            documentId: saved.documentId,
+            product: productKey,
+            templateId,
+            title,
+            brief,
+            payload,
+            mode,
+            sectionHtml: html
+          })
+        });
+        const responsePayload = await parseResponse(response);
+        if (!response.ok || !responsePayload?.html?.trim()) {
+          setStatus("The generation response was interrupted. Recovering your paid document now...");
+          if (await recoverDocument(saved.documentId)) return;
+          setStatus(responsePayload?.error ?? "Generation was interrupted. Your payment is safe - use Generate again or contact support for immediate recovery.");
+          return;
+        }
+        setHtml(responsePayload.html);
+        setQualityScores(responsePayload.output?.qualityScores ?? {});
+        setQualityNotes(responsePayload.output?.qualityScores?.notes ?? responsePayload.output?.improvementNotes ?? []);
+        setStatus("Ready");
+        trackEvent("document_generated", { product: productKey, documentId: saved.documentId, mode });
+      } catch {
+        setStatus("The connection was interrupted. Recovering your paid document now...");
+        if (savedDocumentId && (await recoverDocument(savedDocumentId))) return;
+        setStatus("We could not finish this attempt. Your payment remains valid - refresh and select Generate again, or contact support for immediate recovery.");
       }
-      setHtml(responsePayload.html);
-      setQualityScores(responsePayload.output?.qualityScores ?? {});
-      setQualityNotes(responsePayload.output?.qualityScores?.notes ?? responsePayload.output?.improvementNotes ?? []);
-      setStatus("Ready");
-      trackEvent("document_generated", { product: productKey, documentId: saved.documentId, mode });
     });
   }
 

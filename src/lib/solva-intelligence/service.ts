@@ -144,7 +144,7 @@ async function runHumanCvWriterReview(input: GenerateDocumentInput, draft: Solva
       }
     ],
     temperature: 0.18,
-    max_output_tokens: 18000
+    max_output_tokens: 9000
   } as any);
 
   const polished = parseSolvaJson((reviewResponse as { output_text?: string }).output_text ?? "");
@@ -418,6 +418,7 @@ async function saveServiceRecoveryDocument(input: GenerateDocumentInput, generat
 }
 
 export async function generateWithSolvaIntelligence(input: GenerateDocumentInput) {
+  const generationStartedAt = Date.now();
   const supabase = await createSupabaseServerClient();
   const usageWarning = await enforceRateLimit(input.userId);
   const payload = sanitizePayload({
@@ -456,7 +457,7 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
     let rawResponse: unknown = null;
     let usageTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
       rawResponse = await client.responses.create({
         model,
         input: [
@@ -477,7 +478,7 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
           }
         ],
         temperature: attempt === 1 ? 0.35 : 0.15,
-        max_output_tokens: isCvProduct(input.product) && (!input.mode || input.mode === "full_document") ? 18000 : 12000
+        max_output_tokens: isCvProduct(input.product) && (!input.mode || input.mode === "full_document") ? 9000 : 7000
       } as any);
       const attemptUsage = extractTokenUsage(rawResponse);
       usageTotals = {
@@ -489,7 +490,7 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
       try {
         output = parseSolvaJson((rawResponse as { output_text?: string }).output_text ?? "");
         const depthIssue = cvDepthIssue(input, output);
-        if (depthIssue && attempt < 3) continue;
+        if (depthIssue && attempt < 2) continue;
         if (depthIssue && isRecoverableCvDepth(input, output)) {
           output = markRecoverableCvDepth(output, depthIssue);
           break;
@@ -497,13 +498,13 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
         if (depthIssue) throw new Error(depthIssue);
         break;
       } catch (error) {
-        if (attempt === 3) throw error;
+        if (attempt === 2) throw error;
       }
     }
 
     if (!output) throw new Error("Solva Intelligence returned an empty response.");
 
-    if (shouldRunCvWriterReview(input)) {
+    if (shouldRunCvWriterReview(input) && Date.now() - generationStartedAt < 120_000) {
       const polished = await runHumanCvWriterReview({ ...input, payload }, output, client, model);
       output = polished.output;
       rawResponse = polished.response;

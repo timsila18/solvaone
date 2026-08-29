@@ -9,6 +9,9 @@ import { hasPromptInjectionRisk } from "@/lib/solva-intelligence/safety";
 import { generationModeSchema } from "@/lib/solva-intelligence/types";
 import { analyzeCvInput } from "@/lib/solva-intelligence/cv-quality";
 
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
 const schema = z.object({
   projectId: z.string().uuid(),
   documentId: z.string().uuid(),
