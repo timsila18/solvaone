@@ -36,53 +36,69 @@ export function CheckoutPanel({ projectId, productId, initialPaymentId = null, i
     trackEvent("start_checkout", { projectId, productId });
   }, [projectId, productId]);
 
+  async function parseResponse(response: Response) {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) return null;
+    return response.json().catch(() => null);
+  }
+
   function initiatePayment() {
     startTransition(async () => {
-      setStatus("processing");
-      setMessage("Sending STK Push. Check your phone and enter your M-Pesa PIN.");
-      const response = await fetch("/api/mpesa/stk-push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, productId, phone })
-      });
-      const payload = await response.json();
-      if (!response.ok) {
+      try {
+        setStatus("processing");
+        setMessage("Sending STK Push. Check your phone and enter your M-Pesa PIN.");
+        const response = await fetch("/api/mpesa/stk-push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId, productId, phone })
+        });
+        const payload = await parseResponse(response);
+        if (!response.ok || !payload?.paymentId) {
+          setStatus("failed");
+          setMessage(payload?.error ?? "M-Pesa could not start this request. Confirm the phone number and try again.");
+          trackEvent("payment_failed", { projectId, productId, reason: payload?.error ?? `HTTP ${response.status}` });
+          return;
+        }
+        setPaymentId(payload.paymentId);
+        const returnedStatus = payload.status as Status | undefined;
+        if (returnedStatus === "successful" || returnedStatus === "paid") {
+          setStatus(returnedStatus);
+          setMessage("Payment already confirmed. You can generate, edit, and download your document.");
+          trackEvent("payment_successful", { projectId, productId, paymentId: payload.paymentId, status: returnedStatus });
+          return;
+        }
+        setStatus("processing");
+        trackEvent("payment_initiated", { projectId, productId, paymentId: payload.paymentId });
+        setMessage("Payment request sent. M-Pesa callbacks can take a few seconds to update.");
+      } catch {
         setStatus("failed");
-        setMessage(payload.error ?? "Payment failed. Confirm the phone number and try again.");
-        trackEvent("payment_failed", { projectId, productId, reason: payload.error });
-        return;
+        setMessage("The connection was interrupted, so payment status is unknown. Check your phone and Payments page before retrying to avoid another charge.");
+        trackEvent("payment_failed", { projectId, productId, reason: "network_interrupted" });
       }
-      setPaymentId(payload.paymentId);
-      const returnedStatus = payload.status as Status | undefined;
-      if (returnedStatus === "successful" || returnedStatus === "paid") {
-        setStatus(returnedStatus);
-        setMessage("Payment already confirmed. You can generate, edit, and download your document.");
-        trackEvent("payment_successful", { projectId, productId, paymentId: payload.paymentId, status: returnedStatus });
-        return;
-      }
-      setStatus("processing");
-      trackEvent("payment_initiated", { projectId, productId, paymentId: payload.paymentId });
-      setMessage("Payment request sent. M-Pesa callbacks can take a few seconds to update.");
     });
   }
 
   function refreshPaymentStatus() {
     if (!paymentId) return;
     startTransition(async () => {
+      try {
       setMessage("Checking M-Pesa confirmation...");
       const response = await fetch(`/api/payments/status?paymentId=${paymentId}`, { cache: "no-store" });
-      const payload = await response.json();
+      const payload = await parseResponse(response);
       if (!response.ok) {
-        setMessage(payload.error ?? "Status check failed. Please try again.");
+        setMessage(payload?.error ?? "Status check failed. Please try again.");
         return;
       }
-      const nextStatus = payload.payment?.status as Status | undefined;
+      const nextStatus = payload?.payment?.status as Status | undefined;
       if (nextStatus) setStatus(nextStatus);
       setMessage(
         nextStatus === "successful" || nextStatus === "paid"
           ? "Payment confirmed. You can generate and download your document."
-          : payload.payment?.result_description ?? "Confirmation has not arrived yet. Wait briefly, then check again or retry if M-Pesa cancelled the request."
+          : payload?.payment?.result_description ?? "Confirmation has not arrived yet. Wait briefly, then check again or retry if M-Pesa cancelled the request."
       );
+      } catch {
+        setMessage("Unable to check payment status right now. Please try checking again before making another payment.");
+      }
     });
   }
 
@@ -90,23 +106,27 @@ export function CheckoutPanel({ projectId, productId, initialPaymentId = null, i
     if (!paymentId || status !== "processing") return;
     const startedAt = Date.now();
     const interval = window.setInterval(async () => {
-      const response = await fetch(`/api/payments/status?paymentId=${paymentId}`, { cache: "no-store" });
-      const payload = await response.json();
-      const nextStatus = payload.payment?.status as Status | undefined;
-      if (nextStatus === "successful" || nextStatus === "paid" || nextStatus === "failed" || nextStatus === "cancelled" || nextStatus === "timed_out") {
-        setStatus(nextStatus);
-        setMessage(
-          nextStatus === "successful" || nextStatus === "paid"
-            ? "Payment confirmed. You can generate and download your document."
-            : payload.payment?.result_description ?? "Payment was not completed. You can retry."
-        );
-        trackEvent(nextStatus === "successful" || nextStatus === "paid" ? "payment_successful" : "payment_failed", { projectId, productId, paymentId, status: nextStatus });
-        window.clearInterval(interval);
-      }
-      if (Date.now() - startedAt > 120000) {
-        setStatus("timed_out");
-        setMessage("The payment confirmation is delayed. You can retry or refresh status from your dashboard.");
-        window.clearInterval(interval);
+      try {
+        const response = await fetch(`/api/payments/status?paymentId=${paymentId}`, { cache: "no-store" });
+        const payload = await parseResponse(response);
+        const nextStatus = payload?.payment?.status as Status | undefined;
+        if (nextStatus === "successful" || nextStatus === "paid" || nextStatus === "failed" || nextStatus === "cancelled" || nextStatus === "timed_out") {
+          setStatus(nextStatus);
+          setMessage(
+            nextStatus === "successful" || nextStatus === "paid"
+              ? "Payment confirmed. You can generate and download your document."
+              : payload?.payment?.result_description ?? "Payment was not completed. You can retry."
+          );
+          trackEvent(nextStatus === "successful" || nextStatus === "paid" ? "payment_successful" : "payment_failed", { projectId, productId, paymentId, status: nextStatus });
+          window.clearInterval(interval);
+        }
+        if (Date.now() - startedAt > 120000) {
+          setStatus("timed_out");
+          setMessage("The payment confirmation is delayed. Check its status before starting another STK Push.");
+          window.clearInterval(interval);
+        }
+      } catch {
+        setMessage("M-Pesa status could not be refreshed. Your payment record is safe; select Check payment status shortly.");
       }
     }, 4000);
     return () => window.clearInterval(interval);

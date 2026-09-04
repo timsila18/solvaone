@@ -65,7 +65,10 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
   const fields = getFields(productKey);
   const cvQualityReport = useMemo(() => analyzeCvInput(productKey, payload, brief), [brief, payload, productKey]);
   const readiness = useMemo(() => getGenerationReadiness(productKey, payload, brief), [brief, payload, productKey]);
-  const canGenerate = readiness.ready && (hasPaidAccess || !cvQualityReport.isCv || cvQualityReport.readyForPremiumGeneration);
+  // Quality findings guide the customer and the generation prompt, but must never
+  // trap a valid uploaded CV behind a disabled checkout button.
+  const canContinue = readiness.ready;
+  const canGenerate = readiness.ready && hasPaidAccess;
 
   function updatePayload(key: string, value: string) {
     setPayload((current) => ({ ...current, [key]: value }));
@@ -227,20 +230,25 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
 
   function goToCheckout() {
     startTransition(async () => {
-      setStatus("Saving before checkout");
-      const saveResponse = await fetch("/api/documents/autosave", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, payload, html })
-      });
-      const saved = await saveResponse.json();
-      if (!saveResponse.ok) {
-        setStatus(saved.error ?? "Save failed");
-        return;
+      try {
+        setStatus("Saving securely before M-Pesa checkout");
+        const saveResponse = await fetch("/api/documents/autosave", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId, documentId, product: productKey, templateId, title, brief, payload, html })
+        });
+        const saved = await parseResponse(saveResponse);
+        if (!saveResponse.ok || !saved?.projectId || !saved?.documentId) {
+          setStatus(saved?.error ?? "We could not save this CV. Please try again; no payment has been taken.");
+          return;
+        }
+        setProjectId(saved.projectId);
+        setDocumentId(saved.documentId);
+        setStatus("Opening secure checkout");
+        router.push(`/dashboard/checkout?projectId=${saved.projectId}&productId=${productKey}`);
+      } catch {
+        setStatus("The connection was interrupted before checkout. No payment was taken. Please try again.");
       }
-      setProjectId(saved.projectId);
-      setDocumentId(saved.documentId);
-      router.push(`/dashboard/checkout?projectId=${saved.projectId}&productId=${productKey}`);
     });
   }
 
@@ -284,8 +292,8 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-      <section className="rounded-lg border border-black/10 p-5 dark:border-white/10">
+    <div className="grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <section className="min-w-0 rounded-lg border border-black/10 p-5 dark:border-white/10">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black">{product.title}</h1>
@@ -414,9 +422,9 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
           </label>
           {cvQualityReport.isCv ? <CvQualityPanel report={cvQualityReport} /> : null}
           <div className="flex flex-wrap gap-3">
-            <Button onClick={goToCheckout} disabled={isPending || !canGenerate}>
-              <CreditCard className="h-4 w-4" /> Pay & Generate
-            </Button>
+            {!hasPaidAccess ? <Button onClick={goToCheckout} disabled={isPending || !canContinue}>
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />} Continue to M-Pesa
+            </Button> : null}
             <Button onClick={() => saveDraft()} disabled={isPending}>
               <Save className="h-4 w-4" /> Save
             </Button>
@@ -429,11 +437,17 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
             </Button>
           </div>
           <p className="text-sm font-semibold text-black/55 dark:text-white/55">Status: {status}</p>
-          {!canGenerate ? (
+          {!canContinue ? (
             <p className="text-sm font-semibold text-black/55 dark:text-white/55">
-              {!readiness.ready ? readiness.message : hasPaidAccess ? "You can generate now. The document will include improvement notes for anything still missing." : "Answer the CV Quality Engine questions above before payment so the final CV is strong enough to feel worth paying for."}
+              {readiness.message}
             </p>
-          ) : null}
+          ) : !hasPaidAccess ? (
+            <p className="text-sm font-semibold text-black/55 dark:text-white/55">
+              Your document is ready for checkout. Any quality suggestions above are optional and will not block payment.
+            </p>
+          ) : (
+            <p className="text-sm font-semibold text-brand-blue">Payment confirmed. Select Generate to prepare your document.</p>
+          )}
           {Object.keys(qualityScores).length ? (
             <div className="rounded-lg border border-black/10 p-3 dark:border-white/10">
               <p className="text-sm font-black">Quality</p>
@@ -451,8 +465,8 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
           ) : null}
         </div>
       </section>
-      <section className="rounded-lg border border-black/10 dark:border-white/10">
-        <div className="flex items-center justify-between border-b border-black/10 p-3 dark:border-white/10">
+      <section className="min-w-0 overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-black/10 p-3 dark:border-white/10">
           <div className="flex gap-1">
             {["B", "I", "H1"].map((label) => (
               <button key={label} className="h-8 rounded-lg px-3 text-sm font-black hover:bg-black/5 dark:hover:bg-white/10">
@@ -460,7 +474,7 @@ export function EditorStudio({ userId, productKey, initialProjectId = null, init
               </button>
             ))}
           </div>
-          <div className="flex gap-2">
+          <div className="flex min-w-0 flex-wrap gap-2">
             <Button variant="secondary" className="h-8 px-3" onClick={() => generateDocument("make_more_professional")}>
               <Wand2 className="h-4 w-4" /> Professional
             </Button>
@@ -519,7 +533,7 @@ function CvQualityPanel({ report }: { report: ReturnType<typeof analyzeCvInput> 
           <p className="mt-1 text-xs leading-5 text-black/55 dark:text-white/55">
             {report.readyForPremiumGeneration
               ? "This CV has enough substance for premium generation. Pasting a job advert can still improve ATS matching."
-              : "This CV is not strong enough yet. Add the missing details below so the final CV feels worth paying for."}
+              : "Add any missing details you can to strengthen your CV. These suggestions will not prevent you from continuing to checkout."}
           </p>
         </div>
       </div>
