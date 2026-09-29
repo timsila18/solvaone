@@ -100,6 +100,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <DashboardMetricCard label="Average Quality" value={averageQuality ? `${averageQuality}%` : "0%"} />
       </div>
       <div className="mt-6 flex flex-wrap gap-3">
+        <ButtonLink href="/dashboard/admin/job-desk">Open Job Desk</ButtonLink>
         <ButtonLink href="/api/admin/reports/revenue?format=csv">Export CSV</ButtonLink>
         <ButtonLink href="/api/admin/reports/revenue?format=excel" variant="secondary">Export Excel</ButtonLink>
         <ButtonLink href="/dashboard/admin/launch" variant="secondary">Launch Readiness</ButtonLink>

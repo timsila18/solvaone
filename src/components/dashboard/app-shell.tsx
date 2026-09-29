@@ -56,6 +56,13 @@ export function AppShell({
                 <CheckCircle2 className="h-4 w-4" />
                 Launch
               </Link>
+              <Link
+                href="/dashboard/admin/job-desk"
+                className="flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-semibold text-black/65 transition hover:bg-black/5 hover:text-black dark:text-white/65 dark:hover:bg-white/10 dark:hover:text-white"
+              >
+                <BriefcaseBusiness className="h-4 w-4" />
+                Job Desk
+              </Link>
             </>
           ) : null}
         </nav>

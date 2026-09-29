@@ -8,6 +8,39 @@
   --foreground: #000000;
 }
 
+.job-desk-cv {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12pt;
+  line-height: 1.15;
+}
+
+.job-desk-cv section + section {
+  margin-top: 1.35rem;
+}
+
+.job-desk-cv h2 {
+  margin-bottom: 0.55rem;
+  border-bottom: 1px solid #000;
+  padding-bottom: 0.3rem;
+  font-size: 12pt;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.job-desk-cv p,
+.job-desk-cv li {
+  text-align: justify;
+}
+
+.job-desk-cv ul {
+  margin: 0.4rem 0 0 1.2rem;
+  list-style: disc;
+}
+
+.job-desk-cv li + li {
+  margin-top: 0.35rem;
+}
+
 .dark {
   color-scheme: dark;
   --background: #000000;

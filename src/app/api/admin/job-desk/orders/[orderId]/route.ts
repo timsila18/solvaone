@@ -1,0 +1,46 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { logAdminAction, requireAdmin } from "@/lib/security";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getCurrentUser } from "@/lib/supabase/server";
+
+const actionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("approve_cv") }),
+  z.object({ action: z.literal("set_status"), status: z.enum(["intake", "awaiting_information", "cv_review", "approved", "active", "paused", "completed", "cancelled", "failed"]) })
+]);
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ orderId: string }> }) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requireAdmin(user);
+  if (!access.allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const parsed = actionSchema.safeParse(await request.json());
+  if (!parsed.success) return NextResponse.json({ error: "Invalid Job Desk action." }, { status: 400 });
+  const { orderId } = await params;
+  const db = createSupabaseAdminClient();
+
+  if (parsed.data.action === "approve_cv") {
+    const { data: document, error: findError } = await db
+      .from("job_desk_documents")
+      .select("id")
+      .eq("order_id", orderId)
+      .eq("document_type", "revamped_cv")
+      .eq("status", "review")
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (findError || !document) return NextResponse.json({ error: findError?.message ?? "No CV is ready for approval." }, { status: 409 });
+    const { error } = await db
+      .from("job_desk_documents")
+      .update({ status: "approved", approved_by: user.id, approved_at: new Date().toISOString() })
+      .eq("id", document.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId);
+  } else {
+    const { error } = await db.from("job_desk_orders").update({ status: parsed.data.status }).eq("id", orderId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  await logAdminAction({ adminId: user.id, action: `job_desk.${parsed.data.action}`, targetType: "job_desk_order", targetId: orderId, details: parsed.data });
+  return NextResponse.json({ ok: true });
+}

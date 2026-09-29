@@ -1,7 +1,8 @@
 import mammoth from "mammoth";
+import pdf from "pdf-parse/lib/pdf-parse.js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-const MAX_EXTRACTED_CV_CHARS = 20000;
+const MAX_EXTRACTED_CV_CHARS = 50000;
 
 export type CvExtractionResult = {
   text: string;
@@ -37,9 +38,22 @@ export async function extractTextFromCvFile(fileName: string, contentType: strin
     }
   }
 
+  if (extension === "pdf" || contentType === "application/pdf") {
+    try {
+      const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+      const result = await pdf(buffer);
+      const text = normalizeExtractedText(result.text);
+      return text
+        ? { text }
+        : { text: "", warning: "The PDF appears to contain scanned images rather than selectable text. Paste the CV text or upload a text-based PDF/DOCX." };
+    } catch {
+      return { text: "", warning: "We saved the PDF, but could not read its text. Paste the CV text or upload a DOCX version." };
+    }
+  }
+
   return {
     text: "",
-    warning: "We saved the CV. Paste the CV text below for PDF or legacy DOC uploads so the revamp can read it accurately."
+    warning: "We saved the CV. Paste the CV text below for legacy DOC uploads so the revamp can read it accurately."
   };
 }
 
