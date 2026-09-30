@@ -55,5 +55,44 @@ export const jobDeskProcessingOutputSchema = z.object({
   processingNotes: z.array(z.string()).default([])
 });
 
-export type JobDeskProcessingOutput = z.infer<typeof jobDeskProcessingOutputSchema>;
+// The model contract has only required fields; the application schema above
+// remains responsible for validating content and applying any defaults.
+export const jobDeskModelOutputSchema = z.object({
+  candidateProfile: z.object({
+    fullName: z.string(), email: z.string(), phone: z.string(), location: z.string(),
+    linkedIn: z.string(), targetHeadline: z.string(), professionalSummary: z.string(),
+    totalYearsExperience: z.string(), skills: z.array(z.string()), tools: z.array(z.string()),
+    industries: z.array(z.string()),
+    experience: z.array(z.object({
+      jobTitle: z.string(), employer: z.string(), location: z.string(),
+      startDate: z.string(), endDate: z.string(),
+      responsibilities: z.array(z.string()), achievements: z.array(z.string())
+    })),
+    education: z.array(z.object({
+      qualification: z.string(), institution: z.string(), location: z.string(),
+      startDate: z.string(), endDate: z.string()
+    })),
+    certifications: z.array(z.string()), languages: z.array(z.string()),
+    projects: z.array(z.string()), leadership: z.array(z.string())
+  }),
+  profileCompleteness: z.number(),
+  revampedCv: z.object({
+    title: z.string(), executiveSummary: z.string(),
+    sections: z.array(z.object({
+      id: z.string(), title: z.string(), html: z.string(), improvementNotes: z.array(z.string())
+    })),
+    qualityScores: z.object({
+      completeness: z.number(), professionalTone: z.number(), structure: z.number(),
+      ats: z.number(), achievementStrength: z.number(), recruiterReadability: z.number(),
+      careerClarity: z.number(), notes: z.array(z.string())
+    }),
+    improvementNotes: z.array(z.string()), missingInformation: z.array(z.string()),
+    atsKeywords: z.array(z.string()), improvementsMade: z.array(z.string())
+  }),
+  questionnaire: z.array(z.object({
+    id: z.string(), category: z.string(), question: z.string(), reason: z.string(), required: z.boolean()
+  })),
+  processingNotes: z.array(z.string())
+});
 
+export type JobDeskProcessingOutput = z.infer<typeof jobDeskProcessingOutputSchema>;

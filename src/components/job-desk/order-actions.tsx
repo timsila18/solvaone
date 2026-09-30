@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentStatus, paymentStatus }: { orderId: string; canProcess: boolean; canApprove: boolean; currentStatus: string; paymentStatus: string }) {
+export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentStatus, paymentStatus, paymentNeedsReview = false }: { orderId: string; canProcess: boolean; canApprove: boolean; currentStatus: string; paymentStatus: string; paymentNeedsReview?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"process" | "approve" | "status" | "payment" | null>(null);
   const [message, setMessage] = useState("");
@@ -88,7 +88,7 @@ export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentSt
       <Button variant="ghost" onClick={updateStatus} disabled={busy !== null || status === currentStatus}>
         {busy === "status" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Update status
       </Button>
-      {paymentStatus !== "paid" ? <Button variant="secondary" onClick={() => setShowPayment(!showPayment)} disabled={busy !== null}>Record payment</Button> : null}
+      {paymentStatus !== "paid" || paymentNeedsReview ? <Button variant="secondary" onClick={() => setShowPayment(!showPayment)} disabled={busy !== null}>{paymentNeedsReview ? "Verify payment record" : "Record payment"}</Button> : null}
       {showPayment ? <form action={recordPayment} className="flex basis-full flex-wrap gap-2 border-t border-black/10 pt-3 dark:border-white/10">
         <input name="amount" type="number" min="1" step="0.01" required placeholder="Amount in KES" aria-label="Amount in KES" className="h-10 w-36 rounded border border-black/20 bg-white px-2 text-sm text-black" />
         <select name="method" aria-label="Payment method" defaultValue="mpesa" className="h-10 rounded border border-black/20 bg-white px-2 text-sm text-black"><option value="mpesa">M-Pesa</option><option value="cash">Cash</option><option value="bank">Bank</option><option value="manual">Manual</option><option value="other">Other</option></select>

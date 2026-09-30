@@ -1,11 +1,12 @@
 import { createHash } from "crypto";
 import { z } from "zod";
+import { zodTextFormat } from "openai/helpers/zod";
 import { createOpenAIClient } from "@/lib/openai";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { sectionsToHtml, sanitizeText, stripUnsafeHtml } from "@/lib/solva-intelligence/safety";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction, logSystemEvent } from "@/lib/security";
-import { jobDeskProcessingOutputSchema, type JobDeskProcessingOutput } from "./types";
+import { jobDeskModelOutputSchema, jobDeskProcessingOutputSchema, type JobDeskProcessingOutput } from "./types";
 
 type ProcessJobDeskOrderInput = {
   orderId: string;
@@ -16,6 +17,23 @@ type ProcessJobDeskOrderInput = {
 function parseJson(raw: string): JobDeskProcessingOutput {
   const cleaned = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
   return jobDeskProcessingOutputSchema.parse(JSON.parse(cleaned));
+}
+
+function validationMessage(error: unknown) {
+  if (error instanceof z.ZodError) {
+    return `The CV response needs correction in: ${error.issues.slice(0, 8).map((issue) => issue.path.join(".") || "document").join(", ")}.`;
+  }
+  if (error instanceof SyntaxError) return "The CV response was not valid JSON.";
+  return error instanceof Error ? error.message : "The CV response could not be read.";
+}
+
+function cvDepthIssue(output: JobDeskProcessingOutput) {
+  const sections = output.revampedCv.sections;
+  const text = sections.map((section) => section.html.replace(/<[^>]+>/g, " ")).join(" ").replace(/\s+/g, " ").trim();
+  if (sections.length < 5 || text.length < 3500) {
+    return `The CV needs more supported detail: ${sections.length} sections and ${text.length} characters of body text. Expand the real experience, skills, education and achievements without inventing facts.`;
+  }
+  return null;
 }
 
 function fingerprint(value: unknown) {
@@ -123,7 +141,10 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
       .eq("input_fingerprint", inputFingerprint)
       .eq("status", "succeeded")
       .maybeSingle();
-    if (existing) return { reused: true, runId: existing.id, output: existing.output_payload as JobDeskProcessingOutput };
+    if (existing) {
+      const { data: savedDocument } = await db.from("job_desk_documents").select("id").eq("order_id", orderId).eq("document_type", "revamped_cv").neq("status", "superseded").limit(1).maybeSingle();
+      if (savedDocument) return { reused: true, runId: existing.id, output: existing.output_payload as JobDeskProcessingOutput };
+    }
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
@@ -151,22 +172,35 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
 
   await db.from("job_desk_orders").update({ status: "cv_processing" }).eq("id", orderId);
 
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
   try {
     const clientApi = createOpenAIClient();
     let response: unknown;
     let output: JobDeskProcessingOutput | null = null;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let correction = "";
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
       response = await clientApi.responses.create({
         model,
-        input: buildPrompt(promptInput),
+        input: [...buildPrompt(promptInput), ...(correction ? [{ role: "developer" as const, content: `Correct the previous response: ${correction}` }] : [])],
+        text: { format: zodTextFormat(jobDeskModelOutputSchema, "job_desk_cv") },
+        store: false,
         temperature: attempt === 1 ? 0.25 : 0.1,
-        max_output_tokens: 10000
+        max_output_tokens: 12000
       } as any);
+      const attemptUsage = extractTokenUsage(response);
+      totalInputTokens += attemptUsage.inputTokens;
+      totalOutputTokens += attemptUsage.outputTokens;
       try {
-        output = parseJson((response as { output_text?: string }).output_text ?? "");
+        if ((response as { status?: string }).status !== "completed") throw new Error("The CV response was incomplete. Continue with a complete document.");
+        const parsed = parseJson((response as { output_text?: string }).output_text ?? "");
+        const depthIssue = cvDepthIssue(parsed);
+        if (depthIssue) throw new Error(depthIssue);
+        output = parsed;
         break;
       } catch (error) {
-        if (attempt === 2) throw error;
+        correction = validationMessage(error);
+        if (attempt === 3) throw new Error(correction);
       }
     }
     if (!output) throw new Error("The CV processor returned an empty result.");
@@ -174,7 +208,7 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
     const safeSections = output.revampedCv.sections.map((section) => ({ ...section, html: stripUnsafeHtml(section.html) }));
     const safeOutput = { ...output, revampedCv: { ...output.revampedCv, sections: safeSections } };
     const html = sectionsToHtml(safeSections);
-    const usage = extractTokenUsage(response);
+    const usage = { inputTokens: totalInputTokens, outputTokens: totalOutputTokens, totalTokens: totalInputTokens + totalOutputTokens };
     const estimatedCost = estimateCost(model, usage.inputTokens, usage.outputTokens);
 
     const { data: latestDocument } = await db
@@ -187,14 +221,29 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
       .maybeSingle();
     const version = (latestDocument?.version ?? 0) + 1;
 
-    await db
-      .from("job_desk_documents")
-      .update({ status: "superseded" })
-      .eq("order_id", orderId)
-      .eq("document_type", "revamped_cv")
-      .in("status", ["draft", "review"]);
+    const { error: profileSaveError } = await db.from("job_desk_candidate_profiles").upsert(
+      {
+        client_id: order.client_id,
+        structured_profile: safeOutput.candidateProfile,
+        completeness_score: Math.round(safeOutput.profileCompleteness),
+        last_extracted_at: new Date().toISOString()
+      },
+      { onConflict: "client_id", ignoreDuplicates: false }
+    );
+    if (profileSaveError) throw new Error(`Could not save candidate profile: ${profileSaveError.message}`);
 
-    const { error: documentError } = await db.from("job_desk_documents").insert({
+    const { error: questionnaireSaveError } = await db.from("job_desk_questionnaires").upsert(
+      {
+        order_id: orderId,
+        client_id: order.client_id,
+        questions: safeOutput.questionnaire,
+        status: safeOutput.questionnaire.length ? "open" : "closed"
+      },
+      { onConflict: "order_id", ignoreDuplicates: false }
+    );
+    if (questionnaireSaveError) throw new Error(`Could not save client questions: ${questionnaireSaveError.message}`);
+
+    const { data: savedDocument, error: documentError } = await db.from("job_desk_documents").insert({
       order_id: orderId,
       client_id: order.client_id,
       ai_run_id: run.id,
@@ -204,28 +253,16 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
       html,
       status: "review",
       version
-    });
-    if (documentError) throw new Error(documentError.message);
+    }).select("id").single();
+    if (documentError || !savedDocument) throw new Error(documentError?.message ?? "Could not save the CV.");
 
-    await db.from("job_desk_candidate_profiles").upsert(
-      {
-        client_id: order.client_id,
-        structured_profile: safeOutput.candidateProfile,
-        completeness_score: Math.round(safeOutput.profileCompleteness),
-        last_extracted_at: new Date().toISOString()
-      },
-      { onConflict: "client_id", ignoreDuplicates: false }
-    );
-
-    await db.from("job_desk_questionnaires").upsert(
-      {
-        order_id: orderId,
-        client_id: order.client_id,
-        questions: safeOutput.questionnaire,
-        status: safeOutput.questionnaire.length ? "open" : "closed"
-      },
-      { onConflict: "order_id", ignoreDuplicates: false }
-    );
+    const { error: supersedeError } = await db.from("job_desk_documents")
+      .update({ status: "superseded" })
+      .eq("order_id", orderId)
+      .eq("document_type", "revamped_cv")
+      .neq("id", savedDocument.id)
+      .in("status", ["draft", "review"]);
+    if (supersedeError) await logSystemEvent({ category: "job_desk.cv_versions", level: "error", message: supersedeError.message, metadata: { orderId, documentId: savedDocument.id } });
 
     await db
       .from("job_desk_ai_runs")
@@ -251,8 +288,14 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
 
     return { reused: false, runId: run.id, output: safeOutput };
   } catch (error) {
-    const message = error instanceof z.ZodError ? "The AI response did not match the Job Desk quality contract." : error instanceof Error ? error.message : "CV processing failed.";
-    await db.from("job_desk_ai_runs").update({ status: "failed", error_message: message, completed_at: new Date().toISOString() }).eq("id", run.id);
+    const message = validationMessage(error);
+    await db.from("job_desk_ai_runs").update({
+      status: "failed", error_message: message,
+      token_input: totalInputTokens, token_output: totalOutputTokens,
+      total_tokens: totalInputTokens + totalOutputTokens,
+      estimated_cost: estimateCost(model, totalInputTokens, totalOutputTokens),
+      completed_at: new Date().toISOString()
+    }).eq("id", run.id);
     await db.from("job_desk_orders").update({ status: "failed" }).eq("id", orderId);
     await logSystemEvent({ category: "job_desk.cv_processing", level: "error", message, metadata: { orderId, runId: run.id } });
     throw new Error(message);

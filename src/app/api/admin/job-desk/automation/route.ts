@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 import { requireAdmin, logAdminAction } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createAuthorizationToken, enqueueTask } from "@/lib/job-desk/automation";
+import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("add_source"), provider: z.enum(["greenhouse", "lever"]), siteToken: z.string().regex(/^[a-zA-Z0-9_-]{2,80}$/), companyName: z.string().min(2).max(120) }),
@@ -39,8 +40,8 @@ export async function POST(request: Request) {
       if (error) throw new Error(error.message);
       result = { vacancyId: data.id };
     } else if (input.action === "match") {
-      const { data: order } = await db.from("job_desk_orders").select("id,payment_status").eq("id", input.orderId).single();
-      if (!order || !["paid", "waived"].includes(order.payment_status)) return NextResponse.json({ error: "Paid order required." }, { status: 409 });
+      const { data: order } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").eq("id", input.orderId).single();
+      if (!hasVerifiedJobDeskPayment(order)) return NextResponse.json({ error: "Verify the payment record before matching jobs." }, { status: 409 });
       await enqueueTask("match", `match:${input.orderId}:${Date.now()}`, input.orderId);
     } else if (input.action === "prepare") {
       const { data: match } = await db.from("job_desk_matches").select("id,order_id,status").eq("id", input.matchId).single();
@@ -52,10 +53,10 @@ export async function POST(request: Request) {
       if (!match || match.status !== "needs_human" || !match.authorized_at || !["portal", "email"].includes(vacancy?.application_method ?? "")) return NextResponse.json({ error: "A client-authorized application awaiting human submission is required." }, { status: 409 });
       if (vacancy?.application_method === "email" && (!vacancy.email_verified || !vacancy.application_email)) return NextResponse.json({ error: "Verify the employer email address before recording a sent application." }, { status: 409 });
       const [{ data: order }, { data: cv }] = await Promise.all([
-        db.from("job_desk_orders").select("payment_status").eq("id", match.order_id).single(),
+        db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", match.order_id).single(),
         db.from("job_desk_documents").select("id").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle()
       ]);
-      if (!order || !["paid", "waived"].includes(order.payment_status) || !cv) return NextResponse.json({ error: "Paid order and approved CV required." }, { status: 409 });
+      if (!hasVerifiedJobDeskPayment(order) || !cv) return NextResponse.json({ error: "Verified payment and approved CV required." }, { status: 409 });
       const now = new Date().toISOString();
       const { error } = await db.from("job_desk_applications").upsert({ match_id: match.id, order_id: match.order_id, method: vacancy!.application_method, status: "submitted", recipient: vacancy!.application_email ?? null, provider_response: { confirmation: input.confirmation, recorded_by: user.id, verification_type: vacancy!.application_method === "email" ? "gmail_message_id" : "employer_reference" }, submitted_at: now, error_message: null }, { onConflict: "match_id" });
       if (error) throw new Error(error.message);

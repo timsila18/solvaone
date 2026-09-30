@@ -5,6 +5,7 @@ import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs"
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { discoverVacancies, enqueueTask, matchOrder, plainText } from "./automation";
 import { submissionHoldReason } from "./matching";
+import { hasVerifiedJobDeskPayment } from "./payment";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
@@ -15,7 +16,7 @@ async function prepareMatch(matchId: string) {
   const { data: order, error: orderError } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", match.order_id).single();
   if (orderError) throw new Error(orderError.message);
   const { data: cv } = await db.from("job_desk_documents").select("html").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
-  if (!order || !cv || !["paid", "waived"].includes(order.payment_status)) throw new Error("Paid order and approved CV required.");
+  if (!order || !cv || !hasVerifiedJobDeskPayment(order)) throw new Error("Verified payment and approved CV required.");
   const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (profileError || !profile) throw new Error(profileError?.message ?? "Candidate profile is missing.");
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
@@ -55,7 +56,7 @@ async function submitMatch(matchId: string) {
   const { data: order } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", match.order_id).single();
   const { data: cv } = await db.from("job_desk_documents").select("html,title").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
   const client = Array.isArray(order?.client) ? order.client[0] : order?.client;
-  if (!order || !cv || !["paid", "waived"].includes(order.payment_status) || !client?.consent_to_process) throw new Error("Order, consent, payment or approved CV missing.");
+  if (!order || !cv || !hasVerifiedJobDeskPayment(order) || !client?.consent_to_process) throw new Error("Order, consent, verified payment or approved CV missing.");
   const cvPlain = plainText(String(cv.html));
   const pauseReason = submissionHoldReason(String(vacancy?.description ?? ""), client.email ?? null, cvPlain.length);
   if (pauseReason) {

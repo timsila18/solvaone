@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { scoreVacancy } from "./matching";
+import { hasVerifiedJobDeskPayment } from "./payment";
 
 export type Vacancy = { id: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
 
@@ -43,8 +44,8 @@ export async function discoverVacancies(sourceId: string) {
     }
     await db.from("job_desk_vacancies").update({ status: "closed" }).eq("source_id", sourceId).lt("last_seen_at", now);
     await db.from("job_desk_sources").update({ last_synced_at: now, last_error: null }).eq("id", sourceId);
-    const { data: orders } = await db.from("job_desk_orders").select("id").in("payment_status", ["paid", "waived"]).in("status", ["approved", "active"]).limit(500);
-    for (const order of orders ?? []) await enqueueTask("match", `match:${order.id}:${sourceId}:${now.slice(0, 13)}`, order.id);
+    const { data: orders } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").in("payment_status", ["paid", "waived"]).in("status", ["approved", "active"]).limit(500);
+    for (const order of orders ?? []) if (hasVerifiedJobDeskPayment(order)) await enqueueTask("match", `match:${order.id}:${sourceId}:${now.slice(0, 13)}`, order.id);
     return rows.length;
   } catch (cause) {
     await db.from("job_desk_sources").update({ last_error: cause instanceof Error ? cause.message.slice(0, 500) : "Source failed" }).eq("id", sourceId);
@@ -54,9 +55,9 @@ export async function discoverVacancies(sourceId: string) {
 
 export async function matchOrder(orderId: string) {
   const db = createSupabaseAdminClient();
-  const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,client_id,payment_status,status").eq("id", orderId).single();
+  const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,client_id,payment_status,amount,payment_reference,status").eq("id", orderId).single();
   if (orderError) throw new Error(orderError.message);
-  if (!order || !["paid", "waived"].includes(order.payment_status)) throw new Error("Paid Job Desk order required.");
+  if (!hasVerifiedJobDeskPayment(order)) throw new Error("A verified payment or approved waiver is required before job matching.");
   const { data: approved } = await db.from("job_desk_documents").select("id").eq("order_id", orderId).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
   if (!approved) throw new Error("Approve the candidate CV before matching vacancies.");
   const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();

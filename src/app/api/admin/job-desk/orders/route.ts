@@ -36,6 +36,11 @@ const intakeSchema = z.object({
   amount: z.coerce.number().min(0).max(1000000),
   paymentReference: z.string().max(160),
   consentToProcess: z.literal("true")
+}).superRefine((input, context) => {
+  if (["paid", "partially_paid"].includes(input.paymentStatus)) {
+    if (input.amount <= 0) context.addIssue({ code: "custom", path: ["amount"], message: "Enter the verified amount paid." });
+    if (input.paymentReference.trim().length < 3) context.addIssue({ code: "custom", path: ["paymentReference"], message: "Enter the verified payment reference." });
+  }
 });
 
 function list(value: string) {
@@ -169,4 +174,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to create the Job Desk order." }, { status: 500 });
   }
 }
-

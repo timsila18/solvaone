@@ -6,6 +6,7 @@ import { ManualSubmissionForm } from "@/components/job-desk/manual-submission-fo
 import { EmailHandoff } from "@/components/job-desk/email-handoff";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { formatKes } from "@/lib/utils";
+import { FileDown } from "lucide-react";
 
 type Question = { id: string; category: string; question: string; reason: string; required?: boolean };
 
@@ -31,6 +32,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   const { data: candidate, error: candidateError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (candidateError) throw new Error(`Could not load candidate profile: ${candidateError.message}`);
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
+  const paymentNeedsReview = order.payment_status === "paid" && (Number(order.amount) <= 0 || !order.payment_reference);
   const file = files?.find((item) => item.document_kind === "cv");
   const questions = (questionnaire?.questions ?? []) as Question[];
 
@@ -38,8 +40,9 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
     <AppShell email={user.email} isAdmin>
       <div className="flex flex-col justify-between gap-5 border-b border-black/10 pb-6 dark:border-white/10 lg:flex-row lg:items-end">
         <div><a href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Desk / Orders</a><h1 className="mt-2 text-3xl font-black">{client?.full_name ?? "Client order"}</h1><p className="mt-2 text-sm text-black/55 dark:text-white/55">{order.service_type.replaceAll("_", " ")} · {client?.whatsapp_phone} · {order.status.replaceAll("_", " ")}</p></div>
-        <JobDeskOrderActions key={order.status} orderId={orderId} canProcess={file?.extraction_status === "succeeded" && order.status !== "cv_processing"} canApprove={document?.status === "review"} currentStatus={order.status} paymentStatus={order.payment_status} />
+        <JobDeskOrderActions key={order.status} orderId={orderId} canProcess={file?.extraction_status === "succeeded" && order.status !== "cv_processing"} canApprove={document?.status === "review"} currentStatus={order.status} paymentStatus={order.payment_status} paymentNeedsReview={paymentNeedsReview} />
       </div>
+      {paymentNeedsReview ? <p role="alert" className="mt-5 border-l-4 border-brand-blue bg-brand-blue/5 p-4 text-sm font-semibold">This order is marked paid without a positive amount and receipt reference. Verify the payment record before treating it as confirmed.</p> : null}
 
       <div className="grid gap-6 py-7 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="space-y-6">
@@ -55,7 +58,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
             <div className="divide-y divide-black/10 dark:divide-white/10">{questions.length ? questions.map((item, index) => <div key={item.id} className="grid gap-2 py-4 md:grid-cols-[36px_1fr]"><div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-blue text-xs font-black text-white">{index + 1}</div><div><div className="text-xs font-black uppercase text-brand-blue">{item.category}</div><p className="mt-1 font-bold">{item.question}</p><p className="mt-1 text-sm text-black/50 dark:text-white/50">{item.reason}</p></div></div>) : <p className="py-8 text-sm text-black/50 dark:text-white/50">Process the CV to create one consolidated questionnaire.</p>}</div>
           </section>
 
-          <section><div className="flex items-end justify-between border-b border-black/10 pb-3 dark:border-white/10"><div><h2 className="text-xl font-black">Approval-ready CV</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">Review every fact before approving or using it for applications.</p></div>{document ? <span className="text-sm font-bold text-brand-blue">Version {document.version} · {document.status}</span> : null}</div>
+          <section><div className="flex flex-wrap items-end justify-between gap-3 border-b border-black/10 pb-3 dark:border-white/10"><div><h2 className="text-xl font-black">Approval-ready CV</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">Review every fact before approving or using it for applications.</p></div>{document ? <div className="flex flex-wrap items-center gap-2"><span className="mr-2 text-sm font-bold text-brand-blue">Version {document.version} · {document.status}</span><a href={`/api/admin/job-desk/orders/${orderId}/download?format=pdf`} className="inline-flex h-9 items-center gap-2 rounded border border-black/20 px-3 text-sm font-bold dark:border-white/20"><FileDown className="h-4 w-4" />PDF</a><a href={`/api/admin/job-desk/orders/${orderId}/download?format=docx`} className="inline-flex h-9 items-center gap-2 rounded border border-black/20 px-3 text-sm font-bold dark:border-white/20"><FileDown className="h-4 w-4" />Word</a></div> : null}</div>
             {document?.html ? <article className="job-desk-cv mt-5 bg-white p-8 text-black shadow-soft" dangerouslySetInnerHTML={{ __html: document.html }} /> : <div className="mt-5 border border-dashed border-black/20 px-5 py-16 text-center dark:border-white/20"><p className="font-bold">No processed CV yet</p><p className="mt-2 text-sm text-black/50 dark:text-white/50">Use “Prepare CV and profile” after confirming the intake text is readable.</p></div>}
           </section>
         </main>

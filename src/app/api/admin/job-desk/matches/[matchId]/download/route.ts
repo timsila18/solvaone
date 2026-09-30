@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/security";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { plainText } from "@/lib/job-desk/automation";
+import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 
 function filename(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "candidate";
@@ -27,10 +28,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (kind !== "cv" && kind !== "letter") return NextResponse.json({ error: "Invalid document type" }, { status: 400 });
   const { matchId } = await params;
   const db = createSupabaseAdminClient();
-  const { data: match } = await db.from("job_desk_matches").select("id,order_id,authorized_at,status,cover_letter,order:job_desk_orders(payment_status,client:job_desk_clients(full_name))").eq("id", matchId).single();
+  const { data: match } = await db.from("job_desk_matches").select("id,order_id,authorized_at,status,cover_letter,order:job_desk_orders(payment_status,amount,payment_reference,client:job_desk_clients(full_name))").eq("id", matchId).single();
   const order = Array.isArray(match?.order) ? match.order[0] : match?.order;
   const client = Array.isArray(order?.client) ? order.client[0] : order?.client;
-  if (!match || !match.authorized_at || !["authorized", "needs_human", "submitted"].includes(match.status) || !order || !["paid", "waived"].includes(order.payment_status)) return NextResponse.json({ error: "Authorized paid application required" }, { status: 403 });
+  if (!match || !match.authorized_at || !["authorized", "needs_human", "submitted"].includes(match.status) || !hasVerifiedJobDeskPayment(order)) return NextResponse.json({ error: "Authorized paid application required" }, { status: 403 });
   const name = client?.full_name ?? "Candidate";
   let paragraphs: Paragraph[];
   if (kind === "cv") {
