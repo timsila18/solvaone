@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve_cv") }),
+  z.object({ action: z.literal("record_payment"), amount: z.number().positive().max(1000000), method: z.enum(["mpesa", "cash", "bank", "manual", "other"]), reference: z.string().trim().min(3).max(160) }),
   z.object({ action: z.literal("set_status"), status: z.enum(["intake", "awaiting_information", "cv_review", "approved", "active", "paused", "completed", "cancelled", "failed"]) })
 ]);
 
@@ -36,6 +37,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
       .eq("id", document.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId);
+  } else if (parsed.data.action === "record_payment") {
+    const { data: order, error: findError } = await db.from("job_desk_orders").select("id,payment_status,payment_reference").eq("id", orderId).single();
+    if (findError || !order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
+    if (order.payment_status === "paid" && order.payment_reference !== parsed.data.reference) {
+      return NextResponse.json({ error: "This order is already paid. Review its payment before changing the receipt." }, { status: 409 });
+    }
+    const { error } = await db.from("job_desk_orders").update({
+      payment_status: "paid",
+      payment_method: parsed.data.method,
+      amount: parsed.data.amount,
+      payment_reference: parsed.data.reference,
+      paid_at: new Date().toISOString()
+    }).eq("id", orderId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else {
     const { error } = await db.from("job_desk_orders").update({ status: parsed.data.status }).eq("id", orderId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

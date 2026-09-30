@@ -76,6 +76,7 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
     .from("job_desk_intake_files")
     .select("id,file_name,content_type,extracted_text,extraction_status,extraction_warning")
     .eq("order_id", orderId)
+    .eq("document_kind", "cv")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -255,4 +256,3 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
     throw new Error(message);
   }
 }
-

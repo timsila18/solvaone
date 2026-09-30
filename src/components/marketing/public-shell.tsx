@@ -6,6 +6,7 @@ import { productPages, site } from "@/lib/marketing";
 
 const nav = [
   { href: "/", label: "Home" },
+  { href: "/job-desk", label: "Job Desk" },
   { href: "/pricing", label: "Pricing" },
   { href: "/resources", label: "Resources" },
   { href: "/faq", label: "FAQ" },
@@ -49,6 +50,7 @@ export function PublicFooter() {
         <div>
           <h2 className="text-sm font-black">Products</h2>
           <div className="mt-4 grid gap-2 text-sm text-white/65">
+            <Link href="/job-desk" className="hover:text-white">Job Desk</Link>
             {productPages.map((page) => (
               <Link key={page.key} href={`/products/${page.slug}`} className="hover:text-white">
                 {page.headline.split(".")[0]}

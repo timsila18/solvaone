@@ -14,9 +14,9 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   if (profile?.role !== "admin" && profile?.role !== "super_admin") redirect("/dashboard");
   const { orderId } = await params;
 
-  const [{ data: order }, { data: file }, { data: document }, { data: questionnaire }, { data: aiRun }] = await Promise.all([
+  const [{ data: order }, { data: files }, { data: document }, { data: questionnaire }, { data: aiRun }] = await Promise.all([
     db.from("job_desk_orders").select("*, client:job_desk_clients(*), profile:job_desk_candidate_profiles(*)").eq("id", orderId).single(),
-    db.from("job_desk_intake_files").select("file_name,extraction_status,extraction_warning,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    db.from("job_desk_intake_files").select("id,file_name,document_kind,extraction_status,extraction_warning,created_at").eq("order_id", orderId).order("created_at", { ascending: true }),
     db.from("job_desk_documents").select("id,title,html,status,version,structured_content,created_at").eq("order_id", orderId).eq("document_type", "revamped_cv").neq("status", "superseded").order("version", { ascending: false }).limit(1).maybeSingle(),
     db.from("job_desk_questionnaires").select("questions,status,responses").eq("order_id", orderId).maybeSingle(),
     db.from("job_desk_ai_runs").select("status,total_tokens,estimated_cost,error_message,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle()
@@ -24,20 +24,21 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   if (!order) notFound();
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   const candidate = Array.isArray(order.profile) ? order.profile[0] : order.profile;
+  const file = files?.find((item) => item.document_kind === "cv");
   const questions = (questionnaire?.questions ?? []) as Question[];
 
   return (
     <AppShell email={user.email} isAdmin>
       <div className="flex flex-col justify-between gap-5 border-b border-black/10 pb-6 dark:border-white/10 lg:flex-row lg:items-end">
         <div><a href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Desk / Orders</a><h1 className="mt-2 text-3xl font-black">{client?.full_name ?? "Client order"}</h1><p className="mt-2 text-sm text-black/55 dark:text-white/55">{order.service_type.replaceAll("_", " ")} · {client?.whatsapp_phone} · {order.status.replaceAll("_", " ")}</p></div>
-        <JobDeskOrderActions key={order.status} orderId={orderId} canProcess={file?.extraction_status === "succeeded" && order.status !== "cv_processing"} canApprove={document?.status === "review"} currentStatus={order.status} />
+        <JobDeskOrderActions key={order.status} orderId={orderId} canProcess={file?.extraction_status === "succeeded" && order.status !== "cv_processing"} canApprove={document?.status === "review"} currentStatus={order.status} paymentStatus={order.payment_status} />
       </div>
 
       <div className="grid gap-6 py-7 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="space-y-6">
           <Panel title="Order"><Detail label="Payment" value={`${order.payment_status} · ${formatKes(order.amount)}`} /><Detail label="Reference" value={order.payment_reference || "Not recorded"} /><Detail label="Channel" value={order.source_channel} /><Detail label="Created" value={new Date(order.created_at).toLocaleString()} /></Panel>
           <Panel title="Preferences"><Detail label="Target roles" value={(candidate?.target_job_titles ?? []).join(", ") || "Not provided"} /><Detail label="Industries" value={(candidate?.preferred_industries ?? []).join(", ") || "Not provided"} /><Detail label="Locations" value={(candidate?.preferred_locations ?? []).join(", ") || "Not provided"} /><Detail label="Work arrangement" value={candidate?.remote_preference || "Flexible"} /><Detail label="Profile completeness" value={`${candidate?.completeness_score ?? 0}%`} /></Panel>
-          <Panel title="Intake file"><Detail label="File" value={file?.file_name ?? "Missing"} /><Detail label="Extraction" value={file?.extraction_status ?? "Unknown"} />{file?.extraction_warning ? <p className="mt-3 text-xs leading-5 text-black/55 dark:text-white/55">{file.extraction_warning}</p> : null}</Panel>
+          <Panel title="Intake files">{files?.length ? files.map((item) => <div key={item.id} className="border-b border-black/10 pb-3 dark:border-white/10"><a className="break-all text-sm font-bold text-brand-blue" href={`/api/admin/job-desk/orders/${orderId}/files/${item.id}`}>{item.file_name}</a><Detail label="Type" value={item.document_kind} />{item.document_kind === "cv" ? <Detail label="Extraction" value={item.extraction_status} /> : null}{item.extraction_warning ? <p className="mt-2 text-xs leading-5 text-black/55 dark:text-white/55">{item.extraction_warning}</p> : null}</div>) : <p className="text-sm">No files uploaded.</p>}</Panel>
           <Panel title="Processing cost"><Detail label="Last run" value={aiRun?.status ?? "Not started"} /><Detail label="Tokens" value={Number(aiRun?.total_tokens ?? 0).toLocaleString()} /><Detail label="Estimated cost" value={`$${Number(aiRun?.estimated_cost ?? 0).toFixed(4)}`} />{aiRun?.error_message ? <p className="mt-3 text-xs font-semibold text-black dark:text-white">{aiRun.error_message}</p> : null}</Panel>
         </aside>
 

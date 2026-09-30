@@ -25,6 +25,12 @@ export default function HomePage() {
           {productPages.map((page) => <ProductCard key={page.key} productKey={page.key} />)}
         </div>
       </section>
+      <section className="border-b border-black/10 dark:border-white/10">
+        <div className="mx-auto flex max-w-7xl flex-col justify-between gap-5 px-4 py-8 md:flex-row md:items-center md:px-6">
+          <div><h2 className="text-2xl font-black">Looking for your next role?</h2><p className="mt-2 text-sm text-black/60 dark:text-white/60">Share your CV and job preferences with the SolvaOne Job Desk team.</p></div>
+          <ButtonLink href="/job-desk">Submit your CV <ArrowRight className="h-4 w-4" /></ButtonLink>
+        </div>
+      </section>
       <section className="mx-auto max-w-7xl px-4 py-14 md:px-6">
         <div className="max-w-2xl">
           <h2 className="text-4xl font-black">How it works</h2>

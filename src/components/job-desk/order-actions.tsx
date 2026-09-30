@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentStatus }: { orderId: string; canProcess: boolean; canApprove: boolean; currentStatus: string }) {
+export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentStatus, paymentStatus }: { orderId: string; canProcess: boolean; canApprove: boolean; currentStatus: string; paymentStatus: string }) {
   const router = useRouter();
-  const [busy, setBusy] = useState<"process" | "approve" | "status" | null>(null);
+  const [busy, setBusy] = useState<"process" | "approve" | "status" | "payment" | null>(null);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState(currentStatus);
+  const [showPayment, setShowPayment] = useState(false);
 
   async function run(action: "process" | "approve") {
     setBusy(action);
@@ -52,6 +53,25 @@ export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentSt
     }
   }
 
+  async function recordPayment(formData: FormData) {
+    setBusy("payment");
+    setMessage("");
+    try {
+      const response = await fetch(`/api/admin/job-desk/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "record_payment", amount: Number(formData.get("amount")), method: formData.get("method"), reference: formData.get("reference") })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Payment could not be recorded.");
+      setMessage("Payment marked paid with the reference provided.");
+      setShowPayment(false);
+      router.refresh();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Payment could not be recorded.");
+    } finally { setBusy(null); }
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Button onClick={() => run("process")} disabled={!canProcess || busy !== null}>
@@ -68,6 +88,13 @@ export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentSt
       <Button variant="ghost" onClick={updateStatus} disabled={busy !== null || status === currentStatus}>
         {busy === "status" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Update status
       </Button>
+      {paymentStatus !== "paid" ? <Button variant="secondary" onClick={() => setShowPayment(!showPayment)} disabled={busy !== null}>Record payment</Button> : null}
+      {showPayment ? <form action={recordPayment} className="flex basis-full flex-wrap gap-2 border-t border-black/10 pt-3 dark:border-white/10">
+        <input name="amount" type="number" min="1" step="0.01" required placeholder="Amount in KES" aria-label="Amount in KES" className="h-10 w-36 rounded border border-black/20 bg-white px-2 text-sm text-black" />
+        <select name="method" aria-label="Payment method" defaultValue="mpesa" className="h-10 rounded border border-black/20 bg-white px-2 text-sm text-black"><option value="mpesa">M-Pesa</option><option value="cash">Cash</option><option value="bank">Bank</option><option value="manual">Manual</option><option value="other">Other</option></select>
+        <input name="reference" required minLength={3} maxLength={160} placeholder="Verified receipt/reference" aria-label="Verified receipt or reference" className="h-10 min-w-52 flex-1 rounded border border-black/20 bg-white px-2 text-sm text-black" />
+        <Button type="submit" disabled={busy !== null}>Confirm verified payment</Button>
+      </form> : null}
       {message ? <p className="basis-full text-sm font-semibold text-black/65 dark:text-white/65">{message}</p> : null}
     </div>
   );
