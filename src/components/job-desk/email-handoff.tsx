@@ -1,0 +1,6 @@
+"use client";
+import { FileDown, Mail } from "lucide-react";
+export function EmailHandoff({ matchId, recipient, subject, body }: { matchId: string; recipient: string; subject: string; body: string }) {
+  const gmail = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipient)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-black/10 pt-3 text-xs dark:border-white/10"><span className="basis-full font-semibold">To: {recipient} · Required attachment: CV DOCX</span><a href={gmail} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 rounded bg-brand-blue px-3 font-bold text-white"><Mail className="h-4 w-4" />Open Gmail draft</a><a href={`/api/admin/job-desk/matches/${matchId}/download?kind=cv`} className="inline-flex h-9 items-center gap-2 rounded border border-black/20 px-3 font-bold dark:border-white/20"><FileDown className="h-4 w-4" />CV DOCX</a><a href={`/api/admin/job-desk/matches/${matchId}/download?kind=letter`} className="inline-flex h-9 items-center gap-2 rounded border border-black/20 px-3 font-bold dark:border-white/20"><FileDown className="h-4 w-4" />Letter DOCX</a></div>;
+}

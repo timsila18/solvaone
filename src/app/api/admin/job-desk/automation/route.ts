@@ -47,11 +47,17 @@ export async function POST(request: Request) {
       if (!match || match.status !== "suggested") return NextResponse.json({ error: "Suggested match not found." }, { status: 409 });
       await enqueueTask("prepare", `prepare:${match.id}`, match.order_id, { matchId: match.id });
     } else if (input.action === "record_submission") {
-      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,authorized_at,vacancy:job_desk_vacancies(application_method)").eq("id", input.matchId).single();
+      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,authorized_at,vacancy:job_desk_vacancies(application_method,application_email,email_verified)").eq("id", input.matchId).single();
       const vacancy = Array.isArray(match?.vacancy) ? match.vacancy[0] : match?.vacancy;
-      if (!match || match.status !== "needs_human" || !match.authorized_at || vacancy?.application_method !== "portal") return NextResponse.json({ error: "A client-authorized portal application awaiting human submission is required." }, { status: 409 });
+      if (!match || match.status !== "needs_human" || !match.authorized_at || !["portal", "email"].includes(vacancy?.application_method ?? "")) return NextResponse.json({ error: "A client-authorized application awaiting human submission is required." }, { status: 409 });
+      if (vacancy?.application_method === "email" && (!vacancy.email_verified || !vacancy.application_email)) return NextResponse.json({ error: "Verify the employer email address before recording a sent application." }, { status: 409 });
+      const [{ data: order }, { data: cv }] = await Promise.all([
+        db.from("job_desk_orders").select("payment_status").eq("id", match.order_id).single(),
+        db.from("job_desk_documents").select("id").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle()
+      ]);
+      if (!order || !["paid", "waived"].includes(order.payment_status) || !cv) return NextResponse.json({ error: "Paid order and approved CV required." }, { status: 409 });
       const now = new Date().toISOString();
-      const { error } = await db.from("job_desk_applications").upsert({ match_id: match.id, order_id: match.order_id, method: "portal", status: "submitted", provider_response: { confirmation: input.confirmation, recorded_by: user.id }, submitted_at: now, error_message: null }, { onConflict: "match_id" });
+      const { error } = await db.from("job_desk_applications").upsert({ match_id: match.id, order_id: match.order_id, method: vacancy!.application_method, status: "submitted", recipient: vacancy!.application_email ?? null, provider_response: { confirmation: input.confirmation, recorded_by: user.id, verification_type: vacancy!.application_method === "email" ? "gmail_message_id" : "employer_reference" }, submitted_at: now, error_message: null }, { onConflict: "match_id" });
       if (error) throw new Error(error.message);
       await db.from("job_desk_matches").update({ status: "submitted", submitted_at: now }).eq("id", match.id);
       result = { confirmation: input.confirmation };

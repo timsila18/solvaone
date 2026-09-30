@@ -8,4 +8,6 @@ Every application requires an approved CV, recorded payment, client processing c
 
 The admin can view sources under `/dashboard/admin/job-desk/vacancies`, matches and actions on each order, and a client application report under each order's `report` route. For a portal application completed by a person, the admin records the employer confirmation before the report marks it submitted. Consent links can be sent manually over WhatsApp. No WhatsApp Business API or browser automation is assumed.
 
+When no verified email provider is configured, authorized email applications pause in `needs_human`. The admin order shows an employer-addressed Gmail draft plus downloadable approved CV and tailored cover-letter DOCX files. The admin sends the email and attachments from an account they control, then records the Gmail Message-ID. Opening the draft or downloading documents never changes the submission status. Only the recorded confirmation does. This fallback is manual, not automatic email delivery.
+
 Operational checks: inspect `job_desk_tasks` for failed tasks, `job_desk_sources.last_error` for feed failures, `job_desk_applications` for `needs_human`, and Supabase cron run history for scheduler health. Use the admin controls to retry a failed feed or matching run after fixing the cause. Do not mark a portal application submitted without an external confirmation.
