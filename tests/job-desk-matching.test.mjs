@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scoreVacancy } from "../src/lib/job-desk/matching.ts";
+import { scoreVacancy, submissionHoldReason } from "../src/lib/job-desk/matching.ts";
 
 test("remote role with matching skills ranks ahead of unrelated onsite role", () => {
   const profile = { target_job_titles: ["Data Engineer"], preferred_locations: ["Nairobi"], remote_preference: "remote", structured_profile: { skills: ["Python", "SQL", "Kafka"] } };
@@ -15,4 +15,11 @@ test("missing target role is visible as a gap", () => {
   const result = scoreVacancy({ title: "Accountant", description: "Bookkeeping", location: "Nairobi", workplace_type: "onsite" }, {});
   assert.ok(result.gaps.some((gap) => gap.includes("target role")));
   assert.equal(result.score, 0);
+});
+
+test("assessment and identity requests pause automated submission", () => {
+  assert.match(submissionHoldReason("Complete the application form and aptitude test", "candidate@example.com", 1200), /assessment/);
+  assert.match(submissionHoldReason("Send CV and passport copy", "candidate@example.com", 1200), /identity/);
+  assert.equal(submissionHoldReason("Email CV to apply", "candidate@example.com", 1200), null);
+  assert.match(submissionHoldReason("Email CV to apply", null, 1200), /email/);
 });

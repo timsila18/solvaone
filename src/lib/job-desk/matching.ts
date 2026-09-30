@@ -24,3 +24,10 @@ export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, 
   if (!titles.length) gaps.push("Candidate has not supplied a target role");
   return { score: Math.max(0, Math.min(100, score)), reasons, gaps };
 }
+
+export function submissionHoldReason(advert: string, candidateEmail: string | null, cvTextLength: number) {
+  if (/\b(captcha|assessment|aptitude test|identity verification|passport copy|national id copy|application questionnaire|answer the following questions|complete the application form)\b/i.test(advert)) return "Advert requires an assessment, identity proof, form, or judgment-based answers.";
+  if (!candidateEmail) return "Candidate email is missing.";
+  if (cvTextLength < 500) return "Approved CV is too short for a verified application.";
+  return null;
+}

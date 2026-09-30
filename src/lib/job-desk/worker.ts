@@ -4,6 +4,7 @@ import { createOpenAIClient } from "@/lib/openai";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { discoverVacancies, enqueueTask, matchOrder, plainText } from "./automation";
+import { submissionHoldReason } from "./matching";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
@@ -53,6 +54,13 @@ async function submitMatch(matchId: string) {
   const { data: cv } = await db.from("job_desk_documents").select("html,title").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
   const client = Array.isArray(order?.client) ? order.client[0] : order?.client;
   if (!order || !cv || !["paid", "waived"].includes(order.payment_status) || !client?.consent_to_process) throw new Error("Order, consent, payment or approved CV missing.");
+  const cvPlain = plainText(String(cv.html));
+  const pauseReason = submissionHoldReason(String(vacancy?.description ?? ""), client.email ?? null, cvPlain.length);
+  if (pauseReason) {
+    await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: pauseReason }, { onConflict: "match_id" });
+    return;
+  }
   if (!vacancy || vacancy.status !== "open" || vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "Application portal or unverified email requires human submission." }, { onConflict: "match_id" });
