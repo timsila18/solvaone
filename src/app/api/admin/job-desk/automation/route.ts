@@ -11,13 +11,15 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const schema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("add_source"), provider: z.enum(["greenhouse", "lever"]), siteToken: z.string().regex(/^[a-zA-Z0-9_-]{2,80}$/), companyName: z.string().min(2).max(120) }),
+  z.object({ action: z.literal("add_source"), provider: z.enum(["greenhouse", "lever", "ashby", "smartrecruiters"]), siteToken: z.string().regex(/^[a-zA-Z0-9_-]{2,80}$/), companyName: z.string().min(2).max(120) }),
   z.object({ action: z.literal("discover"), sourceId: z.string().uuid() }),
   z.object({ action: z.literal("match"), orderId: z.string().uuid() }),
   z.object({ action: z.literal("prepare"), matchId: z.string().uuid() }),
   z.object({ action: z.literal("authorize_link"), matchId: z.string().uuid() }),
   z.object({ action: z.literal("record_submission"), matchId: z.string().uuid(), confirmation: z.string().trim().min(5).max(300), personallySubmitted: z.literal(true) }),
   z.object({ action: z.literal("run_queue") }),
+  z.object({ action: z.literal("refresh_all") }),
+  z.object({ action: z.literal("review_vacancy"), vacancyId: z.string().uuid(), decision: z.enum(["approve", "reject"]) }),
   z.object({ action: z.literal("add_vacancy"), companyName: z.string().min(2).max(150), title: z.string().min(3).max(250), location: z.string().max(200), description: z.string().min(100).max(18000), applyUrl: z.string().url().max(1000), applicationMethod: z.enum(["portal", "email"]), applicationEmail: z.string().email().optional(), emailVerified: z.boolean().default(false) })
 ]);
 
@@ -59,6 +61,18 @@ export async function POST(request: Request) {
       queued = true;
     } else if (input.action === "run_queue") {
       result = { processed: await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }) };
+    } else if (input.action === "refresh_all") {
+      const { data: sources, error } = await db.from("job_desk_sources").select("id").eq("active", true).limit(100);
+      if (error) throw new Error(error.message);
+      for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:${Date.now()}`, null, { sourceId: source.id });
+      result = { queued: sources?.length ?? 0 };
+      queued = true;
+    } else if (input.action === "review_vacancy") {
+      const { data: vacancy } = await db.from("job_desk_vacancies").select("id,status,duplicate_of,apply_url").eq("id", input.vacancyId).single();
+      if (!vacancy || vacancy.status !== "open") return NextResponse.json({ error: "Open vacancy not found." }, { status: 404 });
+      if (input.decision === "approve" && vacancy.duplicate_of) return NextResponse.json({ error: "Duplicate listings cannot be approved. Review the original listing." }, { status: 409 });
+      const { error } = await db.from("job_desk_vacancies").update({ review_status: input.decision === "approve" ? "approved" : "rejected" }).eq("id", vacancy.id);
+      if (error) throw new Error(error.message);
     } else if (input.action === "record_submission") {
       const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,authorized_at,vacancy:job_desk_vacancies(application_method,application_email,email_verified)").eq("id", input.matchId).single();
       const vacancy = Array.isArray(match?.vacancy) ? match.vacancy[0] : match?.vacancy;
@@ -75,8 +89,10 @@ export async function POST(request: Request) {
       await db.from("job_desk_matches").update({ status: "submitted", submitted_at: now }).eq("id", match.id);
       result = { confirmation: input.confirmation };
     } else {
-      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,cover_letter").eq("id", input.matchId).single();
+      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,cover_letter,vacancy:job_desk_vacancies(status,review_status,duplicate_of,last_seen_at)").eq("id", input.matchId).single();
       if (!match || match.status !== "ready" || !match.cover_letter) return NextResponse.json({ error: "Prepare the application before requesting consent." }, { status: 409 });
+      const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
+      if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) return NextResponse.json({ error: "Refresh and review the vacancy before requesting client consent." }, { status: 409 });
       const { data: latestCv } = await db.from("job_desk_documents").select("status").eq("order_id", match.order_id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
       if (latestCv?.status !== "approved") return NextResponse.json({ error: "Approve the latest CV before requesting consent." }, { status: 409 });
       const { token, hash } = createAuthorizationToken();
@@ -84,7 +100,7 @@ export async function POST(request: Request) {
       if (error) throw new Error(error.message);
       result = { authorizationUrl: `${process.env.NEXT_PUBLIC_SITE_URL ?? "https://solvaone.co.ke"}/job-desk/authorize/${token}` };
     }
-    await logAdminAction({ adminId: user.id, action: `job_desk.${input.action}`, targetType: "job_desk", targetId: "orderId" in input ? input.orderId : "matchId" in input ? input.matchId : "sourceId" in input ? input.sourceId : user.id, details: { action: input.action } });
+    await logAdminAction({ adminId: user.id, action: `job_desk.${input.action}`, targetType: "job_desk", targetId: "orderId" in input ? input.orderId : "matchId" in input ? input.matchId : "sourceId" in input ? input.sourceId : "vacancyId" in input ? input.vacancyId : user.id, details: { action: input.action, ...("decision" in input ? { decision: input.decision } : {}) } });
     if (queued) after(async () => {
       try { await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }); }
       catch (cause) { await logSystemEvent({ category: "job_desk.worker", level: "error", message: cause instanceof Error ? cause.message : "Queue processing failed" }); }

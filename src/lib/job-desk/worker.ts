@@ -23,7 +23,7 @@ async function prepareMatch(matchId: string) {
   if (profileError || !profile) throw new Error(profileError?.message ?? "Candidate profile is missing.");
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
-  if (!vacancy || vacancy.status !== "open") throw new Error("Vacancy is closed.");
+  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) throw new Error("Vacancy is closed, unreviewed, duplicated or stale.");
   const prompt = JSON.stringify({ candidate: profile?.structured_profile, cv: plainText(cv.html).slice(0, 14000), clientName: client.full_name, role: vacancy.title, company: vacancy.company_name, description: vacancy.description.slice(0, 10000) });
   const fingerprint = createHash("sha256").update(prompt).digest("hex");
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
@@ -73,7 +73,7 @@ async function submitMatch(matchId: string) {
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: pauseReason }, { onConflict: "match_id" });
     return;
   }
-  if (!vacancy || vacancy.status !== "open" || vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email) {
+  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "Application portal or unverified email requires human submission." }, { onConflict: "match_id" });
     return;

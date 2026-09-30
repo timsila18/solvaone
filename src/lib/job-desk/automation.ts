@@ -2,11 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { scoreVacancy } from "./matching";
 import { hasVerifiedJobDeskPayment } from "./payment";
+import { cleanText, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
 
 export type Vacancy = { id: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
 
 export function plainText(html: string) {
-  return html.replace(/<[^>]*>/g, " ").replace(/&(?:nbsp|amp|lt|gt|quot|#39);/g, " ").replace(/\s+/g, " ").trim().slice(0, 18000);
+  return cleanText(html);
 }
 
 export async function enqueueTask(taskType: string, key: string, orderId: string | null, payload: Record<string, unknown> = {}) {
@@ -20,24 +21,34 @@ export async function discoverVacancies(sourceId: string) {
   const db = createSupabaseAdminClient();
   const { data: source, error } = await db.from("job_desk_sources").select("*").eq("id", sourceId).eq("active", true).single();
   if (error || !source) throw new Error("Active vacancy source not found.");
-  const token = source.site_token;
-  if (!/^[a-zA-Z0-9_-]{2,80}$/.test(token)) throw new Error("Invalid source token.");
-  const url = source.provider === "greenhouse" ? `https://boards-api.greenhouse.io/v1/boards/${token}/jobs?content=true` : `https://api.lever.co/v0/postings/${token}?mode=json`;
+  if (!/^[a-zA-Z0-9_-]{2,80}$/.test(source.site_token)) throw new Error("Invalid source token.");
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(20000), cache: "no-store" });
-    if (!response.ok) throw new Error(`Vacancy feed returned HTTP ${response.status}`);
-    const json = await response.json();
-    const items: any[] = source.provider === "greenhouse" ? json.jobs : json;
-    if (!Array.isArray(items) || items.length > 1500) throw new Error("Vacancy feed format was not recognized.");
+    const items = await fetchFeedJobs(source as FeedSource);
     const now = new Date().toISOString();
-    const rows = items.map((item) => {
-      const applyUrl = source.provider === "greenhouse" ? item.absolute_url : item.hostedUrl;
-      const host = new URL(applyUrl).hostname;
-      if (!(source.provider === "greenhouse" ? ["boards.greenhouse.io", "job-boards.greenhouse.io"].includes(host) : host === "jobs.lever.co")) return null;
-      const location = String(source.provider === "greenhouse" ? item.location?.name ?? "" : item.categories?.location ?? "").slice(0, 300);
-      const description = plainText(String(source.provider === "greenhouse" ? item.content ?? "" : item.descriptionPlain ?? item.description ?? ""));
-      return { source_id: sourceId, provider: source.provider, external_id: String(item.id), company_name: source.company_name, title: String(item.title ?? item.text ?? "").slice(0, 300), location, workplace_type: /remote/i.test(location + " " + String(item.workplaceType ?? "")) ? "remote" : /hybrid/i.test(location) ? "hybrid" : "unspecified", description, apply_url: applyUrl, application_method: "portal", last_seen_at: now, status: "open" };
-    }).filter((row): row is NonNullable<typeof row> => !!row && !!row.title);
+    const seenInFeed = new Set<string>();
+    const parsed = items.map((item) => normalizeFeedJob(source as FeedSource, item)).filter((job): job is NonNullable<typeof job> => {
+      if (!job) return false;
+      const key = vacancyFingerprint(job);
+      if (seenInFeed.has(key)) return false;
+      seenInFeed.add(key);
+      return true;
+    });
+    if (items.length > 0 && parsed.length === 0) throw new Error("No official application links were found; existing vacancies were retained.");
+    const { data: existing, error: existingError } = await db.from("job_desk_vacancies").select("id,source_id,company_name,title,location").eq("status", "open").or(`source_id.is.null,source_id.neq.${sourceId}`).limit(5000);
+    if (existingError) throw new Error(existingError.message);
+    const { data: previous, error: previousError } = await db.from("job_desk_vacancies").select("external_id,review_status,description,source_updated_at").eq("source_id", sourceId).limit(1500);
+    if (previousError) throw new Error(previousError.message);
+    const previousById = new Map((previous ?? []).map((item) => [item.external_id, item]));
+    const existingByFingerprint = new Map((existing ?? []).map((item) => [vacancyFingerprint(item), item.id]));
+    const rows = parsed.map((job) => {
+      const duplicateOf = existingByFingerprint.get(vacancyFingerprint(job)) ?? null;
+      const reasons = reviewReasons(job, new Date(now));
+      if (duplicateOf) reasons.push("duplicate_listing");
+      const old = previousById.get(job.external_id);
+      const unchanged = old && old.description === job.description && old.source_updated_at === job.source_updated_at;
+      const reviewStatus = old?.review_status === "rejected" ? "rejected" : unchanged && old.review_status === "approved" && !duplicateOf ? "approved" : reasons.length ? "needs_review" : "approved";
+      return { ...job, source_id: sourceId, provider: source.provider, application_method: "portal", last_seen_at: now, status: "open", review_status: reviewStatus, review_reasons: reasons, duplicate_of: duplicateOf };
+    });
     for (let index = 0; index < rows.length; index += 100) {
       const { error: upsertError } = await db.from("job_desk_vacancies").upsert(rows.slice(index, index + 100), { onConflict: "provider,external_id" });
       if (upsertError) throw new Error(upsertError.message);
@@ -63,9 +74,15 @@ export async function matchOrder(orderId: string) {
   const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (profileError) throw new Error(profileError.message);
   if (!profile) throw new Error("Candidate profile is missing.");
-  const { data: vacancies, error } = await db.from("job_desk_vacancies").select("*").eq("status", "open").order("last_seen_at", { ascending: false }).limit(1000);
-  if (error) throw new Error(error.message);
-  const matches = (vacancies ?? []).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile) })).filter((item) => item.score >= 40).sort((a, b) => b.score - a.score).slice(0, 50);
+  const freshnessCutoff = new Date(Date.now() - 72 * 3600000).toISOString();
+  const vacancies: Vacancy[] = [];
+  for (let offset = 0; offset < 3000; offset += 1000) {
+    const { data, error } = await db.from("job_desk_vacancies").select("*").eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).gte("last_seen_at", freshnessCutoff).order("last_seen_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 999);
+    if (error) throw new Error(error.message);
+    vacancies.push(...(data ?? []));
+    if ((data ?? []).length < 1000) break;
+  }
+  const matches = vacancies.map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile) })).filter((item) => item.score >= 40).sort((a, b) => b.score - a.score).slice(0, 50);
   for (const match of matches) {
     const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id" });
     if (matchError) throw new Error(matchError.message);
