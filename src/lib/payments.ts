@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getPricingProduct, type ProductId } from "./pricing";
 import { notifyPaymentFailed, notifyPaymentSuccessful, notifyReceiptGenerated } from "./notifications";
 import { logSystemEvent } from "./security";
+import { validateJobDeskCallback } from "./job-desk/payment-validation";
 
 export type PaymentStatus = "pending" | "processing" | "successful" | "failed" | "cancelled" | "timed_out" | "paid";
 
@@ -51,6 +52,22 @@ export function normalizeSafaricomPhone(input: string) {
   if (/^0(7|1)\d{8}$/.test(digits)) return `254${digits.slice(1)}`;
   if (/^(7|1)\d{8}$/.test(digits)) return `254${digits}`;
   throw new Error("Use a valid Safaricom number, for example 2547XXXXXXXX.");
+}
+
+export async function requestJobDeskStkPush(input: { phone: string; amount: number; orderId: string; description: string }) {
+  const phone = normalizeSafaricomPhone(input.phone);
+  const { shortcode, passkey, callbackUrl } = getDarajaConfig();
+  const token = await getAccessToken();
+  const ts = timestamp();
+  const response = await fetch(`${getDarajaBaseUrl()}/mpesa/stkpush/v1/processrequest`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ BusinessShortCode: shortcode, Password: Buffer.from(`${shortcode}${passkey}${ts}`).toString("base64"), Timestamp: ts, TransactionType: "CustomerPayBillOnline", Amount: input.amount, PartyA: phone, PartyB: shortcode, PhoneNumber: phone, CallBackURL: callbackUrl, AccountReference: `JD-${input.orderId.slice(0, 8)}`, TransactionDesc: input.description.slice(0, 50) }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ResponseCode !== "0" || !data.CheckoutRequestID) throw new Error(`M-Pesa rejected the request: ${data.errorMessage ?? data.ResponseDescription ?? "Prompt could not be sent."}`);
+  return { checkoutRequestId: String(data.CheckoutRequestID), merchantRequestId: String(data.MerchantRequestID ?? "") };
 }
 
 async function getAccessToken() {
@@ -175,6 +192,25 @@ function parseDarajaDate(value?: string | number) {
   return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T${raw.slice(8, 10)}:${raw.slice(10, 12)}:${raw.slice(12, 14)}+03:00`;
 }
 
+async function handleJobDeskCallback(callback: Record<string, any>, checkoutRequestId: string) {
+  const db = createSupabaseAdminClient();
+  const { data: attempt, error } = await db.from("job_desk_payment_attempts").select("id,order_id,status,amount,phone_number").eq("checkout_request_id", checkoutRequestId).maybeSingle();
+  if (error || !attempt) return null;
+  if (attempt.status === "successful") return { ok: true, matched: true, duplicate: true, service: "job_desk" };
+  const outcome = validateJobDeskCallback(callback, { amount: Number(attempt.amount), phone_number: attempt.phone_number });
+  const { data: changed, error: updateError } = await db.from("job_desk_payment_attempts").update({ status: outcome.status, mpesa_receipt_number: outcome.receipt, result_code: outcome.code, result_description: outcome.description }).eq("id", attempt.id).eq("status", attempt.status).select("id").maybeSingle();
+  if (updateError) throw new Error(`Could not record Job Desk payment: ${updateError.message}`);
+  if (!changed) return { ok: true, matched: true, duplicate: true, service: "job_desk" };
+  await db.from("job_desk_payment_events").insert({ attempt_id: attempt.id, event_type: `callback_${outcome.status}`, details: { result_code: outcome.code, receipt: outcome.receipt } });
+  if (outcome.status === "successful") {
+    const { data: order } = await db.from("job_desk_orders").select("id,amount,payment_status,status").eq("id", attempt.order_id).single();
+    if (!order || Number(order.amount) !== Number(attempt.amount)) throw new Error("Paid Job Desk order amount mismatch; manual reconciliation required.");
+    const { error: orderError } = await db.from("job_desk_orders").update({ payment_status: "paid", payment_method: "mpesa", payment_reference: outcome.receipt, paid_at: new Date().toISOString(), status: order.status === "awaiting_payment" ? "intake" : order.status }).eq("id", attempt.order_id).neq("payment_status", "paid");
+    if (orderError) throw new Error(`Paid Job Desk order needs reconciliation: ${orderError.message}`);
+  }
+  return { ok: true, matched: true, status: outcome.status, service: "job_desk" };
+}
+
 export async function handleDarajaCallback(payload: any) {
   const supabase = createSupabaseAdminClient();
   const callback = payload?.Body?.stkCallback;
@@ -192,6 +228,8 @@ export async function handleDarajaCallback(payload: any) {
     .maybeSingle();
 
   if (!payment) {
+    const desk = await handleJobDeskCallback(callback, checkoutRequestId);
+    if (desk) return desk;
     await supabase.from("payment_events").insert({ event_type: "callback_unknown_checkout", raw_payload: payload });
     await logSystemEvent({ category: "payment", level: "warning", message: "M-Pesa callback for unknown checkout request", metadata: { checkoutRequestId } });
     return { ok: true, matched: false };

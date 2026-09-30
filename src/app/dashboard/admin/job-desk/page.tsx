@@ -14,7 +14,7 @@ export default async function JobDeskPage() {
   if (profile?.role !== "admin" && profile?.role !== "super_admin") redirect("/dashboard");
 
   const [{ data: orders }, { count: websiteCount }, { count: activeCount }, { count: reviewCount }, { count: awaitingCount }, { count: queuedCount }, { count: failedCount }, { count: humanCount }] = await Promise.all([
-    db.from("job_desk_orders").select("id,status,payment_status,amount,service_type,source_channel,created_at,client:job_desk_clients(full_name,whatsapp_phone)").order("created_at", { ascending: false }).limit(30),
+    db.from("job_desk_orders").select("id,status,payment_status,amount,service_type,source_channel,created_at,client:job_desk_clients(full_name,whatsapp_phone)").neq("status", "awaiting_payment").order("created_at", { ascending: false }).limit(30),
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).eq("source_channel", "website").eq("status", "intake"),
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).in("status", ["active", "approved", "cv_processing"]),
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).eq("status", "cv_review"),
@@ -47,7 +47,7 @@ export default async function JobDeskPage() {
       </div>
 
       <div className="grid gap-8 py-8 2xl:grid-cols-[minmax(0,1.1fr)_minmax(560px,0.9fr)]">
-        <section className="min-w-0"><h2 className="text-xl font-black">Order queue</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">Newest manual intakes appear first.</p>
+        <section className="min-w-0"><h2 className="text-xl font-black">Order queue</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">Paid website requests and manual intakes appear here. Unpaid checkouts stay out of the service queue.</p>
           <div className="mt-5 overflow-x-auto border-y border-black/10 dark:border-white/10">
             <table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-black/[0.03] text-xs uppercase text-black/45 dark:bg-white/[0.05] dark:text-white/45"><tr><th className="px-3 py-3">Client</th><th className="px-3 py-3">Service</th><th className="px-3 py-3">Payment</th><th className="px-3 py-3">Workflow</th><th className="px-3 py-3">Created</th></tr></thead>
               <tbody>{orders?.length ? orders.map((order) => {

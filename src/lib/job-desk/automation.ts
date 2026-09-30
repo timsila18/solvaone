@@ -56,7 +56,7 @@ export async function discoverVacancies(sourceId: string) {
     }
     await db.from("job_desk_vacancies").update({ status: "closed" }).eq("source_id", sourceId).lt("last_seen_at", now);
     await db.from("job_desk_sources").update({ last_synced_at: now, last_error: null }).eq("id", sourceId);
-    const { data: orders } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").in("payment_status", ["paid", "waived"]).in("status", ["approved", "active"]).limit(500);
+    const { data: orders } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").eq("service_type", "job_search_full").in("payment_status", ["paid", "waived"]).in("status", ["approved", "active"]).limit(500);
     for (const order of orders ?? []) if (hasVerifiedJobDeskPayment(order)) await enqueueTask("match", `match:${order.id}:${sourceId}:${now.slice(0, 13)}`, order.id);
     return rows.length;
   } catch (cause) {
@@ -77,8 +77,9 @@ export async function verifyVacancyStillOpen(vacancy: { id: string; source_id: s
 
 export async function matchOrder(orderId: string) {
   const db = createSupabaseAdminClient();
-  const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,client_id,payment_status,amount,payment_reference,status").eq("id", orderId).single();
+  const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,client_id,payment_status,amount,payment_reference,status,service_type").eq("id", orderId).single();
   if (orderError) throw new Error(orderError.message);
+  if (order?.service_type !== "job_search_full") throw new Error("Job matching is only available for job hunting orders.");
   if (!hasVerifiedJobDeskPayment(order)) throw new Error("A verified payment or approved waiver is required before job matching.");
   const { data: approved } = await db.from("job_desk_documents").select("id,status").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
   if (approved?.status !== "approved") throw new Error("Approve the latest candidate CV before matching vacancies.");

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentStatus, paymentStatus, paymentNeedsReview = false }: { orderId: string; canProcess: boolean; canApprove: boolean; currentStatus: string; paymentStatus: string; paymentNeedsReview?: boolean }) {
+export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentStatus, paymentStatus, paymentNeedsReview = false, showCvActions = true }: { orderId: string; canProcess: boolean; canApprove: boolean; currentStatus: string; paymentStatus: string; paymentNeedsReview?: boolean; showCvActions?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"process" | "approve" | "status" | "payment" | null>(null);
   const [message, setMessage] = useState("");
@@ -74,14 +74,14 @@ export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentSt
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <Button onClick={() => run("process")} disabled={!canProcess || busy !== null}>
+      {showCvActions ? <Button onClick={() => run("process")} disabled={!canProcess || busy !== null}>
         {busy === "process" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Prepare CV and profile
-      </Button>
-      <Button variant="secondary" onClick={() => run("approve")} disabled={!canApprove || busy !== null}>
+      </Button> : null}
+      {showCvActions ? <Button variant="secondary" onClick={() => run("approve")} disabled={!canApprove || busy !== null}>
         {busy === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
         Approve CV
-      </Button>
+      </Button> : null}
       <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm font-semibold dark:border-white/15 dark:bg-white/10">
         <option value="intake">Intake</option><option value="awaiting_information">Awaiting information</option><option value="cv_review">CV review</option><option value="approved">Approved</option><option value="active">Active</option><option value="paused">Paused</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="failed">Failed</option>
       </select>

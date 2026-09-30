@@ -1,9 +1,12 @@
-import { randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractTextFromCvFile } from "@/lib/cv-extraction";
 import { checkRateLimit, clientIpFromHeaders, logSystemEvent, rateLimitResponse } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { startJobDeskPayment } from "@/lib/job-desk/checkout";
+import { getJobDeskService } from "@/lib/job-desk/services";
+import { normalizeSafaricomPhone } from "@/lib/payments";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -18,10 +21,15 @@ const mimeByExtension: Record<string, string> = {
 };
 
 const schema = z.object({
+  serviceType: z.enum(["job_search_full", "interview_coaching", "linkedin_revamp"]),
   fullName: z.string().trim().min(2).max(160),
   whatsappPhone: z.string().trim().regex(/^\+?[0-9][0-9\s-]{7,20}$/),
   email: z.union([z.literal(""), z.string().trim().email().max(254)]),
-  targetJobTitles: z.string().trim().min(2).max(1000),
+  targetJobTitles: z.string().trim().max(1000),
+  positionName: z.string().trim().max(160),
+  organizationName: z.string().trim().max(160),
+  linkedInUrl: z.string().trim().max(500),
+  linkedInEmail: z.union([z.literal(""), z.string().trim().email().max(254)]),
   preferredIndustries: z.string().trim().max(1000),
   preferredLocations: z.string().trim().max(1000),
   employmentTypes: z.string().trim().max(500),
@@ -32,6 +40,11 @@ const schema = z.object({
   pastedCvText: z.string().trim().max(50000),
   consentToProcess: z.literal("true"),
   website: z.string().max(200).default("")
+}).superRefine((value, context) => {
+  if (value.serviceType === "job_search_full" && value.targetJobTitles.length < 2) context.addIssue({ code: "custom", path: ["targetJobTitles"], message: "Target role is required." });
+  if (value.serviceType === "interview_coaching" && (!value.positionName || !value.organizationName)) context.addIssue({ code: "custom", path: ["positionName"], message: "Position and organization are required." });
+  if (value.serviceType === "linkedin_revamp" && (!/^https:\/\/(?:www\.)?linkedin\.com\/in\/[a-z0-9%_-]+\/?(?:\?.*)?$/i.test(value.linkedInUrl) || !value.linkedInEmail)) context.addIssue({ code: "custom", path: ["linkedInUrl"], message: "A LinkedIn profile link and contact email are required." });
+  if (/\bpassword\s*[:=]/i.test(value.instructions)) context.addIssue({ code: "custom", path: ["instructions"], message: "Do not send account passwords." });
 });
 
 function list(value: string) {
@@ -68,27 +81,34 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(Object.fromEntries([...formData.entries()].filter(([key]) => key !== "cvFile" && key !== "supportingFiles")));
   if (!parsed.success) return NextResponse.json({ error: "Check the required details and consent." }, { status: 400 });
   if (parsed.data.website) return NextResponse.json({ ok: true }, { status: 202 });
+  if ([...formData.keys()].some((key) => /password/i.test(key))) return NextResponse.json({ error: "Do not submit account passwords." }, { status: 400 });
+  let paymentPhone: string;
+  try { paymentPhone = normalizeSafaricomPhone(parsed.data.whatsappPhone); }
+  catch { return NextResponse.json({ error: "Enter a valid Safaricom number for the M-Pesa prompt." }, { status: 400 }); }
 
   const cv = formData.get("cvFile");
   const supportingFiles = formData.getAll("supportingFiles").filter((item): item is File => item instanceof File && item.size > 0);
-  if (!(cv instanceof File) || !cv.size) return NextResponse.json({ error: "Upload your CV to continue." }, { status: 400 });
-  const files = [cv, ...supportingFiles];
-  if (supportingFiles.length > 2 || files.some((file) => file.size > MAX_FILE_SIZE) || files.reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL_SIZE) {
+  const hasCv = cv instanceof File && cv.size > 0;
+  if (parsed.data.serviceType !== "interview_coaching" && !hasCv) return NextResponse.json({ error: "Upload your CV to continue." }, { status: 400 });
+  const files = [...(hasCv ? [{ file: cv, kind: "cv" as const }] : []), ...supportingFiles.map((file) => ({ file, kind: "supporting" as const }))];
+  if (supportingFiles.length > 2 || files.some(({ file }) => file.size > MAX_FILE_SIZE) || files.reduce((sum, { file }) => sum + file.size, 0) > MAX_TOTAL_SIZE) {
     return NextResponse.json({ error: "Upload one CV and up to two supporting files, each under 10MB and 20MB in total." }, { status: 400 });
   }
-  const prepared = await Promise.all(files.map(async (file) => ({ file, info: fileInfo(file), bytes: new Uint8Array(await file.arrayBuffer()) })));
+  const prepared = await Promise.all(files.map(async ({ file, kind }) => ({ file, kind, info: fileInfo(file), bytes: new Uint8Array(await file.arrayBuffer()) })));
   if (prepared.some(({ info, bytes }) => !info || !hasExpectedSignature(bytes, info.extension))) {
     return NextResponse.json({ error: "Use valid PDF, DOCX, DOC, or TXT files." }, { status: 400 });
   }
 
   const db = createSupabaseAdminClient();
   const orderId = randomUUID();
+  const accessToken = randomBytes(32).toString("base64url");
+  const service = getJobDeskService(parsed.data.serviceType)!;
   let clientId: string | null = null;
   const uploadedPaths: string[] = [];
   try {
     const { data: client, error: clientError } = await db.from("job_desk_clients").insert({
       full_name: parsed.data.fullName,
-      whatsapp_phone: parsed.data.whatsappPhone.replace(/[\s-]/g, ""),
+      whatsapp_phone: paymentPhone,
       email: parsed.data.email || null,
       source: "website",
       consent_to_process: true,
@@ -99,7 +119,7 @@ export async function POST(request: Request) {
 
     const { error: profileError } = await db.from("job_desk_candidate_profiles").insert({
       client_id: clientId,
-      target_job_titles: list(parsed.data.targetJobTitles),
+      target_job_titles: list(parsed.data.targetJobTitles || parsed.data.positionName),
       preferred_industries: list(parsed.data.preferredIndustries),
       preferred_locations: list(parsed.data.preferredLocations),
       employment_types: list(parsed.data.employmentTypes),
@@ -113,23 +133,26 @@ export async function POST(request: Request) {
     const { error: orderError } = await db.from("job_desk_orders").insert({
       id: orderId,
       client_id: clientId,
-      service_type: "job_search_full",
+      service_type: parsed.data.serviceType,
+      service_details: { positionName: parsed.data.positionName, organizationName: parsed.data.organizationName, linkedInUrl: parsed.data.linkedInUrl, linkedInEmail: parsed.data.linkedInEmail },
+      public_access_token_hash: createHash("sha256").update(accessToken).digest("hex"),
+      status: "awaiting_payment",
       payment_status: "unpaid",
-      amount: 0,
+      amount: service.price,
       source_channel: "website",
       instructions: parsed.data.instructions || null,
       application_authorized: false
     });
     if (orderError) throw new Error(orderError.message);
 
-    for (const [index, { file, info, bytes }] of prepared.entries()) {
+    for (const { file, kind, info, bytes } of prepared) {
       if (!info) throw new Error("Invalid file.");
       const path = `${orderId}/${randomUUID()}-${info.safeName}`;
       const { error: uploadError } = await db.storage.from("job-desk-intake").upload(path, bytes, { contentType: info.contentType, upsert: false });
       if (uploadError) throw new Error(uploadError.message);
       uploadedPaths.push(path);
-      const extraction = index === 0 ? await extractTextFromCvFile(file.name, info.contentType, Buffer.from(bytes)) : null;
-      const pasted = index === 0 ? parsed.data.pastedCvText : "";
+      const extraction = kind === "cv" ? await extractTextFromCvFile(file.name, info.contentType, Buffer.from(bytes)) : null;
+      const pasted = kind === "cv" ? parsed.data.pastedCvText : "";
       const text = pasted.length >= 120 ? pasted : extraction?.text ?? "";
       const { error: fileError } = await db.from("job_desk_intake_files").insert({
         order_id: orderId,
@@ -138,14 +161,22 @@ export async function POST(request: Request) {
         file_name: file.name.slice(0, 180),
         file_size: file.size,
         content_type: info.contentType,
-        document_kind: index === 0 ? "cv" : "supporting",
+        document_kind: kind,
         extracted_text: text,
-        extraction_status: index === 0 ? (text.length >= 120 ? "succeeded" : "needs_text") : "pending",
-        extraction_warning: index === 0 ? extraction?.warning ?? null : null
+        extraction_status: kind === "cv" ? (text.length >= 120 ? "succeeded" : "needs_text") : "pending",
+        extraction_warning: kind === "cv" ? extraction?.warning ?? null : null
       });
       if (fileError) throw new Error(fileError.message);
     }
-    return NextResponse.json({ ok: true, reference: orderId.slice(0, 8).toUpperCase(), needsReadableCv: prepared[0].info?.extension === "doc" && parsed.data.pastedCvText.length < 120 }, { status: 201 });
+    let paymentStatus = "initiating";
+    let paymentError: string | null = null;
+    try { paymentStatus = (await startJobDeskPayment(orderId)).status; }
+    catch (cause) {
+      const { data: attempt } = await db.from("job_desk_payment_attempts").select("status").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      paymentStatus = attempt?.status ?? "failed";
+      paymentError = cause instanceof Error ? cause.message : "M-Pesa prompt could not be sent.";
+    }
+    return NextResponse.json({ ok: true, accessToken, reference: orderId.slice(0, 8).toUpperCase(), paymentStatus, paymentError, price: service.price, needsReadableCv: prepared.find((item) => item.kind === "cv")?.info?.extension === "doc" && parsed.data.pastedCvText.length < 120 }, { status: 201 });
   } catch (error) {
     if (uploadedPaths.length) await db.storage.from("job-desk-intake").remove(uploadedPaths);
     if (clientId) await db.from("job_desk_clients").delete().eq("id", clientId);

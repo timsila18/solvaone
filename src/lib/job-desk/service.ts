@@ -7,6 +7,7 @@ import { sectionsToHtml, sanitizeText, stripUnsafeHtml } from "@/lib/solva-intel
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction, logSystemEvent } from "@/lib/security";
 import { jobDeskModelOutputSchema, jobDeskProcessingOutputSchema, type JobDeskProcessingOutput } from "./types";
+import { hasVerifiedJobDeskPayment } from "./payment";
 
 type ProcessJobDeskOrderInput = {
   orderId: string;
@@ -90,6 +91,8 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
     .single();
 
   if (orderError || !order) throw new Error(orderError?.message ?? "Job Desk order was not found.");
+  if (order.source_channel === "website" && !hasVerifiedJobDeskPayment(order)) throw new Error("Confirm payment before processing this website request.");
+  if (order.service_type === "interview_coaching" || order.service_type === "linkedin_revamp") throw new Error("This service does not use the CV preparation workflow.");
   const { data: candidateProfile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (profileError || !candidateProfile) throw new Error(profileError?.message ?? "Candidate profile was not found.");
 

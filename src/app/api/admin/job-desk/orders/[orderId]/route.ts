@@ -46,10 +46,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId);
     const { data: paidOrder } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", orderId).single();
-    if (hasVerifiedJobDeskPayment(paidOrder)) { await enqueueTask("match", `match:${orderId}:approval:${document.id}`, orderId); queued = true; }
+    const { data: serviceOrder } = await db.from("job_desk_orders").select("service_type").eq("id", orderId).single();
+    if (serviceOrder?.service_type === "job_search_full" && hasVerifiedJobDeskPayment(paidOrder)) { await enqueueTask("match", `match:${orderId}:approval:${document.id}`, orderId); queued = true; }
   } else if (parsed.data.action === "record_payment") {
-    const { data: order, error: findError } = await db.from("job_desk_orders").select("id,payment_status,payment_reference,amount").eq("id", orderId).single();
+    const { data: order, error: findError } = await db.from("job_desk_orders").select("id,payment_status,payment_reference,amount,source_channel,status,service_type").eq("id", orderId).single();
     if (findError || !order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
+    if (order.source_channel === "website" && Number(order.amount) !== parsed.data.amount) return NextResponse.json({ error: "Amount must match the service price for website orders." }, { status: 400 });
     if (order.payment_status === "paid" && Number(order.amount) > 0 && order.payment_reference && order.payment_reference !== parsed.data.reference) {
       return NextResponse.json({ error: "This order is already paid. Review its payment before changing the receipt." }, { status: 409 });
     }
@@ -58,11 +60,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
       payment_method: parsed.data.method,
       amount: parsed.data.amount,
       payment_reference: parsed.data.reference,
-      paid_at: new Date().toISOString()
+      paid_at: new Date().toISOString(),
+      status: order.status === "awaiting_payment" ? "intake" : order.status
     }).eq("id", orderId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const { data: cv } = await db.from("job_desk_documents").select("id").eq("order_id", orderId).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
-    if (cv) { await enqueueTask("match", `match:${orderId}:payment`, orderId); queued = true; }
+    if (cv && order.service_type === "job_search_full") { await enqueueTask("match", `match:${orderId}:payment`, orderId); queued = true; }
   } else if (parsed.data.action === "save_answers") {
     const { data: questionnaire, error: findError } = await db.from("job_desk_questionnaires").select("id,questions,responses").eq("order_id", orderId).maybeSingle();
     if (findError || !questionnaire) return NextResponse.json({ error: "Process the CV before recording answers." }, { status: 409 });
@@ -77,6 +80,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     const { error } = await db.from("job_desk_questionnaires").update({ responses: answers, status: complete ? "answered" : "open" }).eq("id", questionnaire.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else {
+    const { data: order } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference,source_channel").eq("id", orderId).single();
+    if (!order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
+    if (order.source_channel === "website" && !hasVerifiedJobDeskPayment(order) && parsed.data.status !== "cancelled") return NextResponse.json({ error: "Confirm payment before advancing this website request." }, { status: 409 });
     const { error } = await db.from("job_desk_orders").update({ status: parsed.data.status }).eq("id", orderId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
