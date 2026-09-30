@@ -58,8 +58,8 @@ export async function matchOrder(orderId: string) {
   const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,client_id,payment_status,amount,payment_reference,status").eq("id", orderId).single();
   if (orderError) throw new Error(orderError.message);
   if (!hasVerifiedJobDeskPayment(order)) throw new Error("A verified payment or approved waiver is required before job matching.");
-  const { data: approved } = await db.from("job_desk_documents").select("id").eq("order_id", orderId).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
-  if (!approved) throw new Error("Approve the candidate CV before matching vacancies.");
+  const { data: approved } = await db.from("job_desk_documents").select("id,status").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+  if (approved?.status !== "approved") throw new Error("Approve the latest candidate CV before matching vacancies.");
   const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (profileError) throw new Error(profileError.message);
   if (!profile) throw new Error("Candidate profile is missing.");
@@ -67,11 +67,11 @@ export async function matchOrder(orderId: string) {
   if (error) throw new Error(error.message);
   const matches = (vacancies ?? []).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile) })).filter((item) => item.score >= 40).sort((a, b) => b.score - a.score).slice(0, 50);
   for (const match of matches) {
-    const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id", ignoreDuplicates: true });
+    const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id" });
     if (matchError) throw new Error(matchError.message);
   }
-  const { data: top } = await db.from("job_desk_matches").select("id").eq("order_id", orderId).eq("status", "suggested").order("score", { ascending: false }).limit(3);
-  for (const item of top ?? []) await enqueueTask("prepare", `prepare:${item.id}`, orderId, { matchId: item.id });
+  const { data: top } = await db.from("job_desk_matches").select("id").eq("order_id", orderId).eq("status", "suggested").gte("score", 60).order("score", { ascending: false }).limit(10);
+  for (const item of top ?? []) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   return matches.length;
 }

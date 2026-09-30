@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { Document, Packer, Paragraph, TextRun } from "docx";
 import { createOpenAIClient } from "@/lib/openai";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { discoverVacancies, enqueueTask, matchOrder, plainText } from "./automation";
 import { submissionHoldReason } from "./matching";
 import { hasVerifiedJobDeskPayment } from "./payment";
+import { createJobDeskCvDocx } from "./cv-docx";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
@@ -15,7 +15,9 @@ async function prepareMatch(matchId: string) {
   if (!match || !["suggested", "preparing"].includes(match.status)) return;
   const { data: order, error: orderError } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", match.order_id).single();
   if (orderError) throw new Error(orderError.message);
-  const { data: cv } = await db.from("job_desk_documents").select("html").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
+  const { data: latestCv } = await db.from("job_desk_documents").select("id,status").eq("order_id", match.order_id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+  if (latestCv?.status !== "approved") throw new Error("Approve the latest CV before preparing applications.");
+  const { data: cv } = await db.from("job_desk_documents").select("html").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").order("version", { ascending: false }).limit(1).maybeSingle();
   if (!order || !cv || !hasVerifiedJobDeskPayment(order)) throw new Error("Verified payment and approved CV required.");
   const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (profileError || !profile) throw new Error(profileError?.message ?? "Candidate profile is missing.");
@@ -54,9 +56,16 @@ async function submitMatch(matchId: string) {
   if (!match || match.status !== "authorized" || !match.authorized_at || !match.cover_letter) return;
   const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
   const { data: order } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", match.order_id).single();
-  const { data: cv } = await db.from("job_desk_documents").select("html,title").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
+  const { data: latestCv } = await db.from("job_desk_documents").select("id,status").eq("order_id", match.order_id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+  if (latestCv?.status !== "approved") {
+    await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: match.order_id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "A newer CV is awaiting approval. Recheck the application before submission." }, { onConflict: "match_id" });
+    return;
+  }
+  const { data: cv } = await db.from("job_desk_documents").select("html,title,structured_content").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").order("version", { ascending: false }).limit(1).maybeSingle();
+  const { data: profile } = await db.from("job_desk_candidate_profiles").select("structured_profile").eq("client_id", order?.client_id).maybeSingle();
   const client = Array.isArray(order?.client) ? order.client[0] : order?.client;
-  if (!order || !cv || !hasVerifiedJobDeskPayment(order) || !client?.consent_to_process) throw new Error("Order, consent, verified payment or approved CV missing.");
+  if (!order || !cv || !profile || !hasVerifiedJobDeskPayment(order) || !client?.consent_to_process) throw new Error("Order, consent, verified payment, candidate profile or approved CV missing.");
   const cvPlain = plainText(String(cv.html));
   const pauseReason = submissionHoldReason(String(vacancy?.description ?? ""), client.email ?? null, cvPlain.length);
   if (pauseReason) {
@@ -81,8 +90,13 @@ async function submitMatch(matchId: string) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     return;
   }
-  const cvText = String(cv.html).replace(/<\/(?:p|h2|h3|li|div)>/gi, "\n").replace(/<li[^>]*>/gi, "• ").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n");
-  const attachment = await Packer.toBuffer(new Document({ sections: [{ children: cvText.split(/\n+/).filter(Boolean).map((line) => new Paragraph({ children: [new TextRun(line)], spacing: { after: 120 } })) }] }));
+  const candidate = (profile.structured_profile ?? {}) as { targetHeadline?: string; location?: string };
+  const attachment = await createJobDeskCvDocx({
+    name: client.full_name,
+    role: candidate.targetHeadline?.trim() ?? "",
+    contact: [client.email, client.whatsapp_phone, candidate.location].filter(Boolean).join("  |  "),
+    content: cv.structured_content
+  });
   const { error: saveError } = await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "email", status: "sending", recipient: vacancy.application_email }, { onConflict: "match_id" });
   if (saveError) throw new Error(saveError.message);
   const content = `${match.cover_letter}\n\nApplication submitted with the candidate's express authorization. Candidate contact: ${client.email ?? "Not provided"}; ${client.whatsapp_phone}.`;
@@ -114,11 +128,12 @@ async function processTask(task: Task) {
   throw new Error(`Unknown Job Desk task: ${task.task_type}`);
 }
 
-export async function runJobDeskWorker() {
+export async function runJobDeskWorker({ maxTasks = 10, maxRunMs = 45000 }: { maxTasks?: number; maxRunMs?: number } = {}) {
   const db = createSupabaseAdminClient();
   const workerId = `vercel-${crypto.randomUUID()}`;
+  const deadline = Date.now() + maxRunMs;
   let processed = 0;
-  for (let index = 0; index < 1; index += 1) {
+  for (let index = 0; index < maxTasks && Date.now() < deadline; index += 1) {
     const { data, error } = await db.rpc("claim_job_desk_task", { p_worker: workerId });
     if (error) throw new Error(error.message);
     const task = (data?.[0] ?? null) as Task | null;

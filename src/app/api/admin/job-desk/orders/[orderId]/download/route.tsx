@@ -1,10 +1,10 @@
 import { renderToBuffer, Document as PdfDocument, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
-import { AlignmentType, BorderStyle, Document, Footer, HeadingLevel, LineRuleType, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { solvaOutputSchema } from "@/lib/solva-intelligence/types";
+import { createJobDeskCvDocx } from "@/lib/job-desk/cv-docx";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -55,17 +55,6 @@ function exportSections(content: unknown): Section[] {
     .filter((section) => section.blocks.length > 0);
 }
 
-function docxBlock(block: Block) {
-  return new Paragraph({
-    children: [new TextRun({ text: block.text, font: "Arial", size: block.kind === "bullet" ? 22 : 24, bold: block.kind === "subheading" })],
-    bullet: block.kind === "bullet" ? { level: 0 } : undefined,
-    alignment: block.kind === "subheading" ? AlignmentType.LEFT : AlignmentType.BOTH,
-    spacing: { line: 276, lineRule: LineRuleType.AUTO, after: block.kind === "bullet" ? 40 : block.kind === "subheading" ? 20 : 100, before: block.kind === "subheading" ? 100 : 0 },
-    keepNext: block.kind === "subheading",
-    widowControl: true
-  });
-}
-
 function pdfCv(name: string, role: string, contact: string, sections: Section[]) {
   return <PdfDocument title={`${name} CV`} author={name}>
     <Page size="A4" style={pdfStyles.page}>
@@ -112,16 +101,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const file = await renderToBuffer(pdfCv(name, role, contact, sections));
       return new NextResponse(new Uint8Array(file), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${safeName}-cv${suffix}.pdf"`, "Cache-Control": "private, no-store" } });
     }
-    const body = [
-      new Paragraph({ children: [new TextRun({ text: name, font: "Arial", bold: true, size: 32 })], spacing: { after: 40 }, keepNext: true }),
-      ...(role ? [new Paragraph({ children: [new TextRun({ text: role, font: "Arial", size: 24, bold: true })], spacing: { after: 60 }, keepNext: true })] : []),
-      ...(contact ? [new Paragraph({ children: [new TextRun({ text: contact, font: "Arial", size: 21 })], spacing: { after: 160 }, keepNext: true })] : []),
-      ...sections.flatMap((section) => [
-        new Paragraph({ children: [new TextRun({ text: section.title.toUpperCase(), font: "Arial", size: 24, bold: true })], heading: HeadingLevel.HEADING_2, border: { bottom: { color: "000000", style: BorderStyle.SINGLE, size: 4, space: 1 } }, spacing: { before: 200, after: 80 }, keepNext: true }),
-        ...section.blocks.map(docxBlock)
-      ])
-    ];
-    const file = await Packer.toBuffer(new Document({ creator: name, title: `${name} CV`, styles: { default: { document: { run: { font: "Arial", size: 24 }, paragraph: { spacing: { line: 276, lineRule: LineRuleType.AUTO } } } } }, sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 720, right: 1120, bottom: 720, left: 1120 } } }, footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ children: [PageNumber.CURRENT, " / ", PageNumber.TOTAL_PAGES], font: "Arial", size: 18 })] })] }) }, children: body }] }));
+    const file = await createJobDeskCvDocx({ name, role, contact, content: cv.structured_content });
     return new NextResponse(new Uint8Array(file), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${safeName}-cv${suffix}.docx"`, "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ error: "The CV could not be exported. Please retry or review the content." }, { status: 500 });

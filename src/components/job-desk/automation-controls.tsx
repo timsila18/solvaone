@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function AutomationControls({ action, id, label }: { action: "discover" | "match" | "prepare" | "authorize_link"; id: string; label: string }) {
+export function AutomationControls({ action, id = "", label }: { action: "discover" | "match" | "prepare" | "authorize_link" | "run_queue"; id?: string; label: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const router = useRouter();
@@ -10,10 +10,10 @@ export function AutomationControls({ action, id, label }: { action: "discover" |
     setBusy(true); setMessage("");
     try {
       const key = action === "discover" ? "sourceId" : action === "match" ? "orderId" : "matchId";
-      const response = await fetch("/api/admin/job-desk/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, [key]: id }) });
+      const response = await fetch("/api/admin/job-desk/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "run_queue" ? { action } : { action, [key]: id }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Action failed.");
-      setMessage(body.authorizationUrl ?? "Queued. Refresh to see progress.");
+      setMessage(body.authorizationUrl ?? (action === "run_queue" ? `${body.processed ?? 0} tasks processed.` : "Queued. Refresh to see progress."));
       router.refresh();
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Action failed."); }
     finally { setBusy(false); }
