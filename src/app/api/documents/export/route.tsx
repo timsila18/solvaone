@@ -31,25 +31,19 @@ const styles = StyleSheet.create({
 });
 
 const cvStyles = StyleSheet.create({
-  page: { padding: 0, fontSize: 12, lineHeight: 1.15, color: "#000000", fontFamily: "Helvetica", backgroundColor: "#FFFFFF" },
-  header: { backgroundColor: "#000000", paddingTop: 28, paddingHorizontal: 38, paddingBottom: 17 },
-  headerAccent: { width: 52, height: 4, backgroundColor: "#0066FF", marginBottom: 12 },
-  name: { fontSize: 25, fontWeight: 700, marginBottom: 6, color: "#FFFFFF" },
-  role: { fontSize: 12, color: "#FFFFFF", fontWeight: 700, marginBottom: 11 },
-  contactBar: { borderTopWidth: 1, borderTopColor: "#0066FF", paddingTop: 8 },
-  contactGrid: { flexDirection: "row", flexWrap: "wrap" },
-  contactItem: { fontSize: 9.5, lineHeight: 1.15, color: "#FFFFFF", marginRight: 14, marginBottom: 4, maxWidth: 250 },
-  body: { paddingHorizontal: 38, paddingTop: 16, paddingBottom: 34 },
-  section: { marginBottom: 9 },
-  sectionTitleRow: { flexDirection: "row", alignItems: "center", marginBottom: 5, paddingBottom: 3, borderBottomWidth: 1, borderBottomColor: "#0066FF" },
-  sectionBadge: { width: 6, height: 17, backgroundColor: "#0066FF", marginRight: 8 },
-  sectionTitle: { fontSize: 13, lineHeight: 1.15, fontWeight: 700, textTransform: "uppercase", color: "#000000" },
-  paragraph: { fontSize: 12, lineHeight: 1.15, marginBottom: 4, textAlign: "justify" },
-  bulletRow: { flexDirection: "row", marginBottom: 3.5 },
-  bulletDot: { width: 12, color: "#0066FF", fontWeight: 700, fontSize: 12, lineHeight: 1.15 },
-  bulletText: { flex: 1, fontSize: 12, lineHeight: 1.15, textAlign: "justify" },
-  jobLine: { fontSize: 12, lineHeight: 1.15, fontWeight: 700, marginTop: 3, marginBottom: 3, textAlign: "left" },
-  footer: { position: "absolute", bottom: 15, left: 38, right: 38, paddingTop: 5, borderTopWidth: 1, borderTopColor: "#0066FF", fontSize: 8.5, color: "#000000", flexDirection: "row", justifyContent: "flex-end" }
+  page: { paddingTop: 49, paddingBottom: 46, paddingHorizontal: 56, fontSize: 12, lineHeight: 1.15, color: "#000000", fontFamily: "Helvetica", backgroundColor: "#FFFFFF" },
+  header: { marginBottom: 7 },
+  name: { fontSize: 16, fontWeight: 700, marginBottom: 2, color: "#000000" },
+  role: { fontSize: 12, color: "#000000", fontWeight: 700, marginBottom: 3 },
+  contact: { fontSize: 10.5, lineHeight: 1.15, color: "#000000", marginBottom: 5 },
+  section: { marginBottom: 5 },
+  sectionTitle: { fontSize: 12, lineHeight: 1.15, fontWeight: 700, textTransform: "uppercase", color: "#000000", marginTop: 10, marginBottom: 4, borderBottomWidth: 0.6, borderBottomColor: "#000000", paddingBottom: 2 },
+  paragraph: { fontSize: 12, lineHeight: 1.15, marginBottom: 5, textAlign: "justify" },
+  bulletRow: { flexDirection: "row", marginBottom: 2 },
+  bulletDot: { width: 13, color: "#000000", fontSize: 11, lineHeight: 1.15 },
+  bulletText: { flex: 1, fontSize: 11, lineHeight: 1.15, textAlign: "left" },
+  jobLine: { fontSize: 12, lineHeight: 1.15, fontWeight: 700, marginTop: 5, marginBottom: 2, textAlign: "left" },
+  footer: { position: "absolute", bottom: 22, right: 56, fontSize: 8.5, color: "#000000" }
 });
 
 const CV_BODY_FONT_SIZE = 24;
@@ -117,8 +111,13 @@ function cvHeaderFromHtml(html: string, fallbackTitle: string) {
 }
 
 function roleFromTitle(title: string, name: string) {
-  const normalized = title.replace(name, "").replace(/^[-\s]+/, "").replace(/\s+CV$/i, "").trim();
-  return normalized || "Professional CV";
+  const role = title
+    .replace(name, "")
+    .replace(/\b(?:revamped|professional|generated|ats[- ]optimized)?\s*(?:cv|resume)\b/gi, "")
+    .replace(/^[\s:|\-]+|[\s:|\-]+$/g, "")
+    .replace(/^for\s+/i, "")
+    .trim();
+  return /^(revamp|builder|build)$/i.test(role) ? "" : role;
 }
 
 function sectionLines(text: string) {
@@ -146,7 +145,7 @@ function docxParagraph(line: string, isCv: boolean) {
     children: [
       new TextRun({
         text: bullet ? cleanBullet(line) : line,
-        size: isCv ? CV_BODY_FONT_SIZE : 22,
+        size: isCv ? (bullet ? 22 : CV_BODY_FONT_SIZE) : 22,
         font: isCv ? "Arial" : "Aptos",
         bold: jobLine,
         color: "000000"
@@ -156,7 +155,7 @@ function docxParagraph(line: string, isCv: boolean) {
     indent: bullet ? { left: 360 } : undefined,
     alignment: isCv && !jobLine ? AlignmentType.BOTH : AlignmentType.LEFT,
     spacing: isCv
-      ? { after: bullet ? 54 : 72, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO }
+      ? { before: jobLine ? 100 : 0, after: bullet ? 40 : jobLine ? 20 : 100, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO }
       : { after: 120 },
     keepLines: jobLine,
     widowControl: true
@@ -169,16 +168,16 @@ function docxSectionTitle(title: string, isCv: boolean) {
       new TextRun({
         text: title.toUpperCase(),
         bold: true,
-        size: isCv ? 26 : 28,
+        size: isCv ? 24 : 28,
         font: isCv ? "Arial" : "Aptos",
         color: "000000"
       })
     ],
     heading: HeadingLevel.HEADING_2,
     spacing: isCv
-      ? { before: 180, after: 84, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO }
+      ? { before: 200, after: 80, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO }
       : { before: 280, after: 120 },
-    border: { bottom: { color: isCv ? "0066FF" : "000000", space: 1, style: BorderStyle.SINGLE, size: 6 } },
+    border: { bottom: { color: "000000", space: 1, style: BorderStyle.SINGLE, size: isCv ? 4 : 6 } },
     keepNext: true,
     widowControl: true
   });
@@ -187,22 +186,24 @@ function docxSectionTitle(title: string, isCv: boolean) {
 function buildDocxChildren(input: { title: string; html: string; product?: string; sections: PlainSection[] }) {
   const isCv = isCvProduct(input.product);
   const header = cvHeaderFromHtml(input.html, input.title);
+  const role = roleFromTitle(input.title, header.name);
   const cvSections = isCv ? input.sections.filter((section) => !/contact|candidate details|personal details/i.test(section.title)) : input.sections;
 
   if (isCv) {
     return [
       new Paragraph({
-        children: [new TextRun({ text: header.name, bold: true, size: 44, font: "Arial", color: "000000" })],
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 72, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO },
+        children: [new TextRun({ text: header.name, bold: true, size: 32, font: "Arial", color: "000000" })],
+        alignment: AlignmentType.LEFT,
+        spacing: { after: 40, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO },
         keepNext: true
       }),
+      ...(role ? [new Paragraph({ children: [new TextRun({ text: role, bold: true, size: 24, font: "Arial", color: "000000" })], spacing: { after: 60, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO }, keepNext: true })] : []),
       ...(header.contact
         ? [
             new Paragraph({
-              children: [new TextRun({ text: header.contact, size: 21, font: "Arial", color: "0066FF" })],
-              alignment: AlignmentType.CENTER,
-              spacing: { after: 126, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO },
+              children: [new TextRun({ text: header.contact, size: 21, font: "Arial", color: "000000" })],
+              alignment: AlignmentType.LEFT,
+              spacing: { after: 160, line: CV_LINE_SPACING_115, lineRule: LineRuleType.AUTO },
               keepNext: true,
               widowControl: true
             })
@@ -228,32 +229,19 @@ function PremiumCvPdf({ title, html }: { title: string; html: string }) {
     <PdfDocument title={title} author={header.name}>
       <Page size="A4" style={cvStyles.page}>
         <View style={cvStyles.header}>
-          <View style={cvStyles.headerAccent} />
           <Text style={cvStyles.name}>{header.name}</Text>
-          <Text style={cvStyles.role}>{role}</Text>
+          {role ? <Text style={cvStyles.role}>{role}</Text> : null}
           {contactItems.length ? (
-            <View style={cvStyles.contactBar}>
-              <View style={cvStyles.contactGrid}>
-                {contactItems.map((item) => (
-                  <Text key={item} style={cvStyles.contactItem}>
-                    {item}
-                  </Text>
-                ))}
-              </View>
-            </View>
+            <Text style={cvStyles.contact}>{contactItems.join("  |  ")}</Text>
           ) : null}
         </View>
-        <View style={cvStyles.body}>
           {sections.map((section) => (
-            <View key={section.title} style={cvStyles.section} wrap minPresenceAhead={55}>
-              <View style={cvStyles.sectionTitleRow}>
-                <View style={cvStyles.sectionBadge} />
-                <Text style={cvStyles.sectionTitle}>{section.title}</Text>
-              </View>
+            <View key={section.title} style={cvStyles.section} wrap>
+              <Text style={cvStyles.sectionTitle} minPresenceAhead={42}>{section.title}</Text>
               {sectionLines(section.text).map((line, index) =>
                 isBulletLine(line) ? (
                   <View key={`${section.title}-${index}`} style={cvStyles.bulletRow}>
-                    <Text style={cvStyles.bulletDot}>-</Text>
+                    <Text style={cvStyles.bulletDot}>•</Text>
                     <Text style={cvStyles.bulletText}>{cleanBullet(line)}</Text>
                   </View>
                 ) : (
@@ -264,7 +252,6 @@ function PremiumCvPdf({ title, html }: { title: string; html: string }) {
               )}
             </View>
           ))}
-        </View>
         <View style={cvStyles.footer} fixed>
           <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
         </View>
@@ -328,7 +315,7 @@ export async function GET(request: NextRequest) {
               page: {
                 size: isCv ? { width: 11906, height: 16838 } : undefined,
                 margin: isCv
-                  ? { top: 936, right: 936, bottom: 936, left: 936, header: 432, footer: 432 }
+                  ? { top: 720, right: 1120, bottom: 720, left: 1120, header: 432, footer: 432 }
                   : { top: 900, right: 900, bottom: 900, left: 900 }
               }
             },
@@ -338,7 +325,6 @@ export async function GET(request: NextRequest) {
                     children: [
                       new Paragraph({
                         alignment: AlignmentType.RIGHT,
-                        border: { top: { color: "0066FF", space: 4, style: BorderStyle.SINGLE, size: 4 } },
                         children: [
                           new TextRun({
                             children: ["Page ", PageNumber.CURRENT, " of ", PageNumber.TOTAL_PAGES],
@@ -365,7 +351,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  if (isCvProduct(product) && variant !== "ats") {
+  if (isCvProduct(product)) {
     const file = await renderToBuffer(<PremiumCvPdf title={document.title} html={document.html} />);
     return new NextResponse(new Uint8Array(file), {
       headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"` }

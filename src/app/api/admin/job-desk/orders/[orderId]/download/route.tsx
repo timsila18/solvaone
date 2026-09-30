@@ -13,21 +13,19 @@ type Block = { kind: "paragraph" | "bullet" | "subheading"; text: string };
 type Section = { title: string; blocks: Block[] };
 
 const pdfStyles = StyleSheet.create({
-  page: { backgroundColor: "#FFFFFF", color: "#000000", fontFamily: "Helvetica", fontSize: 12, lineHeight: 1.15, paddingBottom: 48 },
-  header: { backgroundColor: "#000000", paddingTop: 28, paddingBottom: 22, paddingHorizontal: 42 },
-  accent: { width: 48, height: 4, backgroundColor: "#0066FF", marginBottom: 10 },
-  name: { color: "#FFFFFF", fontSize: 24, fontWeight: 700, marginBottom: 5 },
-  role: { color: "#FFFFFF", fontSize: 12, marginBottom: 6 },
-  contact: { color: "#FFFFFF", fontSize: 10, lineHeight: 1.25 },
-  body: { paddingHorizontal: 42, paddingTop: 20 },
-  section: { marginBottom: 11 },
-  heading: { fontSize: 12, fontWeight: 700, textTransform: "uppercase", borderBottomWidth: 1, borderBottomColor: "#0066FF", paddingBottom: 4, marginBottom: 6 },
+  page: { backgroundColor: "#FFFFFF", color: "#000000", fontFamily: "Helvetica", fontSize: 12, lineHeight: 1.15, paddingTop: 49, paddingBottom: 46, paddingHorizontal: 56 },
+  header: { marginBottom: 7 },
+  name: { color: "#000000", fontSize: 16, fontWeight: 700, marginBottom: 2 },
+  role: { color: "#000000", fontSize: 12, fontWeight: 700, marginBottom: 3 },
+  contact: { color: "#000000", fontSize: 10.5, lineHeight: 1.15, marginBottom: 5 },
+  section: { marginBottom: 5 },
+  heading: { fontSize: 12, fontWeight: 700, textTransform: "uppercase", borderBottomWidth: 0.6, borderBottomColor: "#000000", paddingBottom: 2, marginTop: 10, marginBottom: 4 },
   paragraph: { fontSize: 12, lineHeight: 1.15, textAlign: "justify", marginBottom: 5 },
-  subheading: { fontSize: 12, fontWeight: 700, marginTop: 4, marginBottom: 4 },
-  bulletRow: { flexDirection: "row", marginBottom: 4 },
-  bullet: { width: 15, color: "#0066FF", fontSize: 12 },
-  bulletText: { flex: 1, fontSize: 12, lineHeight: 1.15, textAlign: "justify" },
-  footer: { position: "absolute", bottom: 18, right: 42, fontSize: 9 }
+  subheading: { fontSize: 12, fontWeight: 700, marginTop: 5, marginBottom: 2 },
+  bulletRow: { flexDirection: "row", marginBottom: 2 },
+  bullet: { width: 13, color: "#000000", fontSize: 11 },
+  bulletText: { flex: 1, fontSize: 11, lineHeight: 1.15, textAlign: "left" },
+  footer: { position: "absolute", bottom: 22, right: 56, fontSize: 8.5 }
 });
 
 function textFromHtml(value: string) {
@@ -59,10 +57,10 @@ function exportSections(content: unknown): Section[] {
 
 function docxBlock(block: Block) {
   return new Paragraph({
-    children: [new TextRun({ text: block.text, font: "Arial", size: 24, bold: block.kind === "subheading" })],
+    children: [new TextRun({ text: block.text, font: "Arial", size: block.kind === "bullet" ? 22 : 24, bold: block.kind === "subheading" })],
     bullet: block.kind === "bullet" ? { level: 0 } : undefined,
     alignment: block.kind === "subheading" ? AlignmentType.LEFT : AlignmentType.BOTH,
-    spacing: { line: 276, lineRule: LineRuleType.AUTO, after: 84, before: block.kind === "subheading" ? 84 : 0 },
+    spacing: { line: 276, lineRule: LineRuleType.AUTO, after: block.kind === "bullet" ? 40 : block.kind === "subheading" ? 20 : 100, before: block.kind === "subheading" ? 100 : 0 },
     keepNext: block.kind === "subheading",
     widowControl: true
   });
@@ -72,19 +70,16 @@ function pdfCv(name: string, role: string, contact: string, sections: Section[])
   return <PdfDocument title={`${name} CV`} author={name}>
     <Page size="A4" style={pdfStyles.page}>
       <View style={pdfStyles.header}>
-        <View style={pdfStyles.accent} />
         <Text style={pdfStyles.name}>{name}</Text>
         {role ? <Text style={pdfStyles.role}>{role}</Text> : null}
         {contact ? <Text style={pdfStyles.contact}>{contact}</Text> : null}
       </View>
-      <View style={pdfStyles.body}>
         {sections.map((section) => <View key={section.title} style={pdfStyles.section}>
           <Text style={pdfStyles.heading} minPresenceAhead={42}>{section.title}</Text>
           {section.blocks.map((block, index) => block.kind === "bullet"
             ? <View key={index} style={pdfStyles.bulletRow}><Text style={pdfStyles.bullet}>•</Text><Text style={pdfStyles.bulletText}>{block.text}</Text></View>
             : <Text key={index} style={block.kind === "subheading" ? pdfStyles.subheading : pdfStyles.paragraph}>{block.text}</Text>)}
         </View>)}
-      </View>
       <Text fixed style={pdfStyles.footer} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
     </Page>
   </PdfDocument>;
@@ -118,15 +113,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return new NextResponse(new Uint8Array(file), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${safeName}-cv${suffix}.pdf"`, "Cache-Control": "private, no-store" } });
     }
     const body = [
-      new Paragraph({ children: [new TextRun({ text: name, font: "Arial", bold: true, size: 34 })], spacing: { after: 80 } }),
-      ...(role ? [new Paragraph({ children: [new TextRun({ text: role, font: "Arial", size: 24, color: "0066FF" })], spacing: { after: 70 } })] : []),
-      ...(contact ? [new Paragraph({ children: [new TextRun({ text: contact, font: "Arial", size: 20 })], spacing: { after: 220 } })] : []),
+      new Paragraph({ children: [new TextRun({ text: name, font: "Arial", bold: true, size: 32 })], spacing: { after: 40 }, keepNext: true }),
+      ...(role ? [new Paragraph({ children: [new TextRun({ text: role, font: "Arial", size: 24, bold: true })], spacing: { after: 60 }, keepNext: true })] : []),
+      ...(contact ? [new Paragraph({ children: [new TextRun({ text: contact, font: "Arial", size: 21 })], spacing: { after: 160 }, keepNext: true })] : []),
       ...sections.flatMap((section) => [
-        new Paragraph({ children: [new TextRun({ text: section.title.toUpperCase(), font: "Arial", size: 25, bold: true })], heading: HeadingLevel.HEADING_2, border: { bottom: { color: "0066FF", style: BorderStyle.SINGLE, size: 5, space: 5 } }, spacing: { before: 180, after: 100 }, keepNext: true }),
+        new Paragraph({ children: [new TextRun({ text: section.title.toUpperCase(), font: "Arial", size: 24, bold: true })], heading: HeadingLevel.HEADING_2, border: { bottom: { color: "000000", style: BorderStyle.SINGLE, size: 4, space: 1 } }, spacing: { before: 200, after: 80 }, keepNext: true }),
         ...section.blocks.map(docxBlock)
       ])
     ];
-    const file = await Packer.toBuffer(new Document({ creator: name, title: `${name} CV`, styles: { default: { document: { run: { font: "Arial", size: 24 }, paragraph: { spacing: { line: 276, lineRule: LineRuleType.AUTO } } } } }, sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 900, right: 900, bottom: 900, left: 900 } } }, footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ children: [PageNumber.CURRENT, " / ", PageNumber.TOTAL_PAGES], font: "Arial", size: 18 })] })] }) }, children: body }] }));
+    const file = await Packer.toBuffer(new Document({ creator: name, title: `${name} CV`, styles: { default: { document: { run: { font: "Arial", size: 24 }, paragraph: { spacing: { line: 276, lineRule: LineRuleType.AUTO } } } } }, sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 720, right: 1120, bottom: 720, left: 1120 } } }, footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ children: [PageNumber.CURRENT, " / ", PageNumber.TOTAL_PAGES], font: "Arial", size: 18 })] })] }) }, children: body }] }));
     return new NextResponse(new Uint8Array(file), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${safeName}-cv${suffix}.docx"`, "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ error: "The CV could not be exported. Please retry or review the content." }, { status: 500 });
