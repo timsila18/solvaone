@@ -73,6 +73,8 @@ export function vacancyFingerprint(job: Pick<FeedVacancy, "company_name" | "titl
 
 export function reviewReasons(job: FeedVacancy, now = new Date()) {
   const reasons: string[] = [];
+  const deadline = job.description.match(/\b(?:application\s+deadline|closing\s+date|apply\s+by)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\s+[a-z]+\s+\d{4})\b/i);
+  if (deadline) { const date = new Date(deadline[1]); if (!Number.isNaN(date.getTime()) && date.getTime() + 86400000 < now.getTime()) reasons.push("expired_deadline"); }
   if (job.description.length < 160) reasons.push("thin_description");
   if (job.source_updated_at && now.getTime() - new Date(job.source_updated_at).getTime() > 180 * 86400000) reasons.push("old_published_date");
   if (/application (?:fee|charge)|pay (?:a|an|the) (?:registration|processing|application) fee|send money|deposit to apply/i.test(job.description)) reasons.push("payment_request_language");
@@ -111,4 +113,18 @@ export async function fetchFeedJobs(source: FeedSource): Promise<Record<string, 
     jobs.push(...page);
   }
   return jobs;
+}
+
+export async function feedStillListsJob(source: FeedSource, externalId: string) {
+  const token = encodeURIComponent(source.site_token);
+  if (source.provider === "smartrecruiters") {
+    const body = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings?limit=100&offset=0`);
+    if (!Array.isArray(body.content) || Number(body.totalFound ?? 0) > 100) throw new Error("Official board listing could not be verified.");
+    return body.content.some((item: Record<string, any>) => String(item.id) === externalId);
+  }
+  const items = await fetchFeedJobs(source);
+  return items.some((item) => {
+    if (source.provider === "ashby") return item.isListed !== false && createHash("sha256").update(String(item.jobUrl ?? item.applyUrl ?? "")).digest("hex") === externalId;
+    return String(item.id) === externalId;
+  });
 }

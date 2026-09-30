@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { createOpenAIClient } from "@/lib/openai";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { discoverVacancies, enqueueTask, matchOrder, plainText } from "./automation";
-import { submissionHoldReason } from "./matching";
+import { discoverVacancies, enqueueTask, matchOrder, plainText, verifyVacancyStillOpen } from "./automation";
+import { scoreVacancy, submissionHoldReason } from "./matching";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { createJobDeskCvDocx } from "./cv-docx";
 
@@ -24,6 +24,8 @@ async function prepareMatch(matchId: string) {
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
   if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) throw new Error("Vacancy is closed, unreviewed, duplicated or stale.");
+  if (scoreVacancy(vacancy, profile).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) throw new Error("Vacancy needs a fresh CV-based suitability review before preparation.");
+  if (!(await verifyVacancyStillOpen(vacancy))) throw new Error("Vacancy is no longer listed by its official source.");
   const prompt = JSON.stringify({ candidate: profile?.structured_profile, cv: plainText(cv.html).slice(0, 14000), clientName: client.full_name, role: vacancy.title, company: vacancy.company_name, description: vacancy.description.slice(0, 10000) });
   const fingerprint = createHash("sha256").update(prompt).digest("hex");
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
@@ -63,7 +65,7 @@ async function submitMatch(matchId: string) {
     return;
   }
   const { data: cv } = await db.from("job_desk_documents").select("html,title,structured_content").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").order("version", { ascending: false }).limit(1).maybeSingle();
-  const { data: profile } = await db.from("job_desk_candidate_profiles").select("structured_profile").eq("client_id", order?.client_id).maybeSingle();
+  const { data: profile } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order?.client_id).maybeSingle();
   const client = Array.isArray(order?.client) ? order.client[0] : order?.client;
   if (!order || !cv || !profile || !hasVerifiedJobDeskPayment(order) || !client?.consent_to_process) throw new Error("Order, consent, verified payment, candidate profile or approved CV missing.");
   const cvPlain = plainText(String(cv.html));
@@ -73,9 +75,16 @@ async function submitMatch(matchId: string) {
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: pauseReason }, { onConflict: "match_id" });
     return;
   }
-  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email) {
+  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || scoreVacancy(vacancy, profile).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:")) || vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "Application portal or unverified email requires human submission." }, { onConflict: "match_id" });
+    return;
+  }
+  try {
+    if (!(await verifyVacancyStillOpen(vacancy))) throw new Error("Vacancy is no longer listed by its official source.");
+  } catch (cause) {
+    await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", error_message: cause instanceof Error ? cause.message : "Official vacancy source could not be checked." }, { onConflict: "match_id" });
     return;
   }
   if (!process.env.RESEND_API_KEY || !process.env.FROM_EMAIL) {

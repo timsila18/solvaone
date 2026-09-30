@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BriefcaseBusiness, Loader2, Upload } from "lucide-react";
+import { BriefcaseBusiness, Loader2, ScanText, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 
@@ -10,10 +10,31 @@ const selectClass = "h-11 w-full rounded-lg border border-black/10 bg-white px-3
 
 export function JobDeskIntakeForm() {
   const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [previewMessage, setPreviewMessage] = useState("");
   const [error, setError] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("paid");
   const needsPaymentProof = paymentStatus === "paid" || paymentStatus === "partially_paid";
+
+  async function prefill() {
+    if (!formRef.current) return;
+    setReading(true); setError(""); setPreviewMessage("");
+    try {
+      const response = await fetch("/api/admin/job-desk/intake-preview", { method: "POST", body: new FormData(formRef.current) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Could not read the CV.");
+      for (const [name, raw] of Object.entries(body.fields as Record<string, unknown>)) {
+        const control = formRef.current?.elements.namedItem(name);
+        if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement)) continue;
+        if (name === "remotePreference") { if (control.value === "flexible" && raw !== "flexible") control.value = String(raw); }
+        else if (!control.value.trim() && raw) control.value = Array.isArray(raw) ? raw.join(", ") : String(raw);
+      }
+      setPreviewMessage("CV details filled where available. Check every field, then confirm payment and client consent.");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not read the CV."); }
+    finally { setReading(false); }
+  }
 
   async function submit(formData: FormData) {
     setBusy(true);
@@ -31,7 +52,7 @@ export function JobDeskIntakeForm() {
   }
 
   return (
-    <form action={submit} className="space-y-7">
+    <form ref={formRef} action={submit} className="space-y-7">
       <section>
         <div className="flex items-center gap-3 border-b border-black/10 pb-4 dark:border-white/10">
           <BriefcaseBusiness className="h-5 w-5 text-brand-blue" />
@@ -84,6 +105,8 @@ export function JobDeskIntakeForm() {
           <Field label="Original CV"><Input name="cvFile" type="file" required accept=".pdf,.doc,.docx,.txt" className="py-2" /></Field>
           <Field label="Pasted CV text (recommended for scanned PDF or DOC)"><Textarea name="pastedCvText" placeholder="Paste only when the uploaded file may not contain selectable text." /></Field>
         </div>
+        <button type="button" onClick={prefill} disabled={reading || busy} className="mt-4 inline-flex items-center gap-2 rounded border border-brand-blue px-4 py-2 text-sm font-bold text-brand-blue disabled:opacity-50">{reading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanText className="h-4 w-4" />}{reading ? "Reading CV..." : "Read CV and fill details"}</button>
+        {previewMessage ? <p role="status" className="mt-2 text-sm text-brand-blue">{previewMessage}</p> : null}
       </section>
 
       <section>

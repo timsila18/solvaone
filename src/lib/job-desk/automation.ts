@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { scoreVacancy } from "./matching";
+import { reviewCandidateMatches } from "./relevance";
 import { hasVerifiedJobDeskPayment } from "./payment";
-import { cleanText, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
+import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
 
 export type Vacancy = { id: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
 
@@ -46,7 +47,7 @@ export async function discoverVacancies(sourceId: string) {
       if (duplicateOf) reasons.push("duplicate_listing");
       const old = previousById.get(job.external_id);
       const unchanged = old && old.description === job.description && old.source_updated_at === job.source_updated_at;
-      const reviewStatus = old?.review_status === "rejected" ? "rejected" : unchanged && old.review_status === "approved" && !duplicateOf ? "approved" : reasons.length ? "needs_review" : "approved";
+      const reviewStatus = old?.review_status === "rejected" ? "rejected" : reasons.includes("expired_deadline") ? "needs_review" : unchanged && old.review_status === "approved" && !duplicateOf ? "approved" : reasons.length ? "needs_review" : "approved";
       return { ...job, source_id: sourceId, provider: source.provider, application_method: "portal", last_seen_at: now, status: "open", review_status: reviewStatus, review_reasons: reasons, duplicate_of: duplicateOf };
     });
     for (let index = 0; index < rows.length; index += 100) {
@@ -62,6 +63,16 @@ export async function discoverVacancies(sourceId: string) {
     await db.from("job_desk_sources").update({ last_error: cause instanceof Error ? cause.message.slice(0, 500) : "Source failed" }).eq("id", sourceId);
     throw cause;
   }
+}
+
+export async function verifyVacancyStillOpen(vacancy: { id: string; source_id: string | null; external_id: string }) {
+  if (!vacancy.source_id) return true; // A manually added listing needs administrator verification.
+  const db = createSupabaseAdminClient();
+  const { data: source, error } = await db.from("job_desk_sources").select("provider,site_token,company_name,active").eq("id", vacancy.source_id).single();
+  if (error || !source?.active) return false;
+  const listed = await feedStillListsJob(source as FeedSource, vacancy.external_id);
+  if (!listed) await db.from("job_desk_vacancies").update({ status: "closed" }).eq("id", vacancy.id);
+  return listed;
 }
 
 export async function matchOrder(orderId: string) {
@@ -82,12 +93,22 @@ export async function matchOrder(orderId: string) {
     vacancies.push(...(data ?? []));
     if ((data ?? []).length < 1000) break;
   }
-  const matches = vacancies.map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile) })).filter((item) => item.score >= 40).sort((a, b) => b.score - a.score).slice(0, 50);
+  const candidates = vacancies.map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile) })).filter((item) => item.score >= 25).sort((a, b) => b.score - a.score).slice(0, 24);
+  const reviewed = await reviewCandidateMatches(orderId, profile, candidates.map((item) => item.vacancy));
+  const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
+  const selected = new Set(matches.map((item) => item.vacancy.id));
+  const { data: oldMatches, error: oldError } = await db.from("job_desk_matches").select("id,vacancy_id").eq("order_id", orderId).in("status", ["suggested", "preparing", "ready"]).limit(500);
+  if (oldError) throw new Error(oldError.message);
+  const obsoleteIds = (oldMatches ?? []).filter((item) => !selected.has(item.vacancy_id)).map((item) => item.id);
+  if (obsoleteIds.length) {
+    const { error: staleError } = await db.from("job_desk_matches").update({ status: "rejected", authorization_token_hash: null, authorization_expires_at: null }).in("id", obsoleteIds);
+    if (staleError) throw new Error(staleError.message);
+  }
   for (const match of matches) {
     const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id" });
     if (matchError) throw new Error(matchError.message);
   }
-  const { data: top } = await db.from("job_desk_matches").select("id").eq("order_id", orderId).eq("status", "suggested").gte("score", 60).order("score", { ascending: false }).limit(10);
+  const { data: top } = await db.from("job_desk_matches").select("id").eq("order_id", orderId).eq("status", "suggested").gte("score", 50).order("score", { ascending: false }).limit(10);
   for (const item of top ?? []) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   return matches.length;

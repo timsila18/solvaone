@@ -6,6 +6,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createAuthorizationToken, enqueueTask } from "@/lib/job-desk/automation";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { runJobDeskWorker } from "@/lib/job-desk/worker";
+import { expiredDeadline } from "@/lib/job-desk/matching";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -74,9 +75,10 @@ export async function POST(request: Request) {
       const { error } = await db.from("job_desk_vacancies").update({ review_status: input.decision === "approve" ? "approved" : "rejected" }).eq("id", vacancy.id);
       if (error) throw new Error(error.message);
     } else if (input.action === "record_submission") {
-      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,authorized_at,vacancy:job_desk_vacancies(application_method,application_email,email_verified)").eq("id", input.matchId).single();
+      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,authorized_at,vacancy:job_desk_vacancies(application_method,application_email,email_verified,status,review_status,duplicate_of,last_seen_at,description)").eq("id", input.matchId).single();
       const vacancy = Array.isArray(match?.vacancy) ? match.vacancy[0] : match?.vacancy;
       if (!match || match.status !== "needs_human" || !match.authorized_at || !["portal", "email"].includes(vacancy?.application_method ?? "")) return NextResponse.json({ error: "A client-authorized application awaiting human submission is required." }, { status: 409 });
+      if (vacancy?.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || expiredDeadline(vacancy.description) || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) return NextResponse.json({ error: "Refresh the vacancy before recording an application." }, { status: 409 });
       if (vacancy?.application_method === "email" && (!vacancy.email_verified || !vacancy.application_email)) return NextResponse.json({ error: "Verify the employer email address before recording a sent application." }, { status: 409 });
       const [{ data: order }, { data: cv }] = await Promise.all([
         db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", match.order_id).single(),
@@ -89,10 +91,10 @@ export async function POST(request: Request) {
       await db.from("job_desk_matches").update({ status: "submitted", submitted_at: now }).eq("id", match.id);
       result = { confirmation: input.confirmation };
     } else {
-      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,cover_letter,vacancy:job_desk_vacancies(status,review_status,duplicate_of,last_seen_at)").eq("id", input.matchId).single();
+      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,cover_letter,reasons,vacancy:job_desk_vacancies(status,review_status,duplicate_of,last_seen_at,description)").eq("id", input.matchId).single();
       if (!match || match.status !== "ready" || !match.cover_letter) return NextResponse.json({ error: "Prepare the application before requesting consent." }, { status: 409 });
       const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
-      if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) return NextResponse.json({ error: "Refresh and review the vacancy before requesting client consent." }, { status: 409 });
+      if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || expiredDeadline(vacancy.description) || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:")) || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) return NextResponse.json({ error: "Refresh and review the vacancy before requesting client consent." }, { status: 409 });
       const { data: latestCv } = await db.from("job_desk_documents").select("status").eq("order_id", match.order_id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
       if (latestCv?.status !== "approved") return NextResponse.json({ error: "Approve the latest CV before requesting consent." }, { status: 409 });
       const { token, hash } = createAuthorizationToken();

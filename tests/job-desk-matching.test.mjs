@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scoreVacancy, submissionHoldReason } from "../src/lib/job-desk/matching.ts";
+import { expiredDeadline, scoreVacancy, submissionHoldReason } from "../src/lib/job-desk/matching.ts";
 
 test("remote role with matching skills ranks ahead of unrelated onsite role", () => {
   const profile = { target_job_titles: ["Data Engineer"], preferred_locations: ["Nairobi"], remote_preference: "remote", structured_profile: { skills: ["Python", "SQL", "Kafka"] } };
@@ -22,4 +22,19 @@ test("assessment and identity requests pause automated submission", () => {
   assert.match(submissionHoldReason("Send CV and passport copy", "candidate@example.com", 1200), /identity/);
   assert.equal(submissionHoldReason("Email CV to apply", "candidate@example.com", 1200), null);
   assert.match(submissionHoldReason("Email CV to apply", null, 1200), /email/);
+});
+
+test("Kenya candidate does not receive geographically restricted remote jobs", () => {
+  const profile = { target_job_titles: ["Data Engineer"], remote_preference: "remote", structured_profile: { skills: ["Python", "SQL"] } };
+  const job = { title: "Data Engineer", description: "Python and SQL", workplace_type: "remote" };
+  assert.equal(scoreVacancy({ ...job, location: "Remote - United States" }, profile).score, 0);
+  assert.equal(scoreVacancy({ ...job, location: "Remote", description: "Applicants must be authorized to work in the US. Python and SQL." }, profile).score, 0);
+  assert.ok(scoreVacancy({ ...job, location: "Africa Remote" }, profile).score > 0);
+});
+
+test("expired deadline and irrelevant qualifications are screened before AI review", () => {
+  const profile = { target_job_titles: ["Accountant"], structured_profile: { skills: ["Bookkeeping"] } };
+  assert.equal(expiredDeadline("Application deadline: 2025-01-10", new Date("2026-09-30")), true);
+  assert.equal(scoreVacancy({ title: "Accountant", description: "Application deadline: 2025-01-10", location: "Nairobi", workplace_type: "onsite" }, profile).score, 0);
+  assert.equal(scoreVacancy({ title: "Aircraft Engineer", description: "Maintain aircraft", location: "Nairobi", workplace_type: "onsite" }, profile).score, 0);
 });
