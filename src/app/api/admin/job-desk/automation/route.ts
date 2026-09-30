@@ -11,6 +11,7 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("match"), orderId: z.string().uuid() }),
   z.object({ action: z.literal("prepare"), matchId: z.string().uuid() }),
   z.object({ action: z.literal("authorize_link"), matchId: z.string().uuid() }),
+  z.object({ action: z.literal("record_submission"), matchId: z.string().uuid(), confirmation: z.string().trim().min(5).max(300), personallySubmitted: z.literal(true) }),
   z.object({ action: z.literal("add_vacancy"), companyName: z.string().min(2).max(150), title: z.string().min(3).max(250), location: z.string().max(200), description: z.string().min(100).max(18000), applyUrl: z.string().url().max(1000), applicationMethod: z.enum(["portal", "email"]), applicationEmail: z.string().email().optional(), emailVerified: z.boolean().default(false) })
 ]);
 
@@ -45,6 +46,15 @@ export async function POST(request: Request) {
       const { data: match } = await db.from("job_desk_matches").select("id,order_id,status").eq("id", input.matchId).single();
       if (!match || match.status !== "suggested") return NextResponse.json({ error: "Suggested match not found." }, { status: 409 });
       await enqueueTask("prepare", `prepare:${match.id}`, match.order_id, { matchId: match.id });
+    } else if (input.action === "record_submission") {
+      const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,authorized_at,vacancy:job_desk_vacancies(application_method)").eq("id", input.matchId).single();
+      const vacancy = Array.isArray(match?.vacancy) ? match.vacancy[0] : match?.vacancy;
+      if (!match || match.status !== "needs_human" || !match.authorized_at || vacancy?.application_method !== "portal") return NextResponse.json({ error: "A client-authorized portal application awaiting human submission is required." }, { status: 409 });
+      const now = new Date().toISOString();
+      const { error } = await db.from("job_desk_applications").upsert({ match_id: match.id, order_id: match.order_id, method: "portal", status: "submitted", provider_response: { confirmation: input.confirmation, recorded_by: user.id }, submitted_at: now, error_message: null }, { onConflict: "match_id" });
+      if (error) throw new Error(error.message);
+      await db.from("job_desk_matches").update({ status: "submitted", submitted_at: now }).eq("id", match.id);
+      result = { confirmation: input.confirmation };
     } else {
       const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,cover_letter").eq("id", input.matchId).single();
       if (!match || match.status !== "ready" || !match.cover_letter) return NextResponse.json({ error: "Prepare the application before requesting consent." }, { status: 409 });

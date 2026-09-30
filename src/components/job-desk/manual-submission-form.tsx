@@ -1,0 +1,8 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+export function ManualSubmissionForm({ matchId }: { matchId: string }) {
+  const [message, setMessage] = useState("");
+  const router = useRouter();
+  return <form className="mt-3 flex flex-wrap gap-2" onSubmit={async (event) => { event.preventDefault(); const data = new FormData(event.currentTarget); const response = await fetch("/api/admin/job-desk/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "record_submission", matchId, confirmation: data.get("confirmation"), personallySubmitted: data.get("submitted") === "on" }) }); const body = await response.json(); setMessage(response.ok ? "Submission confirmation recorded." : body.error); if (response.ok) router.refresh(); }}><input name="confirmation" required minLength={5} placeholder="Employer confirmation/reference" aria-label="Employer confirmation or reference" className="h-9 min-w-56 border border-black/20 bg-white px-2 text-xs text-black" /><label className="flex items-center gap-1 text-xs"><input type="checkbox" name="submitted" required />I completed this submission</label><button type="submit" className="rounded border border-brand-blue px-3 text-xs font-bold text-brand-blue">Record submission</button>{message ? <p role="status" className="basis-full text-xs">{message}</p> : null}</form>;
+}
