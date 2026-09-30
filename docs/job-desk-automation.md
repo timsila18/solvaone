@@ -1,0 +1,11 @@
+# Job Desk automation
+
+The Job Desk ingests official Greenhouse and Lever public job feeds. Admins may add a verified vacancy manually. Feed listings are cached once for all clients; closed listings are removed from matching after a successful refresh. Candidate matching is deterministic and inexpensive. The top three new matches per paid order queue tailored one-page cover letters, with OpenAI usage and estimated cost recorded in `job_desk_ai_runs`.
+
+`job_desk_tasks` is a leased queue. `claim_job_desk_task` uses a row lock so only one worker can claim a task. A failed task is retried with backoff, up to three attempts. Supabase pg_cron calls the Vercel worker every five minutes using a token stored in Vault. The Vercel Hobby-compatible daily cron is a fallback; it is not sufficient alone for prompt queue processing.
+
+Every application requires an approved CV, recorded payment, client processing consent, a prepared cover letter, and separate authorization for the specific vacancy. Authorization links expire after seven days and are one-time use. Official ATS feeds provide discovery, not permission to submit applications through employer APIs. Such portal applications are marked `needs_human`. Only manually verified email-address vacancies can be sent automatically using Resend. `RESEND_API_KEY` and a verified `FROM_EMAIL` must be configured for this adapter. The provider message ID is stored as the submission confirmation. A timeout or uncertain provider outcome pauses for review and is not silently retried.
+
+The admin can view sources under `/dashboard/admin/job-desk/vacancies`, matches and actions on each order, and a client application report under each order's `report` route. Consent links can be sent manually over WhatsApp. No WhatsApp Business API or browser automation is assumed.
+
+Operational checks: inspect `job_desk_tasks` for failed tasks, `job_desk_sources.last_error` for feed failures, `job_desk_applications` for `needs_human`, and Supabase cron run history for scheduler health. Use the admin controls to retry a failed feed or matching run after fixing the cause. Do not mark a portal application submitted without an external confirmation.

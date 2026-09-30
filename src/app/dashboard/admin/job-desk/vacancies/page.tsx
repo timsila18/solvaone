@@ -1,0 +1,15 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { AppShell } from "@/components/dashboard/app-shell";
+import { SourceForm } from "@/components/job-desk/source-form";
+import { VacancyForm } from "@/components/job-desk/vacancy-form";
+import { AutomationControls } from "@/components/job-desk/automation-controls";
+import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
+export default async function VacanciesPage() {
+  const user = await getCurrentUser(); if (!user) redirect("/login");
+  const db = await createSupabaseServerClient();
+  const { data: account } = await db.from("users").select("role").eq("id", user.id).single();
+  if (!account || !["admin", "super_admin"].includes(account.role)) redirect("/dashboard");
+  const [{ data: sources }, { data: vacancies }, { count }] = await Promise.all([db.from("job_desk_sources").select("*").order("company_name"), db.from("job_desk_vacancies").select("id,title,company_name,location,provider,status,application_method,apply_url").eq("status", "open").order("last_seen_at", { ascending: false }).limit(100), db.from("job_desk_vacancies").select("id", { count: "exact", head: true }).eq("status", "open")]);
+  return <AppShell email={user.email} isAdmin><div className="border-b border-black/10 pb-6 dark:border-white/10"><Link href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Desk</Link><h1 className="mt-2 text-3xl font-black">Vacancy sources</h1><p className="mt-2 text-sm text-black/60 dark:text-white/60">{count ?? 0} open vacancies. Feed results are shared across clients.</p></div><section className="py-7"><h2 className="mb-4 text-lg font-bold">Add official ATS board</h2><SourceForm /><div className="mt-5 divide-y divide-black/10 dark:divide-white/10">{sources?.map((source) => <div key={source.id} className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm"><div><b>{source.company_name}</b> · {source.provider}/{source.site_token}<p className="text-xs text-black/50 dark:text-white/50">Last sync: {source.last_synced_at ? new Date(source.last_synced_at).toLocaleString() : "not yet"}{source.last_error ? ` · ${source.last_error}` : ""}</p></div><AutomationControls action="discover" id={source.id} label="Refresh" /></div>)}</div></section><section className="border-t border-black/10 py-7 dark:border-white/10"><h2 className="mb-4 text-lg font-bold">Add verified vacancy</h2><VacancyForm /></section><section className="border-t border-black/10 py-7 dark:border-white/10"><h2 className="mb-4 text-lg font-bold">Open vacancies</h2><div className="divide-y divide-black/10 dark:divide-white/10">{vacancies?.map((vacancy) => <div key={vacancy.id} className="py-3 text-sm"><a href={vacancy.apply_url} target="_blank" rel="noopener noreferrer" className="font-bold text-brand-blue">{vacancy.title}</a><p className="text-black/60 dark:text-white/60">{vacancy.company_name} · {vacancy.location} · {vacancy.provider} · {vacancy.application_method}</p></div>)}</div></section></AppShell>;
+}

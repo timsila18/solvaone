@@ -3,6 +3,7 @@ import { z } from "zod";
 import { logAdminAction, requireAdmin } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { enqueueTask } from "@/lib/job-desk/automation";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve_cv") }),
@@ -37,6 +38,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
       .eq("id", document.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId);
+    const { data: paidOrder } = await db.from("job_desk_orders").select("payment_status").eq("id", orderId).single();
+    if (paidOrder && ["paid", "waived"].includes(paidOrder.payment_status)) await enqueueTask("match", `match:${orderId}:approval`, orderId);
   } else if (parsed.data.action === "record_payment") {
     const { data: order, error: findError } = await db.from("job_desk_orders").select("id,payment_status,payment_reference").eq("id", orderId).single();
     if (findError || !order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
@@ -51,6 +54,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
       paid_at: new Date().toISOString()
     }).eq("id", orderId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const { data: cv } = await db.from("job_desk_documents").select("id").eq("order_id", orderId).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
+    if (cv) await enqueueTask("match", `match:${orderId}:payment`, orderId);
   } else {
     const { error } = await db.from("job_desk_orders").update({ status: parsed.data.status }).eq("id", orderId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

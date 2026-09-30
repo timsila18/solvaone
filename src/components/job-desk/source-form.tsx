@@ -1,0 +1,8 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+export function SourceForm() {
+  const [message, setMessage] = useState("");
+  const router = useRouter();
+  return <form className="grid gap-3 sm:grid-cols-[120px_1fr_1fr_auto]" onSubmit={async (event) => { event.preventDefault(); const data = new FormData(event.currentTarget); const response = await fetch("/api/admin/job-desk/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add_source", provider: data.get("provider"), siteToken: data.get("siteToken"), companyName: data.get("companyName") }) }); const body = await response.json(); setMessage(response.ok ? "Source saved and discovery queued." : body.error); if (response.ok) router.refresh(); }}><select name="provider" aria-label="Provider" className="h-10 border border-black/20 bg-white px-2 text-sm text-black"><option value="greenhouse">Greenhouse</option><option value="lever">Lever</option></select><input name="siteToken" placeholder="Board token" aria-label="Board token" required className="h-10 border border-black/20 bg-white px-2 text-sm text-black" /><input name="companyName" placeholder="Company name" aria-label="Company name" required className="h-10 border border-black/20 bg-white px-2 text-sm text-black" /><button className="h-10 bg-brand-blue px-3 text-sm font-bold text-white">Add source</button>{message ? <p role="status" className="sm:col-span-4 text-sm">{message}</p> : null}</form>;
+}
