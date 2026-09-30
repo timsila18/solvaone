@@ -12,7 +12,7 @@ export function JobDeskIntakeForm() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [paymentStatus, setPaymentStatus] = useState("unpaid");
+  const [paymentStatus, setPaymentStatus] = useState("paid");
   const needsPaymentProof = paymentStatus === "paid" || paymentStatus === "partially_paid";
 
   async function submit(formData: FormData) {
@@ -91,7 +91,7 @@ export function JobDeskIntakeForm() {
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Field label="Payment status"><select name="paymentStatus" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)} className={selectClass}><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="partially_paid">Partially paid</option><option value="waived">Waived</option></select></Field>
           <Field label="Method"><select name="paymentMethod" defaultValue="mpesa" className={selectClass}><option value="mpesa">M-Pesa</option><option value="cash">Cash</option><option value="bank">Bank</option><option value="manual">Manual</option><option value="other">Other</option></select></Field>
-          <Field label="Amount (KES)"><Input name="amount" type="number" min={needsPaymentProof ? "0.01" : "0"} step="0.01" defaultValue="0" required /></Field>
+          <Field label="Amount (KES)"><Input name="amount" type="number" min={needsPaymentProof ? "0.01" : "0"} step="0.01" placeholder="Amount received" required /></Field>
           <Field label="Payment reference"><Input name="paymentReference" required={needsPaymentProof} minLength={needsPaymentProof ? 3 : undefined} placeholder="M-Pesa receipt or note" /></Field>
         </div>
       </section>
