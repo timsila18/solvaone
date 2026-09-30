@@ -54,11 +54,13 @@ export async function discoverVacancies(sourceId: string) {
 
 export async function matchOrder(orderId: string) {
   const db = createSupabaseAdminClient();
-  const { data: order } = await db.from("job_desk_orders").select("id,client_id,payment_status,status,profile:job_desk_candidate_profiles(*)").eq("id", orderId).single();
+  const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,client_id,payment_status,status").eq("id", orderId).single();
+  if (orderError) throw new Error(orderError.message);
   if (!order || !["paid", "waived"].includes(order.payment_status)) throw new Error("Paid Job Desk order required.");
   const { data: approved } = await db.from("job_desk_documents").select("id").eq("order_id", orderId).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
   if (!approved) throw new Error("Approve the candidate CV before matching vacancies.");
-  const profile = (Array.isArray(order.profile) ? order.profile[0] : order.profile) as Record<string, unknown> | null;
+  const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
+  if (profileError) throw new Error(profileError.message);
   if (!profile) throw new Error("Candidate profile is missing.");
   const { data: vacancies, error } = await db.from("job_desk_vacancies").select("*").eq("status", "open").order("last_seen_at", { ascending: false }).limit(1000);
   if (error) throw new Error(error.message);

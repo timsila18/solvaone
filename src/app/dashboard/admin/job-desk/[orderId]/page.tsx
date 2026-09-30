@@ -17,8 +17,8 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   if (profile?.role !== "admin" && profile?.role !== "super_admin") redirect("/dashboard");
   const { orderId } = await params;
 
-  const [{ data: order }, { data: files }, { data: document }, { data: questionnaire }, { data: aiRun }, { data: matches }, { data: tasks }] = await Promise.all([
-    db.from("job_desk_orders").select("*, client:job_desk_clients(*), profile:job_desk_candidate_profiles(*)").eq("id", orderId).single(),
+  const [{ data: order, error: orderError }, { data: files }, { data: document }, { data: questionnaire }, { data: aiRun }, { data: matches }, { data: tasks }] = await Promise.all([
+    db.from("job_desk_orders").select("*, client:job_desk_clients(*)").eq("id", orderId).single(),
     db.from("job_desk_intake_files").select("id,file_name,document_kind,extraction_status,extraction_warning,created_at").eq("order_id", orderId).order("created_at", { ascending: true }),
     db.from("job_desk_documents").select("id,title,html,status,version,structured_content,created_at").eq("order_id", orderId).eq("document_type", "revamped_cv").neq("status", "superseded").order("version", { ascending: false }).limit(1).maybeSingle(),
     db.from("job_desk_questionnaires").select("questions,status,responses").eq("order_id", orderId).maybeSingle(),
@@ -26,9 +26,11 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
     db.from("job_desk_matches").select("id,score,reasons,gaps,status,cover_letter,authorized_at,vacancy:job_desk_vacancies(title,company_name,location,apply_url,application_method,application_email,email_verified),application:job_desk_applications(status,provider_message_id,error_message)").eq("order_id", orderId).order("score", { ascending: false }).limit(50),
     db.from("job_desk_tasks").select("id,task_type,status,last_error,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(12)
   ]);
+  if (orderError && orderError.code !== "PGRST116") throw new Error(`Could not load Job Desk order: ${orderError.message}`);
   if (!order) notFound();
+  const { data: candidate, error: candidateError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
+  if (candidateError) throw new Error(`Could not load candidate profile: ${candidateError.message}`);
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
-  const candidate = Array.isArray(order.profile) ? order.profile[0] : order.profile;
   const file = files?.find((item) => item.document_kind === "cv");
   const questions = (questionnaire?.questions ?? []) as Question[];
 

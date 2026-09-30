@@ -66,11 +66,13 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
   const db = createSupabaseAdminClient();
   const { data: order, error: orderError } = await db
     .from("job_desk_orders")
-    .select("*, client:job_desk_clients(*), profile:job_desk_candidate_profiles(*)")
+    .select("*, client:job_desk_clients(*)")
     .eq("id", orderId)
     .single();
 
   if (orderError || !order) throw new Error(orderError?.message ?? "Job Desk order was not found.");
+  const { data: candidateProfile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
+  if (profileError || !candidateProfile) throw new Error(profileError?.message ?? "Candidate profile was not found.");
 
   const { data: intakeFile } = await db
     .from("job_desk_intake_files")
@@ -86,7 +88,7 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
     throw new Error("The CV does not contain enough readable text. Paste the CV text into intake instructions or upload a text-based PDF/DOCX.");
   }
 
-  const profile = (order.profile ?? {}) as Record<string, unknown>;
+  const profile = candidateProfile as Record<string, unknown>;
   const client = (order.client ?? {}) as Record<string, unknown>;
   const promptInput = {
     sourceText,

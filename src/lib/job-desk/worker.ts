@@ -12,11 +12,13 @@ async function prepareMatch(matchId: string) {
   const db = createSupabaseAdminClient();
   const { data: match } = await db.from("job_desk_matches").select("*,vacancy:job_desk_vacancies(*)").eq("id", matchId).single();
   if (!match || !["suggested", "preparing"].includes(match.status)) return;
-  const { data: order } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*),profile:job_desk_candidate_profiles(*)").eq("id", match.order_id).single();
+  const { data: order, error: orderError } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", match.order_id).single();
+  if (orderError) throw new Error(orderError.message);
   const { data: cv } = await db.from("job_desk_documents").select("html").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
   if (!order || !cv || !["paid", "waived"].includes(order.payment_status)) throw new Error("Paid order and approved CV required.");
+  const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
+  if (profileError || !profile) throw new Error(profileError?.message ?? "Candidate profile is missing.");
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
-  const profile = Array.isArray(order.profile) ? order.profile[0] : order.profile;
   const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
   if (!vacancy || vacancy.status !== "open") throw new Error("Vacancy is closed.");
   const prompt = JSON.stringify({ candidate: profile?.structured_profile, cv: plainText(cv.html).slice(0, 14000), clientName: client.full_name, role: vacancy.title, company: vacancy.company_name, description: vacancy.description.slice(0, 10000) });
