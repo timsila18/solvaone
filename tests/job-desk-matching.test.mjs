@@ -36,6 +36,7 @@ test("Kenya candidate does not receive geographically restricted remote jobs", (
   const profile = { target_job_titles: ["Data Engineer"], remote_preference: "remote", structured_profile: { skills: ["Python", "SQL"] } };
   const job = { title: "Data Engineer", description: "Python and SQL", workplace_type: "remote" };
   assert.equal(scoreVacancy({ ...job, location: "Remote - United States" }, profile).score, 0);
+  assert.equal(scoreVacancy({ ...job, location: "South Africa - JHB" }, profile).score, 0);
   assert.equal(scoreVacancy({ ...job, location: "Remote", description: "Applicants must be authorized to work in the US. Python and SQL." }, profile).score, 0);
   assert.ok(scoreVacancy({ ...job, location: "Africa Remote" }, profile).score > 0);
 });

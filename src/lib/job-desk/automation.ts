@@ -125,17 +125,17 @@ export async function matchOrder(orderId: string) {
     const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id", ignoreDuplicates: true });
     if (matchError) throw new Error(matchError.message);
   }
-  const { data: top, error: topError } = await db.from("job_desk_matches").select("id,score,vacancy:job_desk_vacancies(id,provider,application_method,email_verified,application_email)").eq("order_id", orderId).eq("status", "suggested").gte("score", 50).order("score", { ascending: false }).limit(50);
+  const { data: top, error: topError } = await db.from("job_desk_matches").select("id,score,vacancy:job_desk_vacancies(id,provider,application_method,email_verified,application_email)").eq("order_id", orderId).eq("status", "suggested").gte("score", 25).order("score", { ascending: false }).limit(50);
   if (topError) throw new Error(topError.message);
   const routeRank = (item: NonNullable<typeof top>[number]) => {
     const vacancy = Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy;
     return vacancy?.application_method === "email" && vacancy.email_verified && vacancy.application_email ? 2 : vacancy?.provider === "greenhouse" ? 1 : 0;
   };
-  // Prefer supported submission routes without weakening candidate relevance thresholds.
+  // Full-advert evidence review, not title-word percentage, qualifies these selected matches.
   for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score).slice(0, 10)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
-  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: 10, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.filter(item => item.score >= 50 && (item.vacancy.application_method === "email" && item.vacancy.email_verified && item.vacancy.application_email || item.vacancy.provider === "greenhouse")).length, refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
+  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: 10, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.filter(item => item.score >= 25 && (item.vacancy.application_method === "email" && item.vacancy.email_verified && item.vacancy.application_email || item.vacancy.provider === "greenhouse")).length, refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
 }
 
 export function createAuthorizationToken() {

@@ -60,7 +60,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
       if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of ||
           Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 ||
           !match.cover_letter || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:")) ||
-          applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile, scope).score < 50) continue;
+          applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile, scope).score < 25) continue;
       const { data: authorized } = await db.from("job_desk_matches")
         .update({ status: "authorized", authorized_at: new Date().toISOString(), authorized_ip_hash: null })
         .eq("id", match.id).eq("status", "ready").select("id").maybeSingle();

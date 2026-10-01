@@ -114,7 +114,7 @@ async function prepareMatch(matchId: string) {
   if (updateError) throw new Error(updateError.message);
   if (!ready || !order.application_authorized || !["approved", "active"].includes(order.status)) return;
   const scope = readApplicationScope(order.service_details);
-  if (!scope || applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile, scope).score < 50) return;
+  if (!scope || applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile, scope).score < 25 || !Array.isArray(match.reasons) || !match.reasons.some((reason: string) => reason.startsWith("Suitability review:"))) return;
   const { data: authorized, error: authorizationError } = await db.from("job_desk_matches")
     .update({ status: "authorized", authorized_at: new Date().toISOString(), authorized_ip_hash: null })
     .eq("id", matchId).eq("status", "ready").select("id").maybeSingle();
@@ -145,7 +145,7 @@ async function submitMatch(matchId: string) {
   if (!match.authorized_ip_hash) {
     const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
     const outside = scope && vacancy ? applicationScopeHold(scope, vacancy) : "Scoped application authorization is missing.";
-    if (outside || !scope || scoreVacancy(vacancy, profile, scope).score < 50) {
+    if (outside || !scope || scoreVacancy(vacancy, profile, scope).score < 25 || !Array.isArray(match.reasons) || !match.reasons.some((reason: string) => reason.startsWith("Suitability review:"))) {
       await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
       await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: outside || "Vacancy no longer meets the automatic suitability threshold." }, { onConflict: "match_id" });
       await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);

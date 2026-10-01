@@ -37,7 +37,7 @@ export function vacancyEligibility(vacancy: MatchableVacancy, profile: Record<st
   const locations = list(profile.preferred_locations).map((item) => item.toLowerCase());
   if (expiredDeadline(vacancy.description)) return "Advert's stated application deadline has passed.";
   const kenya = /\b(kenya|nairobi|mombasa|kisumu|nakuru|eldoret)\b/i;
-  const worldwide = /\b(worldwide|anywhere|global|africa|emea|east africa)\b/i;
+  const worldwide = /\b(worldwide|anywhere|global|emea|east africa)\b|^(?:remote[\s,-]+)?africa(?:[\s,-]+remote)?$/i;
   const explicitExclusion = /\b(?:us|usa|united states|canada|uk|united kingdom|europe|eu|australia|apac|americas)\s*(?:only|based|residents?|citizens?|work authorization|work permit|time zones?)\b|\b(?:only|must be based in|residents? of|citizens? of|authorized to work in|work authorization in|work permit for)\s+(?:the\s+)?(?:us|usa|united states|canada|uk|united kingdom|europe|eu|australia|apac|americas)\b/i;
   if (explicitExclusion.test(advert) || explicitExclusion.test(location)) return "Location or work-authorization restriction may exclude a candidate based in Kenya.";
   if (remote === "remote" && vacancy.workplace_type !== "remote") return "Candidate requested remote work only.";
