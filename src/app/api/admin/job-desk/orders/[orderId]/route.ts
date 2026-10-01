@@ -34,7 +34,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
       .select("id")
       .eq("order_id", orderId)
       .eq("document_type", "revamped_cv")
-      .eq("status", "review")
+      .in("status", ["review", "approved"])
       .order("version", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -42,9 +42,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     const { error } = await db
       .from("job_desk_documents")
       .update({ status: "approved", approved_by: user.id, approved_at: new Date().toISOString() })
-      .eq("id", document.id);
+      .eq("id", document.id)
+      .eq("status", "review");
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId);
+    const { error: statusError } = await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId).in("status", ["cv_review", "approved"]);
+    if (statusError) return NextResponse.json({ error: statusError.message }, { status: 500 });
     const { data: paidOrder } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", orderId).single();
     const { data: serviceOrder } = await db.from("job_desk_orders").select("service_type").eq("id", orderId).single();
     if (serviceOrder?.service_type === "job_search_full" && hasVerifiedJobDeskPayment(paidOrder)) {
