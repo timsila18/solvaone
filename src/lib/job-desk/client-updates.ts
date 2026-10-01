@@ -2,8 +2,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enqueueTask } from "./automation";
 import { applicationOutcome } from "./submission-preflight";
 
-export type ClientUpdate = "cv_review" | "cv_approved" | "matches_ready" | "application_submitted" | "application_needs_action";
-const clientUpdateEvents = new Set<ClientUpdate>(["cv_review", "cv_approved", "matches_ready", "application_submitted", "application_needs_action"]);
+export type ClientUpdate = "cv_review" | "cv_approved" | "matches_ready" | "application_submitted" | "application_needs_action" | "application_delivered" | "application_delivery_failed";
+const clientUpdateEvents = new Set<ClientUpdate>(["cv_review", "cv_approved", "matches_ready", "application_submitted", "application_needs_action", "application_delivered", "application_delivery_failed"]);
 
 export async function queueClientUpdate(orderId: string, event: ClientUpdate, reference: string) {
   return enqueueTask("notify_client", `client-update:${event}:${reference}`, orderId, { event, reference });
@@ -14,8 +14,10 @@ export function clientUpdateContent(event: ClientUpdate, name: string, role?: st
   const position = [role, company].filter(Boolean).join(" at ");
   const updates: Record<ClientUpdate, { subject: string; body: string }> = {
     cv_review: { subject: "Your CV is being reviewed", body: "Your CV has been prepared and is awaiting a final review. We will update you when it is approved for job matching." },
-    cv_approved: { subject: "Your CV is approved", body: "Your CV has been approved. We are checking suitable, currently open vacancies against your experience and preferences. We will request your authorization before any application is submitted." },
-    matches_ready: { subject: "Your job matches are being prepared", body: "We have identified potential vacancies and are preparing the relevant application materials. We will share the suitable opportunities for your authorization. No application will be submitted without it." },
+    cv_approved: { subject: "Your CV is approved", body: "Your CV has been approved. We are checking suitable, currently open vacancies against your experience and preferences. Applications proceed within your recorded authorization." },
+    matches_ready: { subject: "Your job matches are being prepared", body: "We have identified potential vacancies and are preparing the relevant application materials. Supported applications proceed within your recorded roles, locations and exclusions; exceptions are reviewed by your administrator." },
+    application_delivered: { subject: `Application email delivered: ${position}`, body: "The email service confirms delivery to the employer's mail server. This is not confirmation of employer review or an interview." },
+    application_delivery_failed: { subject: `Application delivery needs attention: ${position}`, body: "The email service reported a delivery problem. Your administrator will review it; we will not automatically send duplicate applications." },
     application_submitted: { subject: `Application submitted${position ? `: ${position}` : ""}`, body: `Your application${position ? ` for ${position}` : ""} was submitted through the employer's supported application method. Keep an eye on your email for any reply or next steps from the employer.` },
     application_needs_action: { subject: `Application needs attention${position ? `: ${position}` : ""}`, body: `The application${position ? ` for ${position}` : ""} could not be completed automatically. An employer portal, assessment, identity check or another step needs human attention. We have paused this application and will not claim it was submitted.` }
   };
@@ -42,7 +44,7 @@ export async function sendClientUpdate(orderId: string, event: ClientUpdate, ref
     const vacancy = Array.isArray(match?.vacancy) ? match.vacancy[0] : match?.vacancy;
     role = vacancy?.title;
     company = vacancy?.company_name;
-    if (event === "application_submitted") {
+    if (["application_submitted", "application_delivered", "application_delivery_failed"].includes(event)) {
       const { data: application, error: applicationError } = await db.from("job_desk_applications").select("status,method,provider_message_id,provider_response").eq("match_id", reference).eq("order_id", orderId).maybeSingle();
       if (applicationError) throw new Error(applicationError.message);
       if (application?.status !== "submitted") throw new Error("No submission evidence is available for this client update.");

@@ -36,7 +36,10 @@ export function canRetrySubmission(application: { status?: string; provider_resp
 }
 
 export function applicationOutcome(application: { status?: string; method?: string; provider_message_id?: string | null; provider_response?: unknown } | null) {
-  const evidence = application?.provider_response as { confirmation?: string } | null;
+  const evidence = application?.provider_response as { confirmation?: string; delivery?: { event?: string } } | null;
+  if (evidence?.delivery?.event === "email.delivered") return "Delivered to employer mail server; employer review not confirmed";
+  if (["email.bounced", "email.failed", "email.complained"].includes(evidence?.delivery?.event ?? "")) return "Email delivery problem: administrator review required";
+  if (evidence?.delivery?.event === "email.delivery_delayed") return "Email delivery delayed";
   if (application?.status === "submitted" && evidence?.confirmation) return "Confirmed submitted";
   if (application?.status === "submitted" && application?.provider_message_id) return "Email accepted by provider; employer receipt not confirmed";
   if (application?.status === "submitted") return "Awaiting submission evidence";
