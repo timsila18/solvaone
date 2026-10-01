@@ -7,6 +7,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { startJobDeskPayment } from "@/lib/job-desk/checkout";
 import { getJobDeskService } from "@/lib/job-desk/services";
 import { normalizeSafaricomPhone } from "@/lib/payments";
+import { createApplicationScope } from "@/lib/job-desk/application-scope";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -32,6 +33,9 @@ const schema = z.object({
   linkedInEmail: z.union([z.literal(""), z.string().trim().email().max(254)]),
   preferredIndustries: z.string().trim().max(1000),
   preferredLocations: z.string().trim().max(1000),
+  excludedEmployers: z.string().trim().max(1000),
+  excludedRoles: z.string().trim().max(1000),
+  excludedKeywords: z.string().trim().max(1000),
   employmentTypes: z.string().trim().max(500),
   remotePreference: z.enum(["onsite", "hybrid", "remote", "flexible"]),
   experienceLevel: z.string().trim().max(120),
@@ -39,10 +43,12 @@ const schema = z.object({
   instructions: z.string().trim().max(8000),
   pastedCvText: z.string().trim().max(50000),
   consentToProcess: z.literal("true"),
+  applicationAuthorization: z.string().optional(),
   website: z.string().max(200).default("")
 }).superRefine((value, context) => {
   if (value.serviceType === "job_search_full" && value.targetJobTitles.length < 2) context.addIssue({ code: "custom", path: ["targetJobTitles"], message: "Target role is required." });
   if (value.serviceType === "job_search_full" && !value.email) context.addIssue({ code: "custom", path: ["email"], message: "An email address is required for application updates." });
+  if (value.serviceType === "job_search_full" && value.applicationAuthorization !== "true") context.addIssue({ code: "custom", path: ["applicationAuthorization"], message: "Authorize applications within your selected job preferences." });
   if (value.serviceType === "interview_coaching" && (!value.positionName || !value.organizationName)) context.addIssue({ code: "custom", path: ["positionName"], message: "Position and organization are required." });
   if (value.serviceType === "linkedin_revamp" && (!/^https:\/\/(?:www\.)?linkedin\.com\/in\/[a-z0-9%_-]+\/?(?:\?.*)?$/i.test(value.linkedInUrl) || !value.linkedInEmail)) context.addIssue({ code: "custom", path: ["linkedInUrl"], message: "A LinkedIn profile link and contact email are required." });
   if (/\bpassword\s*[:=]/i.test(value.instructions)) context.addIssue({ code: "custom", path: ["instructions"], message: "Do not send account passwords." });
@@ -131,18 +137,28 @@ export async function POST(request: Request) {
     });
     if (profileError) throw new Error(profileError.message);
 
+    const scope = parsed.data.serviceType === "job_search_full" ? createApplicationScope({
+      targetRoles: parsed.data.targetJobTitles,
+      preferredLocations: parsed.data.preferredLocations,
+      remotePreference: parsed.data.remotePreference,
+      excludedEmployers: parsed.data.excludedEmployers,
+      excludedRoles: parsed.data.excludedRoles,
+      excludedKeywords: parsed.data.excludedKeywords,
+      channel: "website",
+      evidence: "Client checked the scoped application authorization box on the website intake."
+    }) : null;
     const { error: orderError } = await db.from("job_desk_orders").insert({
       id: orderId,
       client_id: clientId,
       service_type: parsed.data.serviceType,
-      service_details: { positionName: parsed.data.positionName, organizationName: parsed.data.organizationName, linkedInUrl: parsed.data.linkedInUrl, linkedInEmail: parsed.data.linkedInEmail },
+      service_details: { positionName: parsed.data.positionName, organizationName: parsed.data.organizationName, linkedInUrl: parsed.data.linkedInUrl, linkedInEmail: parsed.data.linkedInEmail, ...(scope ? { applicationScope: scope } : {}) },
       public_access_token_hash: createHash("sha256").update(accessToken).digest("hex"),
       status: "awaiting_payment",
       payment_status: "unpaid",
       amount: service.price,
       source_channel: "website",
       instructions: parsed.data.instructions || null,
-      application_authorized: false
+      application_authorized: Boolean(scope)
     });
     if (orderError) throw new Error(orderError.message);
 

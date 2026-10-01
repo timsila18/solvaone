@@ -9,6 +9,7 @@ import { hasVerifiedJobDeskPayment } from "./payment";
 import { createJobDeskCvDocx } from "./cv-docx";
 import { processJobDeskOrder } from "./service";
 import { queueClientUpdate, sendClientUpdate, type ClientUpdate } from "./client-updates";
+import { applicationScopeHold, readApplicationScope } from "./application-scope";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
@@ -22,7 +23,12 @@ async function queueUpdateWithoutChangingSubmission(orderId: string, event: Clie
 async function prepareMatch(matchId: string) {
   const db = createSupabaseAdminClient();
   const { data: match } = await db.from("job_desk_matches").select("*,vacancy:job_desk_vacancies(*)").eq("id", matchId).single();
-  if (!match || !["suggested", "preparing"].includes(match.status)) return;
+  if (!match) return;
+  if (match.status === "authorized" && match.authorized_at && !match.authorized_ip_hash) {
+    await enqueueTask("submit", `submit:${matchId}`, match.order_id, { matchId });
+    return;
+  }
+  if (!["suggested", "preparing"].includes(match.status)) return;
   const { data: order, error: orderError } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", match.order_id).single();
   if (orderError) throw new Error(orderError.message);
   const { data: latestCv } = await db.from("job_desk_documents").select("id,status").eq("order_id", match.order_id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
@@ -58,8 +64,16 @@ async function prepareMatch(matchId: string) {
       throw cause;
     }
   }
-  const { error: updateError } = await db.from("job_desk_matches").update({ cover_letter: letter, status: "ready" }).eq("id", matchId).eq("status", "suggested");
+  const { data: ready, error: updateError } = await db.from("job_desk_matches").update({ cover_letter: letter, status: "ready" }).eq("id", matchId).in("status", ["suggested", "preparing"]).select("id").maybeSingle();
   if (updateError) throw new Error(updateError.message);
+  if (!ready || !order.application_authorized || !["approved", "active"].includes(order.status)) return;
+  const scope = readApplicationScope(order.service_details);
+  if (!scope || applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile).score < 50) return;
+  const { data: authorized, error: authorizationError } = await db.from("job_desk_matches")
+    .update({ status: "authorized", authorized_at: new Date().toISOString(), authorized_ip_hash: null })
+    .eq("id", matchId).eq("status", "ready").select("id").maybeSingle();
+  if (authorizationError) throw new Error(authorizationError.message);
+  if (authorized) await enqueueTask("submit", `submit:${matchId}`, order.id, { matchId });
 }
 
 async function submitMatch(matchId: string) {
@@ -78,7 +92,17 @@ async function submitMatch(matchId: string) {
   const { data: cv } = await db.from("job_desk_documents").select("html,title,structured_content").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").order("version", { ascending: false }).limit(1).maybeSingle();
   const { data: profile } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order?.client_id).maybeSingle();
   const client = Array.isArray(order?.client) ? order.client[0] : order?.client;
-  if (!order || !cv || !profile || !hasVerifiedJobDeskPayment(order) || !client?.consent_to_process) throw new Error("Order, consent, verified payment, candidate profile or approved CV missing.");
+  if (!order || !cv || !profile || !hasVerifiedJobDeskPayment(order) || !client?.consent_to_process || !["approved", "active"].includes(order.status)) throw new Error("Order, consent, verified payment, candidate profile or approved CV missing or paused.");
+  if (!match.authorized_ip_hash) {
+    const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
+    const outside = scope && vacancy ? applicationScopeHold(scope, vacancy) : "Scoped application authorization is missing.";
+    if (outside || !scope || scoreVacancy(vacancy, profile).score < 50) {
+      await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+      await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: outside || "Vacancy no longer meets the automatic suitability threshold." }, { onConflict: "match_id" });
+      await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
+      return;
+    }
+  }
   const cvPlain = plainText(String(cv.html));
   const pauseReason = submissionHoldReason(String(vacancy?.description ?? ""), client.email ?? null, cvPlain.length);
   if (pauseReason) {

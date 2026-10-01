@@ -6,6 +6,7 @@ import { checkRateLimit, clientIpFromHeaders, logAdminAction, rateLimitResponse,
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { enqueueTask } from "@/lib/job-desk/automation";
+import { createApplicationScope } from "@/lib/job-desk/application-scope";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -26,6 +27,9 @@ const intakeSchema = z.object({
   targetJobTitles: z.string().max(1000),
   preferredIndustries: z.string().max(1000),
   preferredLocations: z.string().max(1000),
+  excludedEmployers: z.string().max(1000),
+  excludedRoles: z.string().max(1000),
+  excludedKeywords: z.string().max(1000),
   employmentTypes: z.string().max(500),
   remotePreference: z.enum(["onsite", "hybrid", "remote", "flexible"]),
   experienceLevel: z.string().max(120),
@@ -36,9 +40,13 @@ const intakeSchema = z.object({
   paymentMethod: z.enum(["mpesa", "cash", "bank", "manual", "other"]),
   amount: z.coerce.number().min(0).max(1000000),
   paymentReference: z.string().max(160),
-  consentToProcess: z.literal("true")
+  consentToProcess: z.literal("true"),
+  applicationAuthorization: z.string().optional(),
+  authorizationEvidence: z.string().trim().max(1000)
 }).superRefine((input, context) => {
   if (input.serviceType === "job_search_full" && !input.email) context.addIssue({ code: "custom", path: ["email"], message: "Add the client's email for application updates." });
+  if (input.serviceType === "job_search_full" && !input.targetJobTitles.trim()) context.addIssue({ code: "custom", path: ["targetJobTitles"], message: "Record authorized target roles." });
+  if (input.serviceType === "job_search_full" && (input.applicationAuthorization !== "true" || input.authorizationEvidence.length < 8)) context.addIssue({ code: "custom", path: ["applicationAuthorization"], message: "Record the client's explicit application authorization and where it was given." });
   if (["paid", "partially_paid"].includes(input.paymentStatus)) {
     if (input.amount <= 0) context.addIssue({ code: "custom", path: ["amount"], message: "Enter the verified amount paid." });
     if (input.paymentReference.trim().length < 3) context.addIssue({ code: "custom", path: ["paymentReference"], message: "Enter the verified payment reference." });
@@ -120,6 +128,16 @@ export async function POST(request: Request) {
     if (profileError) throw new Error(profileError.message);
 
     const isPaid = parsed.data.paymentStatus === "paid" || parsed.data.paymentStatus === "waived";
+    const scope = parsed.data.serviceType === "job_search_full" ? createApplicationScope({
+      targetRoles: parsed.data.targetJobTitles,
+      preferredLocations: parsed.data.preferredLocations,
+      remotePreference: parsed.data.remotePreference,
+      excludedEmployers: parsed.data.excludedEmployers,
+      excludedRoles: parsed.data.excludedRoles,
+      excludedKeywords: parsed.data.excludedKeywords,
+      channel: "admin_recorded",
+      evidence: parsed.data.authorizationEvidence
+    }) : null;
     const { error: orderError } = await db.from("job_desk_orders").insert({
       id: orderId,
       client_id: client.id,
@@ -132,7 +150,9 @@ export async function POST(request: Request) {
       payment_reference: parsed.data.paymentReference || null,
       paid_at: isPaid ? new Date().toISOString() : null,
       source_channel: parsed.data.source,
-      instructions: parsed.data.instructions || null
+      instructions: parsed.data.instructions || null,
+      application_authorized: Boolean(scope),
+      service_details: scope ? { applicationScope: scope } : {}
     });
     if (orderError) throw new Error(orderError.message);
 

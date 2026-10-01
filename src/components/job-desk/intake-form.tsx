@@ -86,6 +86,9 @@ export function JobDeskIntakeForm() {
           <Field label="Target job titles"><Textarea name="targetJobTitles" placeholder="One per line or comma-separated" /></Field>
           <Field label="Preferred industries"><Textarea name="preferredIndustries" placeholder="NGO, banking, technology..." /></Field>
           <Field label="Preferred locations"><Input name="preferredLocations" placeholder="Nairobi, Mombasa, remote..." /></Field>
+          <Field label="Employers to exclude"><Textarea name="excludedEmployers" placeholder="One name per line or comma-separated" /></Field>
+          <Field label="Roles to exclude"><Textarea name="excludedRoles" placeholder="One title per line or comma-separated" /></Field>
+          <Field label="Other exclusions"><Textarea name="excludedKeywords" placeholder="Sectors or conditions the client ruled out" /></Field>
           <Field label="Employment types"><Input name="employmentTypes" placeholder="Full-time, contract, internship..." /></Field>
           <Field label="Work arrangement">
             <select name="remotePreference" defaultValue="flexible" className={selectClass}>
@@ -124,6 +127,13 @@ export function JobDeskIntakeForm() {
         <input name="consentToProcess" value="true" type="checkbox" required className="mt-0.5 h-4 w-4 accent-brand-blue" />
         <span>I confirm the client authorized SolvaOne to process their CV and personal information for this service.</span>
       </label>
+
+      {serviceType === "job_search_full" ? <section className="space-y-4 border-t border-black/10 pt-5 dark:border-white/10">
+        <h2 className="text-lg font-black">One-time application authorization</h2>
+        <p className="text-sm leading-6">Confirm the client explicitly agreed that SolvaOne may submit their approved CV and tailored letters to genuine jobs matching the roles, locations, work arrangement and exclusions recorded above. Sending a CV alone is not this authorization. Assessments, identity checks and out-of-scope roles still require the client.</p>
+        <Field label="Where the client authorized this"><Input name="authorizationEvidence" required minLength={8} maxLength={1000} placeholder="WhatsApp message date and short excerpt" /></Field>
+        <label className="flex items-start gap-3 text-sm font-semibold"><input name="applicationAuthorization" value="true" type="checkbox" required className="mt-1 h-4 w-4 accent-brand-blue" /><span>I have recorded the client's explicit permission for applications within this scope.</span></label>
+      </section> : <><input name="excludedEmployers" type="hidden" value="" /><input name="excludedRoles" type="hidden" value="" /><input name="excludedKeywords" type="hidden" value="" /><input name="authorizationEvidence" type="hidden" value="" /></>}
 
       {error ? <p role="alert" className="rounded-lg border border-black bg-black p-3 text-sm font-semibold text-white dark:border-white dark:bg-white dark:text-black">{error}</p> : null}
       <Button type="submit" disabled={busy} className="h-12 px-6">
