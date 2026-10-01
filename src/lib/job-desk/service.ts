@@ -8,6 +8,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction, logSystemEvent } from "@/lib/security";
 import { jobDeskModelOutputSchema, jobDeskProcessingOutputSchema, type JobDeskProcessingOutput } from "./types";
 import { hasVerifiedJobDeskPayment } from "./payment";
+import { cvDepthIssue } from "./cv-quality";
 
 type ProcessJobDeskOrderInput = {
   orderId: string;
@@ -26,15 +27,6 @@ function validationMessage(error: unknown) {
   }
   if (error instanceof SyntaxError) return "The CV response was not valid JSON.";
   return error instanceof Error ? error.message : "The CV response could not be read.";
-}
-
-function cvDepthIssue(output: JobDeskProcessingOutput) {
-  const sections = output.revampedCv.sections;
-  const text = sections.map((section) => section.html.replace(/<[^>]+>/g, " ")).join(" ").replace(/\s+/g, " ").trim();
-  if (sections.length < 5 || text.length < 3500) {
-    return `The CV needs more supported detail: ${sections.length} sections and ${text.length} characters of body text. Expand the real experience, skills, education and achievements without inventing facts.`;
-  }
-  return null;
 }
 
 function fingerprint(value: unknown) {
@@ -207,7 +199,8 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
         if ((response as { status?: string }).status !== "completed") throw new Error("The CV response was incomplete. Continue with a complete document.");
         const parsed = parseJson((response as { output_text?: string }).output_text ?? "");
         const depthIssue = cvDepthIssue(parsed);
-        if (depthIssue) throw new Error(depthIssue);
+        if (depthIssue?.blocking || (depthIssue && attempt < 3)) throw new Error(depthIssue.message);
+        if (depthIssue) parsed.processingNotes.push(depthIssue.message);
         output = parsed;
         break;
       } catch (error) {
