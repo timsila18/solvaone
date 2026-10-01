@@ -4,6 +4,25 @@ const generic = new Set(["and", "the", "for", "with", "senior", "junior", "lead"
 const words = (value: string) => new Set((value.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((word) => !generic.has(word)));
 const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
 
+const skillText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+export function documentedSkillMatches(skill: string, advert: string) {
+  const phrase = skillText(skill);
+  const text = ` ${skillText(advert)} `;
+  if (phrase.length < 3) return false;
+  if (text.includes(` ${phrase} `)) return true;
+  // Only explicit equivalent phrases, not arbitrary single-word overlap.
+  const equivalents = [
+    ["key account management", "account management", "managing key accounts"],
+    ["customer relationship management", "client relationship management", "crm"],
+    ["sales forecasting", "sales forecasts", "forecasting sales"],
+    ["team leadership", "team management", "leading sales teams"],
+    ["distributor management", "distribution management", "managing distributors"],
+    ["route to market", "route to market strategy"],
+    ["business development", "new business development"]
+  ];
+  return equivalents.some(group => group.includes(phrase) && group.some(item => text.includes(` ${item} `)));
+}
+
 export function expiredDeadline(advert: string, now = new Date()) {
   const match = advert.match(/\b(?:application\s+deadline|closing\s+date|apply\s+by)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\s+[a-z]+\s+\d{4})\b/i);
   if (!match) return false;
@@ -51,7 +70,7 @@ export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, 
     const terms = [...words(title)];
     return terms.length > 0 && terms.every(term => titleWords.has(term));
   });
-  const matchingSkills = skills.filter((skill) => skill.length >= 3 && description.includes(skill.toLowerCase()));
+  const matchingSkills = [...new Set(skills.map(skill => skillText(skill)))].filter(skill => documentedSkillMatches(skill, description));
   const industries = list(structured.industries).filter((industry) => industry.length > 3 && description.includes(industry.toLowerCase()));
   const reasons: string[] = [];
   const gaps: string[] = [];

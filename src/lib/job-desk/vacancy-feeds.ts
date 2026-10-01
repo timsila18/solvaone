@@ -14,6 +14,9 @@ export type FeedVacancy = {
 };
 
 export const recommendedSources: FeedSource[] = [
+  { provider: "ashby", site_token: "talentsafari", company_name: "Talent Safari" },
+  { provider: "ashby", site_token: "the-global-talent-co", company_name: "The Global Talent Co" },
+  { provider: "smartrecruiters", site_token: "AccorHotel", company_name: "Accor Kenya" },
   { provider: "greenhouse", site_token: "jumia", company_name: "Jumia" },
   { provider: "ashby", site_token: "M-KOPA", company_name: "M-KOPA" },
   { provider: "greenhouse", site_token: "scangroup", company_name: "WPP Scangroup" },
@@ -121,9 +124,11 @@ export async function fetchFeedJobs(source: FeedSource): Promise<Record<string, 
 
 async function fetchSmartRecruitersPostings(token: string) {
   const postings: Record<string, any>[] = [];
+  // Accor's worldwide board exceeds the bounded import size; use its official Kenya filter.
+  const countryFilter = token === "AccorHotel" ? "&country=ke" : "";
   let total = 0;
   do {
-    const page = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings?limit=100&offset=${postings.length}`);
+    const page = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings?limit=100&offset=${postings.length}${countryFilter}`);
     if (!Array.isArray(page.content) || !Number.isInteger(page.totalFound) || page.totalFound < 0 || page.totalFound > 1500) throw new Error("SmartRecruiters feed was incomplete or too large.");
     total = page.totalFound;
     if (!page.content.length && postings.length < total) throw new Error("SmartRecruiters returned an incomplete page; existing vacancies were retained.");

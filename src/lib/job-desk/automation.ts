@@ -96,11 +96,11 @@ export async function matchOrder(orderId: string) {
     if ((data ?? []).length < 1000) break;
   }
   const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
-  const candidates = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort((a, b) => b.score - a.score).slice(0, 24);
+  const candidates = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort((a, b) => b.score - a.score).slice(0, 64);
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
   const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
   let refreshedSources = 0;
-  if (matches.length < 3) {
+  if (matches.length < 10) {
     const { data: sources, error: sourceError } = await db.from("job_desk_sources").select("id,last_synced_at").eq("active", true).limit(100);
     if (sourceError) throw new Error(sourceError.message);
     const cutoff = Date.now() - 2 * 3600000;
@@ -134,7 +134,7 @@ export async function matchOrder(orderId: string) {
   for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score).slice(0, 10)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
-  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.filter(item => item.score >= 50 && (item.vacancy.application_method === "email" && item.vacancy.email_verified && item.vacancy.application_email || item.vacancy.provider === "greenhouse")).length, refreshedSources } };
+  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: 10, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.filter(item => item.score >= 50 && (item.vacancy.application_method === "email" && item.vacancy.email_verified && item.vacancy.application_email || item.vacancy.provider === "greenhouse")).length, refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
 }
 
 export function createAuthorizationToken() {

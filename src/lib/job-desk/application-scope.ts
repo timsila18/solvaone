@@ -28,8 +28,9 @@ type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evide
 };
 
 const entries = (value: string) => value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
+const locationEntries = (value: string[]) => value.filter((item, index) => !(item.toLowerCase() === "kenya" && index > 0 && /^(nairobi|mombasa|kisumu|nakuru|eldoret)$/i.test(value[index - 1])));
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-const terms = (value: string) => normalize(value).split(" ").filter((term) => term.length >= 3 && !["and", "the", "for", "with", "senior", "junior", "manager", "officer", "assistant", "associate", "executive", "specialist"].includes(term));
+const terms = (value: string) => normalize(value).split(" ").filter((term) => term.length >= 3 && !["and", "the", "for", "with", "senior", "junior", "national", "regional", "manager", "officer", "assistant", "associate", "executive", "specialist"].includes(term));
 
 export function createApplicationScope(input: ScopeInput): ApplicationScope {
   const targetRoles = entries(input.targetRoles);
@@ -39,7 +40,7 @@ export function createApplicationScope(input: ScopeInput): ApplicationScope {
   return {
     version: 1,
     targetRoles,
-    preferredLocations: entries(input.preferredLocations),
+    preferredLocations: locationEntries(entries(input.preferredLocations)),
     remotePreference: input.remotePreference,
     excludedEmployers: entries(input.excludedEmployers),
     excludedRoles: entries(input.excludedRoles),
@@ -69,7 +70,7 @@ export function readApplicationScope(details: unknown): ApplicationScope | null 
       ![value.preferredLocations, value.excludedEmployers, value.excludedRoles, value.excludedKeywords].every((items) => items.every((item) => typeof item === "string" && item.trim())) ||
       !["onsite", "hybrid", "remote", "flexible"].includes(value.remotePreference ?? "") ||
       !value.authorizedAt || Number.isNaN(Date.parse(value.authorizedAt)) || !["website", "admin_recorded"].includes(value.channel ?? "")) return null;
-  return value as ApplicationScope;
+  return { ...value, preferredLocations: locationEntries(value.preferredLocations) } as ApplicationScope;
 }
 
 export function applicationScopeHold(scope: ApplicationScope, vacancy: {
