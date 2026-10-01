@@ -9,15 +9,20 @@ const chain = {
 let responseDecision;
 let incompleteFirst = false;
 let calls = 0;
+let isolateFailures = false;
 const dependencies = {
   '@/lib/supabase/admin': { createSupabaseAdminClient: () => ({ from: () => Object.create(chain) }) },
   '@/lib/openai': { createOpenAIClient: () => ({ responses: { async create(request) {
     calls += 1;
     const input = JSON.parse(request.input.findLast(item => item.role === 'user').content);
-    assert.equal(input.reviewVersion, 5);
+    assert.equal(input.reviewVersion, 6);
     assert.equal(input.candidate.approvedCvText, 'Bachelor of Business Administration, Marketing');
     assert.equal(input.vacancies[0].description.length, 5000);
     if (incompleteFirst) { incompleteFirst = false; return { output_text: '{truncated' }; }
+    if (isolateFailures) {
+      if (input.vacancies.length > 1 || input.vacancies[0].id === 'broken') return { output_text: '{truncated' };
+      return { output_text: JSON.stringify({ decisions: input.vacancies.map(job => ({ ...responseDecision, id: job.id })) }) };
+    }
     return { output_text: JSON.stringify({ decisions: [responseDecision] }) };
   } } }) },
   '@/lib/solva-intelligence/costs': { extractTokenUsage: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }), estimateCost: () => 0 },
@@ -29,6 +34,12 @@ new Function('exports', 'module', 'require', ts.transpileModule(fs.readFileSync(
   const profile = { approvedCvText: 'Bachelor of Business Administration, Marketing' };
   responseDecision = { id: 'job', suitable: true, reason: 'Sales skills transfer', mandatoryChecks: [{ requirement: 'Luxury hospitality sales essential', cvEvidence: 'Not documented', supported: false }] };
   assert.equal((await mod.exports.reviewCandidateMatches('order', profile, [vacancy])).get('job').suitable, false);
+  responseDecision = { ...responseDecision, mandatoryChecks: [{ requirement: 'Sales experience', cvEvidence: 'National Sales Manager, 2024-2025', supported: true }] };
+  isolateFailures = true;
+  const isolated = await mod.exports.reviewCandidateMatches('order', profile, ['broken', 'valid1', 'valid2', 'valid3', 'valid4'].map(id => ({ ...vacancy, id })));
+  assert.equal(isolated.get('broken').suitable, false);
+  assert.match(isolated.get('broken').reason, /later retry/);
+  for (const id of ['valid1', 'valid2', 'valid3', 'valid4']) assert.equal(isolated.get(id).suitable, true);
   responseDecision = { ...responseDecision, mandatoryChecks: [{ requirement: 'Sales experience', cvEvidence: 'National Sales Manager, 2024-2025', supported: true }] };
   incompleteFirst = true;
   const before = calls;

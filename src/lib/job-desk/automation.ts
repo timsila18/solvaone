@@ -113,9 +113,10 @@ export async function matchOrder(orderId: string) {
     }
   }
   const selected = new Set(matches.map((item) => item.vacancy.id));
+  const deferred = new Set(candidates.filter(item => reviewed.get(item.vacancy.id)?.reason.startsWith("Review temporarily unavailable;")).map(item => item.vacancy.id));
   const { data: oldMatches, error: oldError } = await db.from("job_desk_matches").select("id,vacancy_id").eq("order_id", orderId).in("status", ["suggested", "preparing", "ready"]).limit(500);
   if (oldError) throw new Error(oldError.message);
-  const obsoleteIds = (oldMatches ?? []).filter((item) => !selected.has(item.vacancy_id)).map((item) => item.id);
+  const obsoleteIds = (oldMatches ?? []).filter((item) => !selected.has(item.vacancy_id) && !deferred.has(item.vacancy_id)).map((item) => item.id);
   if (obsoleteIds.length) {
     const { error: staleError } = await db.from("job_desk_matches").update({ status: "rejected", authorization_token_hash: null, authorization_expires_at: null }).in("id", obsoleteIds);
     if (staleError) throw new Error(staleError.message);
