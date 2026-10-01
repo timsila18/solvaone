@@ -2,100 +2,27 @@ import { z } from "zod";
 import { createOpenAIClient } from "@/lib/openai";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildProductPrompt } from "./prompts";
+import { cvDepthIssue, cvDepthStats, isUsableCv } from "./cv-depth";
 import { estimateCost, extractTokenUsage } from "./costs";
 import { hasPromptInjectionRisk, sanitizePayload, sectionsToHtml, stripUnsafeHtml } from "./safety";
 import { solvaOutputSchema, type GenerateDocumentInput, type SolvaOutput } from "./types";
 
 const MAX_GENERATIONS_PER_HOUR = 10;
-const CV_MIN_SECTION_COUNT = 9;
-const CV_MIN_TEXT_LENGTH = 10500;
-const CV_MIN_WORD_COUNT = 1400;
-const CV_MIN_BULLET_COUNT = 30;
-const CV_RECOVERABLE_TEXT_LENGTH = 8000;
-const CV_RECOVERABLE_WORD_COUNT = 1100;
 
 function isCvProduct(product: string) {
   return product === "cv_builder" || product === "cv_revamp";
 }
 
-function textFromHtml(html: string) {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<li[^>]*>/gi, "\n- ")
-    .replace(/<\/(p|div|section|h1|h2|h3|li)>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function wordCount(text: string) {
-  return text.split(/\s+/).filter(Boolean).length;
-}
-
-function cvDepthIssue(input: GenerateDocumentInput, output: SolvaOutput) {
-  if (!isCvProduct(input.product) || (input.mode && input.mode !== "full_document")) return null;
-
-  const combinedText = output.sections.map((section) => `${section.title} ${textFromHtml(section.html)}`).join(" ");
-  const sectionCount = output.sections.length;
-  const bulletCount = output.sections.reduce((count, section) => count + (section.html.match(/<li\b|(^|\n)\s*[-*\u2022]/gi)?.length ?? 0), 0);
-  const words = wordCount(combinedText);
-
-  if (sectionCount < CV_MIN_SECTION_COUNT || combinedText.length < CV_MIN_TEXT_LENGTH || words < CV_MIN_WORD_COUNT || bulletCount < CV_MIN_BULLET_COUNT) {
-    return [
-      "The CV is too short for SolvaOne's premium standard.",
-      `Current depth: ${sectionCount} sections, ${words} words, ${combinedText.length} text characters, ${bulletCount} bullets.`,
-      `Required minimum: ${CV_MIN_SECTION_COUNT}+ sections, ${CV_MIN_WORD_COUNT}+ words, ${CV_MIN_TEXT_LENGTH}+ text characters, and ${CV_MIN_BULLET_COUNT}+ useful bullets.`,
-      "Rewrite into a richer ATS-optimized CV targeting at least 3 full A4 pages in the premium PDF/DOCX layout.",
-      "Do not add fake employers, dates, qualifications, certifications, referees, awards, or exact metrics.",
-      "Never invent percentages, quantities, money, client counts, team sizes, project counts, KPIs, or any measurable result. Use supplied figures only; otherwise describe value qualitatively.",
-      "Balance compact sections so the final page is substantially filled without repetition, padding, or unsupported content.",
-      "Expand truthfully with role scope, professional summary depth, core competencies, career highlights, richer work bullets, technical tools, projects, leadership/volunteer details where provided, and missing-information prompts where details are absent."
-    ].join("\n");
-  }
-
-  return null;
-}
-
-function cvDepthStats(output: SolvaOutput) {
-  const combinedText = output.sections.map((section) => `${section.title} ${textFromHtml(section.html)}`).join(" ");
-  return {
-    sectionCount: output.sections.length,
-    bulletCount: output.sections.reduce((count, section) => count + (section.html.match(/<li\b|(^|\n)\s*[-*\u2022]/gi)?.length ?? 0), 0),
-    words: wordCount(combinedText),
-    textLength: combinedText.length
-  };
-}
-
-function isRecoverableCvDepth(input: GenerateDocumentInput, output: SolvaOutput) {
-  if (!isCvProduct(input.product) || (input.mode && input.mode !== "full_document")) return true;
-  const stats = cvDepthStats(output);
-  return stats.sectionCount >= CV_MIN_SECTION_COUNT && stats.bulletCount >= CV_MIN_BULLET_COUNT && stats.words >= CV_RECOVERABLE_WORD_COUNT && stats.textLength >= CV_RECOVERABLE_TEXT_LENGTH;
-}
-
-function markRecoverableCvDepth(output: SolvaOutput, issue: string) {
+function noteLimitedCvEvidence(output: SolvaOutput, issue: string) {
   return {
     ...output,
     improvementNotes: [
       ...output.improvementNotes,
-      "The CV has been delivered successfully. For an even stronger version, add measurable achievements, exact tools used, reporting scope, and leadership or project examples, then use Improve Section or Regenerate."
+      "This CV uses the details provided. Add verified achievements, tools, role scope or a target job advert later if you would like a more tailored version."
     ],
-    missingInformation: Array.from(
-      new Set([
-        ...output.missingInformation,
-        "To be provided: measurable achievements such as numbers handled, revenue, clients served, reports produced, team size, projects completed, or turnaround improvements.",
-        "To be provided: exact tools, systems, certifications, referees, and role-specific keywords from the target job advert where available."
-      ])
-    ),
     qualityScores: {
       ...output.qualityScores,
-      notes: [...output.qualityScores.notes, issue, "Delivered as a recoverable premium draft to avoid blocking a paid customer after a valid generation."]
+      notes: [...output.qualityScores.notes, issue]
     }
   };
 }
@@ -123,8 +50,8 @@ async function runHumanCvWriterReview(input: GenerateDocumentInput, draft: Solva
           "Never invent percentages, quantities, money, client counts, team sizes, project counts, KPIs, or measurable outcomes. Retain a metric only when it is supported by the customer's payload or source CV; otherwise rewrite it as a truthful qualitative contribution.",
           "Strengthen bullets using: Action + Scope + Tool/Method + Result/Business Value.",
           "Do not summarize or shorten the CV. The polished version must be at least as detailed as the draft.",
-          "Keep or improve the 3-page premium depth standard: 1,500+ words, 9-12 useful sections, and 30+ useful bullets.",
-          "Arrange the final CV as 3-4 balanced A4 pages. Avoid leaving a sparse final page by positioning compact factual sections thoughtfully or merging compatible short sections, without repetition or filler.",
+          "Preserve useful detail from the draft. Length and section count must reflect the facts actually supplied; do not pad to hit a page or word target.",
+          "Keep sections balanced and readable. Omit unsupported sections instead of filling them with generic claims.",
           "If facts are missing, list the missing detail in missingInformation metadata. Do not create visible employer-facing CV sections that reveal the document is unfinished.",
           "Return one complete JSON object only. No markdown fences."
         ].join("\n")
@@ -148,8 +75,7 @@ async function runHumanCvWriterReview(input: GenerateDocumentInput, draft: Solva
   } as any);
 
   const polished = parseSolvaJson((reviewResponse as { output_text?: string }).output_text ?? "");
-  const depthIssue = cvDepthIssue(input, polished);
-  if (depthIssue) return { output: draft, response: reviewResponse };
+  if (!isUsableCv(input, polished) || cvDepthStats(polished).words < cvDepthStats(draft).words * 0.8) return { output: draft, response: reviewResponse };
   return { output: polished, response: reviewResponse };
 }
 
@@ -454,32 +380,38 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
     const prompt = buildProductPrompt({ ...input, payload });
     const client = createOpenAIClient();
     let output: SolvaOutput | null = null;
+    let usableDraft: SolvaOutput | null = null;
     let rawResponse: unknown = null;
     let usageTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      rawResponse = await client.responses.create({
-        model,
-        input: [
-          { role: "system", content: prompt.system },
-          {
-            role: "developer",
-            content:
-              attempt === 1
-                ? prompt.developer
-                : `${prompt.developer}\n\nREPAIR MODE: The previous response was invalid, too thin, or did not meet the required schema/depth standard. Return one complete valid JSON object only. Do not include markdown fences, commentary, or trailing text.`
-          },
-          {
-            role: "user",
-            content:
-              attempt === 1
-                ? prompt.user
-                : `${prompt.user}\n\nQUALITY RETRY INSTRUCTIONS:\n${output ? cvDepthIssue(input, output) ?? "Return valid JSON that fully satisfies the schema." : "Return valid JSON that fully satisfies the schema."}`
-          }
-        ],
-        temperature: attempt === 1 ? 0.35 : 0.15,
-        max_output_tokens: isCvProduct(input.product) && (!input.mode || input.mode === "full_document") ? 9000 : 7000
-      } as any);
+      try {
+        rawResponse = await client.responses.create({
+          model,
+          input: [
+            { role: "system", content: prompt.system },
+            {
+              role: "developer",
+              content:
+                attempt === 1
+                  ? prompt.developer
+                  : `${prompt.developer}\n\nREPAIR MODE: Improve useful detail from the supplied facts and return one complete valid JSON object. Do not pad to meet a fixed length. Do not include markdown fences, commentary, or trailing text.`
+            },
+            {
+              role: "user",
+              content:
+                attempt === 1
+                  ? prompt.user
+                  : `${prompt.user}\n\nQUALITY RETRY INSTRUCTIONS:\n${output ? cvDepthIssue(input, output) ?? "Return valid JSON that fully satisfies the schema." : "Return valid JSON that fully satisfies the schema."}`
+            }
+          ],
+          temperature: attempt === 1 ? 0.35 : 0.15,
+          max_output_tokens: isCvProduct(input.product) && (!input.mode || input.mode === "full_document") ? 9000 : 7000
+        } as any);
+      } catch (error) {
+        if (usableDraft) { output = usableDraft; break; }
+        throw error;
+      }
       const attemptUsage = extractTokenUsage(rawResponse);
       usageTotals = {
         inputTokens: usageTotals.inputTokens + attemptUsage.inputTokens,
@@ -489,32 +421,38 @@ export async function generateWithSolvaIntelligence(input: GenerateDocumentInput
 
       try {
         output = parseSolvaJson((rawResponse as { output_text?: string }).output_text ?? "");
+        if (!isUsableCv(input, output)) throw new Error("The document response did not contain enough readable CV content.");
         const depthIssue = cvDepthIssue(input, output);
-        if (depthIssue && attempt < 2) continue;
-        if (depthIssue && isRecoverableCvDepth(input, output)) {
-          output = markRecoverableCvDepth(output, depthIssue);
-          break;
-        }
-        if (depthIssue) throw new Error(depthIssue);
+        if (depthIssue && attempt < 2) { usableDraft = output; continue; }
         break;
       } catch (error) {
-        if (attempt === 2) throw error;
+        if (attempt === 2) {
+          if (usableDraft) { output = usableDraft; break; }
+          throw error;
+        }
       }
     }
 
     if (!output) throw new Error("Solva Intelligence returned an empty response.");
 
     if (shouldRunCvWriterReview(input) && Date.now() - generationStartedAt < 120_000) {
-      const polished = await runHumanCvWriterReview({ ...input, payload }, output, client, model);
-      output = polished.output;
-      rawResponse = polished.response;
-      const reviewUsage = extractTokenUsage(polished.response);
-      usageTotals = {
-        inputTokens: usageTotals.inputTokens + reviewUsage.inputTokens,
-        outputTokens: usageTotals.outputTokens + reviewUsage.outputTokens,
-        totalTokens: usageTotals.totalTokens + reviewUsage.totalTokens
-      };
+      try {
+        const polished = await runHumanCvWriterReview({ ...input, payload }, output, client, model);
+        output = polished.output;
+        rawResponse = polished.response;
+        const reviewUsage = extractTokenUsage(polished.response);
+        usageTotals = {
+          inputTokens: usageTotals.inputTokens + reviewUsage.inputTokens,
+          outputTokens: usageTotals.outputTokens + reviewUsage.outputTokens,
+          totalTokens: usageTotals.totalTokens + reviewUsage.totalTokens
+        };
+      } catch {
+        output.improvementNotes.push("Your document is ready. You can refine any section later without paying again.");
+      }
     }
+
+    const evidenceNote = cvDepthIssue(input, output);
+    if (evidenceNote) output = noteLimitedCvEvidence(output, evidenceNote);
 
     const qualityScores = fallbackScores(output, { ...input, payload });
     const safeSections = output.sections.map((section) => ({ ...section, html: stripUnsafeHtml(section.html) }));
