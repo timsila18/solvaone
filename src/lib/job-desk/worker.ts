@@ -13,6 +13,7 @@ import { applicationScopeHold, readApplicationScope } from "./application-scope"
 import { readApplicantDetails } from "./applicant-details";
 import { canAutomatePortal, runPortalApplication } from "./portal-browser";
 import { submissionPreflight } from "./submission-preflight";
+import { ApplicationEmailError, sendApplicationEmail } from "./email-transport";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
@@ -206,16 +207,14 @@ async function submitMatch(matchId: string) {
   if (saveError) throw new Error(saveError.message);
   const content = `${match.cover_letter}\n\nApplication submitted with the candidate's express authorization. Candidate contact: ${client.email ?? "Not provided"}; ${client.whatsapp_phone}.`;
   try {
-    const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": `job-desk-${matchId}` }, body: JSON.stringify({ from: process.env.JOB_DESK_FROM_EMAIL ?? process.env.FROM_EMAIL, to: [vacancy.application_email], reply_to: client.email || undefined, subject: `Application: ${vacancy.title} - ${client.full_name}`, text: content, attachments: [{ filename: `${client.full_name.replace(/[^a-z0-9 -]/gi, "").trim() || "Candidate"}-CV.docx`, content: attachment.toString("base64") }] }), signal: AbortSignal.timeout(20000) });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.id) throw new Error(`Email provider rejected application (${response.status}).`);
+    const result = await sendApplicationEmail({ to: [vacancy.application_email], reply_to: client.email || undefined, subject: `Application: ${vacancy.title} - ${client.full_name}`, text: content, attachments: [{ filename: `${client.full_name.replace(/[^a-z0-9 -]/gi, "").trim() || "Candidate"}-CV.docx`, content: attachment.toString("base64") }] }, `job-desk-${matchId}`);
     const { error: confirmationError } = await db.from("job_desk_applications").update({ status: "submitted", provider_message_id: result.id, provider_response: { id: result.id, verification_type: "email_provider_accepted" }, submitted_at: new Date().toISOString(), error_message: null }).eq("match_id", matchId);
     if (confirmationError) throw new Error(confirmationError.message);
     await db.from("job_desk_matches").update({ status: "submitted", submitted_at: new Date().toISOString() }).eq("id", matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_submitted", matchId);
   } catch (cause) {
     // Provider outcome may be uncertain after a timeout. Never retry without review.
-    await db.from("job_desk_applications").update({ status: "needs_human", error_message: cause instanceof Error ? cause.message : "Submission outcome unknown" }).eq("match_id", matchId);
+    await db.from("job_desk_applications").update({ status: "needs_human", error_message: cause instanceof Error ? cause.message : "Submission outcome unknown", ...(cause instanceof ApplicationEmailError && cause.rejected ? { provider_response: { clicked: false, verification_type: "provider_rejected" } } : {}) }).eq("match_id", matchId);
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
   }

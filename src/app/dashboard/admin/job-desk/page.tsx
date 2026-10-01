@@ -4,6 +4,7 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { JobDeskIntakeForm } from "@/components/job-desk/intake-form";
 import { AutomationControls } from "@/components/job-desk/automation-controls";
 import { ShareIntakeLink } from "@/components/job-desk/share-intake-link";
+import { EmailSenderTest } from "@/components/job-desk/email-sender-test";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { formatKes } from "@/lib/utils";
 
@@ -37,6 +38,7 @@ export default async function JobDeskPage() {
         <div className="flex flex-wrap items-center gap-2"><ShareIntakeLink /><Link href="/job-desk" target="_blank" className="inline-flex h-10 items-center justify-center bg-brand-blue px-4 text-sm font-bold text-white">View client form</Link></div>
       </div>
 
+      <EmailSenderTest />
       <div className="grid border-b border-black/10 dark:border-white/10 sm:grid-cols-2 xl:grid-cols-7">
         <Metric label="New website requests" value={websiteCount ?? 0} />
         <Metric label="Active orders" value={activeCount ?? 0} />
