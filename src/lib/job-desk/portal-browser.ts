@@ -90,7 +90,7 @@ try {
   const completedGroups = evaluate("JSON.stringify([...document.querySelectorAll('input[type=checkbox],input[type=radio]')].filter(e=>e.checked && e.name).map(e=>e.name))");
   const unknown = page.fields.filter(f => (f.required || /\*\s*$/.test(f.label)) && !handled.has(f.name || f.id) && !completedGroups.includes(f.name) && !( !f.name && !f.id && page.fields.some(other => other.id && handled.has(other.id) && normalize(other.label) === normalize(f.label))));
   const questions = [...new Set(unknown.map(f => normalize(f.label) || f.name || f.id || 'unnamed field'))];
-  if (questions.length) throw new Error('Client answers or documents needed: ' + questions.join('; ').slice(0, 900));
+  if (questions.length) throw new Error('Admin action needed: supply verified answers or required documents for ' + questions.join('; ').slice(0, 900));
   if (page.challenge || /security challenge|verify you are human|complete (?:an? )?assessment|identity verification required/i.test(page.body)) throw new Error('The portal requires a challenge or assessment.');
   const submit = evaluate("JSON.stringify([...document.querySelectorAll('button,input[type=submit]')].filter(e=>e.getClientRects().length && /submit application|apply now|submit/i.test((e.innerText||e.value||'').trim())).map(e=>({id:e.id,type:e.type,text:(e.innerText||e.value||'').trim()})))");
   if (!Array.isArray(submit) || submit.length !== 1 || submit[0].text.toLowerCase() !== 'submit application') throw new Error('No unambiguous application submission button.');
