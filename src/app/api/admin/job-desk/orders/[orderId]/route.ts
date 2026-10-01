@@ -7,6 +7,7 @@ import { enqueueTask } from "@/lib/job-desk/automation";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { runJobDeskWorker } from "@/lib/job-desk/worker";
 import { queueClientUpdate } from "@/lib/job-desk/client-updates";
+import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,6 +17,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("record_payment"), amount: z.number().positive().max(1000000), method: z.enum(["mpesa", "cash", "bank", "manual", "other"]), reference: z.string().trim().min(3).max(160) }),
   z.object({ action: z.literal("save_answers"), answers: z.record(z.string().max(4000)) }),
   z.object({ action: z.literal("set_client_email"), email: z.string().trim().email().max(254) }),
+  z.object({ action: z.literal("save_applicant_details"), details: applicantDetailsSchema }),
   z.object({ action: z.literal("set_status"), status: z.enum(["intake", "awaiting_information", "cv_review", "approved", "active", "paused", "completed", "cancelled", "failed"]) })
 ]);
 
@@ -86,6 +88,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     if (findError || !order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
     const { error } = await db.from("job_desk_clients").update({ email: parsed.data.email }).eq("id", order.client_id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  } else if (parsed.data.action === "save_applicant_details") {
+    const { data: order, error: findError } = await db.from("job_desk_orders").select("service_type,service_details").eq("id", orderId).single();
+    if (findError || !order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
+    if (order.service_type !== "job_search_full") return NextResponse.json({ error: "Application details are only used for job-search orders." }, { status: 400 });
+    const { error } = await db.from("job_desk_orders").update({ service_details: { ...(order.service_details ?? {}), applicantDetails: parsed.data.details } }).eq("id", orderId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else if (parsed.data.action === "save_answers") {
     const { data: questionnaire, error: findError } = await db.from("job_desk_questionnaires").select("id,questions,responses").eq("order_id", orderId).maybeSingle();
     if (findError || !questionnaire) return NextResponse.json({ error: "Process the CV before recording answers." }, { status: 409 });
@@ -107,7 +115,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  await logAdminAction({ adminId: user.id, action: `job_desk.${parsed.data.action}`, targetType: "job_desk_order", targetId: orderId, details: parsed.data.action === "save_answers" ? { answerCount: Object.keys(parsed.data.answers).length } : parsed.data });
+  await logAdminAction({ adminId: user.id, action: `job_desk.${parsed.data.action}`, targetType: "job_desk_order", targetId: orderId, details: parsed.data.action === "save_answers" ? { answerCount: Object.keys(parsed.data.answers).length } : parsed.data.action === "save_applicant_details" ? { updatedFields: Object.keys(parsed.data.details) } : parsed.data });
   if (queued) after(async () => { try { await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }); } catch { /* The scheduled worker retains queued tasks. */ } });
   return NextResponse.json({ ok: true });
 }
