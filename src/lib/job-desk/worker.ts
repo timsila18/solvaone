@@ -149,12 +149,22 @@ export async function runJobDeskWorker({ maxTasks = 10, maxRunMs = 45000 }: { ma
     if (error) throw new Error(error.message);
     const task = (data?.[0] ?? null) as Task | null;
     if (!task) break;
+    const heartbeat = setInterval(() => {
+      void db.from("job_desk_tasks")
+        .update({ lease_until: new Date(Date.now() + 4 * 60 * 1000).toISOString() })
+        .eq("id", task.id)
+        .eq("locked_by", workerId)
+        .eq("status", "running");
+    }, 60_000);
     try {
       const result = await processTask(task);
-      await db.from("job_desk_tasks").update({ status: "succeeded", result, locked_at: null, lease_until: null, locked_by: null }).eq("id", task.id).eq("locked_by", workerId);
+      const { error: finishError } = await db.from("job_desk_tasks").update({ status: "succeeded", result, locked_at: null, lease_until: null, locked_by: null }).eq("id", task.id).eq("locked_by", workerId);
+      if (finishError) throw new Error(finishError.message);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message.slice(0, 1000) : "Task failed";
       await db.from("job_desk_tasks").update({ status: task.attempts >= task.max_attempts ? "failed" : "queued", last_error: message, available_at: new Date(Date.now() + Math.min(3600000, 30000 * 2 ** task.attempts)).toISOString(), locked_at: null, lease_until: null, locked_by: null }).eq("id", task.id).eq("locked_by", workerId);
+    } finally {
+      clearInterval(heartbeat);
     }
     processed += 1;
   }
