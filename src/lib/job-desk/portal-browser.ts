@@ -13,6 +13,8 @@ export type PortalApplication = {
   city?: string;
   country?: string;
   portalAnswers?: string;
+  fieldAnswers?: Record<string, string>;
+  fieldSelections?: Record<string, string>;
   portfolioUrl?: string;
   coverLetter: string;
 };
@@ -66,13 +68,15 @@ try {
   for (const field of page.fields) {
     const key = field.name || field.id;
     if (!key || handled.has(key) || field.type === 'file') continue;
-    const answer = confirmedAnswers.get(normalize(field.label));
+    const answer = data.fieldAnswers?.[key] || confirmedAnswers.get(normalize(field.label));
     if (!answer) continue;
     const selector = field.id ? '[id=' + JSON.stringify(field.id) + ']' : '[name=' + JSON.stringify(field.name) + ']';
     if (field.tag === 'SELECT') {
-      browser('select', selector, answer);
+      browser('select', selector, data.fieldSelections?.[key] ?? answer);
     } else if (field.type === 'checkbox' || field.type === 'radio') {
-      if (!/^(yes|true|acknowledge|confirm)\b/i.test(answer)) continue;
+      const selectedValue = data.fieldSelections?.[key];
+      const actualValue = evaluate('JSON.stringify(document.querySelector(' + JSON.stringify(selector) + ')?.value)');
+      if (selectedValue !== undefined ? actualValue !== selectedValue : normalize(field.label) !== normalize(answer) && !/^(yes|true|acknowledge|confirm)\b/i.test(answer)) continue;
       browser('check', selector);
     } else if (['text','email','tel','url','textarea',''].includes(field.type)) {
       browser('fill', selector, answer);

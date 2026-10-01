@@ -26,13 +26,13 @@ async function checkSubmissionRequirements(matchId: string, order: any, client: 
   if (!preflight.ready) {
     const { data: existing, error: readError } = await db.from("job_desk_applications").select("status").eq("match_id", matchId).maybeSingle();
     if (readError) throw new Error(readError.message);
-    if (["sending", "submitted"].includes(existing?.status ?? "")) return false;
+    if (["sending", "submitted"].includes(existing?.status ?? "")) return null;
     const { error: saveError } = await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", error_message: `Preflight: ${preflight.blockers.join("; ")}`.slice(0, 4000), provider_response: { clicked: false, preflight } }, { onConflict: "match_id" });
     if (saveError) throw new Error(saveError.message);
     const { error: matchError } = await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId).in("status", ["suggested", "preparing", "authorized"]);
     if (matchError) throw new Error(matchError.message);
   }
-  return preflight.ready;
+  return preflight.ready ? preflight : null;
 }
 
 async function queueUpdateWithoutChangingSubmission(orderId: string, event: ClientUpdate, matchId: string) {
@@ -156,7 +156,8 @@ async function submitMatch(matchId: string) {
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
-  if (!(await checkSubmissionRequirements(matchId, order, client, vacancy))) return;
+  const submissionCheck = await checkSubmissionRequirements(matchId, order, client, vacancy);
+  if (!submissionCheck) return;
   if (vacancy.application_method === "portal") {
     const { data: source } = vacancy.source_id ? await db.from("job_desk_sources").select("provider,site_token,active").eq("id", vacancy.source_id).maybeSingle() : { data: null };
     const supported = source?.active && canAutomatePortal(source.provider, source.site_token, vacancy.apply_url);
@@ -172,7 +173,7 @@ async function submitMatch(matchId: string) {
     const { error: saveError } = await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "portal", status: "sending", recipient: vacancy.apply_url }, { onConflict: "match_id" });
     if (saveError) throw new Error(saveError.message);
     try {
-      const result = await runPortalApplication({ url: vacancy.apply_url, siteToken: source.site_token, firstName: names[0] ?? "", lastName: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedinUrl: details?.applicantLinkedinUrl, portfolioUrl: details?.portfolioUrl, portalAnswers: details?.portalAnswers, city: details?.currentCity, country: details?.currentCountry, coverLetter: match.cover_letter }, cvFile);
+      const result = await runPortalApplication({ url: vacancy.apply_url, siteToken: source.site_token, firstName: names[0] ?? "", lastName: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedinUrl: details?.applicantLinkedinUrl, portfolioUrl: details?.portfolioUrl, portalAnswers: details?.portalAnswers, fieldAnswers: submissionCheck.fieldAnswers, fieldSelections: submissionCheck.fieldSelections, city: details?.currentCity, country: details?.currentCountry, coverLetter: match.cover_letter }, cvFile);
       if (result.status === "submitted" && result.confirmation) {
         const { error: confirmationError } = await db.from("job_desk_applications").update({ status: "submitted", provider_response: { confirmation: result.confirmation, finalUrl: result.finalUrl, clicked: true, verification_type: "portal_confirmation" }, submitted_at: new Date().toISOString(), error_message: null }).eq("match_id", matchId);
         if (confirmationError) throw new Error(confirmationError.message);

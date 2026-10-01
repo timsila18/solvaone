@@ -1,7 +1,7 @@
 import { isOfficialApplyUrl } from "./vacancy-feeds";
 
 export type PortalQuestion = { label: string; required?: boolean; fields?: { name: string; type: string; values?: { label: string; value: unknown }[] }[] };
-export type SubmissionPreflight = { ready: boolean; blockers: string[]; checkedAt: string };
+export type SubmissionPreflight = { ready: boolean; blockers: string[]; checkedAt: string; fieldAnswers?: Record<string, string>; fieldSelections?: Record<string, string> };
 
 export function normalizeQuestion(text: string) {
   return text.replace(/\*/g, "").replace(/\s+Select\.\.\.$/i, "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -61,5 +61,18 @@ export async function submissionPreflight(input: { method: string; emailVerified
   const blockers = missingPortalRequirements([...job.questions, ...(job.location_questions ?? []), ...(job.compliance ?? [])], input.answers, input.known);
   for (const question of job.demographic_questions?.questions ?? []) if (question.required && !verifiedAnswers(input.answers).has(normalizeQuestion(question.label))) blockers.push(question.label);
   if (job.data_compliance?.some(rule => rule.requires_consent || rule.requires_processing_consent || rule.requires_retention_consent)) blockers.push("Employer-specific privacy consent requires administrator review.");
-  return { ready: blockers.length === 0, blockers: [...new Set(blockers)], checkedAt };
+  const answers = verifiedAnswers(input.answers);
+  const fieldAnswers: Record<string, string> = {};
+  const fieldSelections: Record<string, string> = {};
+  for (const question of [...job.questions, ...(job.location_questions ?? []), ...(job.compliance ?? [])]) {
+    const answer = answers.get(normalizeQuestion(question.label));
+    if (answer && !blockers.includes(question.label)) for (const field of question.fields ?? []) {
+      if (field.type !== "input_file") {
+        fieldAnswers[field.name] = answer;
+        const option = field.values?.find(option => normalizeQuestion(option.label) === normalizeQuestion(answer));
+        if (option) fieldSelections[field.name] = String(option.value);
+      }
+    }
+  }
+  return { ready: blockers.length === 0, blockers: [...new Set(blockers)], checkedAt, fieldAnswers, fieldSelections };
 }
