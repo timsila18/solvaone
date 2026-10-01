@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { scoreVacancy } from "./matching";
+import { applicationScopeHold, readApplicationScope } from "./application-scope";
 import { reviewCandidateMatches } from "./relevance";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
@@ -77,7 +78,7 @@ export async function verifyVacancyStillOpen(vacancy: { id: string; source_id: s
 
 export async function matchOrder(orderId: string) {
   const db = createSupabaseAdminClient();
-  const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,client_id,payment_status,amount,payment_reference,status,service_type").eq("id", orderId).single();
+  const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,client_id,payment_status,amount,payment_reference,status,service_type,application_authorized,service_details").eq("id", orderId).single();
   if (orderError) throw new Error(orderError.message);
   if (order?.service_type !== "job_search_full") throw new Error("Job matching is only available for job hunting orders.");
   if (!hasVerifiedJobDeskPayment(order)) throw new Error("A verified payment or approved waiver is required before job matching.");
@@ -94,8 +95,9 @@ export async function matchOrder(orderId: string) {
     vacancies.push(...(data ?? []));
     if ((data ?? []).length < 1000) break;
   }
-  const candidates = vacancies.map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile) })).filter((item) => item.score >= 25).sort((a, b) => b.score - a.score).slice(0, 24);
-  const reviewed = await reviewCandidateMatches(orderId, profile, candidates.map((item) => item.vacancy));
+  const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
+  const candidates = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort((a, b) => b.score - a.score).slice(0, 24);
+  const reviewed = await reviewCandidateMatches(orderId, { ...profile, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
   const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
   const selected = new Set(matches.map((item) => item.vacancy.id));
   const { data: oldMatches, error: oldError } = await db.from("job_desk_matches").select("id,vacancy_id").eq("order_id", orderId).in("status", ["suggested", "preparing", "ready"]).limit(500);
@@ -109,14 +111,14 @@ export async function matchOrder(orderId: string) {
     const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id", ignoreDuplicates: true });
     if (matchError) throw new Error(matchError.message);
   }
-  const { data: top, error: topError } = await db.from("job_desk_matches").select("id,score,vacancy:job_desk_vacancies(provider,application_method,email_verified,application_email)").eq("order_id", orderId).eq("status", "suggested").gte("score", 50).order("score", { ascending: false }).limit(50);
+  const { data: top, error: topError } = await db.from("job_desk_matches").select("id,score,vacancy:job_desk_vacancies(id,provider,application_method,email_verified,application_email)").eq("order_id", orderId).eq("status", "suggested").gte("score", 50).order("score", { ascending: false }).limit(50);
   if (topError) throw new Error(topError.message);
   const routeRank = (item: NonNullable<typeof top>[number]) => {
     const vacancy = Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy;
     return vacancy?.application_method === "email" && vacancy.email_verified && vacancy.application_email ? 2 : vacancy?.provider === "greenhouse" ? 1 : 0;
   };
   // Prefer supported submission routes without weakening candidate relevance thresholds.
-  for (const item of [...(top ?? [])].sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score).slice(0, 10)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
+  for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score).slice(0, 10)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
   return matches.length;

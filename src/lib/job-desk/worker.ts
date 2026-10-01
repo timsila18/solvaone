@@ -66,7 +66,7 @@ async function prepareMatch(matchId: string) {
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
   if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) throw new Error("Vacancy is closed, unreviewed, duplicated or stale.");
-  if (scoreVacancy(vacancy, profile).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) throw new Error("Vacancy needs a fresh CV-based suitability review before preparation.");
+  if (scoreVacancy(vacancy, profile, order.application_authorized ? readApplicationScope(order.service_details) : null).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) throw new Error("Vacancy needs a fresh CV-based suitability review before preparation.");
   if (!(await verifyVacancyStillOpen(vacancy))) throw new Error("Vacancy is no longer listed by its official source.");
   if (!(await checkSubmissionRequirements(matchId, order, client, vacancy))) return;
   const prompt = JSON.stringify({ version: LETTER_PROMPT_VERSION, cvId: latestCv.id, date: letterDate(), cv: plainText(cv.html).slice(0, 24000), clientName: client.full_name, role: vacancy.title, company: vacancy.company_name, description: vacancy.description.slice(0, 10000) });
@@ -114,7 +114,7 @@ async function prepareMatch(matchId: string) {
   if (updateError) throw new Error(updateError.message);
   if (!ready || !order.application_authorized || !["approved", "active"].includes(order.status)) return;
   const scope = readApplicationScope(order.service_details);
-  if (!scope || applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile).score < 50) return;
+  if (!scope || applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile, scope).score < 50) return;
   const { data: authorized, error: authorizationError } = await db.from("job_desk_matches")
     .update({ status: "authorized", authorized_at: new Date().toISOString(), authorized_ip_hash: null })
     .eq("id", matchId).eq("status", "ready").select("id").maybeSingle();
@@ -145,7 +145,7 @@ async function submitMatch(matchId: string) {
   if (!match.authorized_ip_hash) {
     const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
     const outside = scope && vacancy ? applicationScopeHold(scope, vacancy) : "Scoped application authorization is missing.";
-    if (outside || !scope || scoreVacancy(vacancy, profile).score < 50) {
+    if (outside || !scope || scoreVacancy(vacancy, profile, scope).score < 50) {
       await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
       await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: outside || "Vacancy no longer meets the automatic suitability threshold." }, { onConflict: "match_id" });
       await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
@@ -168,7 +168,7 @@ async function submitMatch(matchId: string) {
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
-  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || scoreVacancy(vacancy, profile).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) {
+  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || scoreVacancy(vacancy, profile, order.application_authorized ? readApplicationScope(order.service_details) : null).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "Vacancy is stale or no longer suitable." }, { onConflict: "match_id" });
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);

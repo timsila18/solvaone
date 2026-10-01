@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { BroaderRoleFields } from "./broader-role-fields";
 
 type Props = {
   orderId: string;
@@ -55,6 +56,7 @@ export function ScopeAuthorizationForm(props: Props) {
     <label className="grid gap-1 text-xs font-bold">Employers to exclude<input name="excludedEmployers" maxLength={1000} className={fieldClass} /></label>
     <label className="grid gap-1 text-xs font-bold">Roles to exclude<input name="excludedRoles" maxLength={1000} className={fieldClass} /></label>
     <label className="grid gap-1 text-xs font-bold">Other exclusions<input name="excludedKeywords" maxLength={1000} className={fieldClass} /></label>
+    <BroaderRoleFields />
     <label className="grid gap-1 text-xs font-bold">WhatsApp authorization date and excerpt<input name="evidence" required minLength={8} maxLength={1000} className={fieldClass} /></label>
     <button type="submit" disabled={busy} className="rounded bg-brand-blue px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Record one-time authorization</button>
     {message ? <p role="status" className="text-xs">{message}</p> : null}

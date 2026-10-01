@@ -8,6 +8,7 @@ import { startJobDeskPayment } from "@/lib/job-desk/checkout";
 import { getJobDeskService } from "@/lib/job-desk/services";
 import { normalizeSafaricomPhone } from "@/lib/payments";
 import { createApplicationScope } from "@/lib/job-desk/application-scope";
+import { broaderPreferenceFields, validateBroaderPreferences } from "@/lib/job-desk/broader-preferences";
 import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
 
 export const runtime = "nodejs";
@@ -23,6 +24,7 @@ const mimeByExtension: Record<string, string> = {
 };
 
 const schema = z.object({
+  ...broaderPreferenceFields,
   serviceType: z.enum(["job_search_full", "interview_coaching", "linkedin_revamp"]),
   fullName: z.string().trim().min(2).max(160),
   whatsappPhone: z.string().trim().regex(/^\+?[0-9][0-9\s-]{7,20}$/),
@@ -48,6 +50,7 @@ const schema = z.object({
   ...applicantDetailsSchema.shape,
   website: z.string().max(200).default("")
 }).superRefine((value, context) => {
+  validateBroaderPreferences(value, context);
   if (value.serviceType === "job_search_full" && value.targetJobTitles.length < 2) context.addIssue({ code: "custom", path: ["targetJobTitles"], message: "Target role is required." });
   if (value.serviceType === "job_search_full" && !value.email) context.addIssue({ code: "custom", path: ["email"], message: "An email address is required for application updates." });
   if (value.serviceType === "job_search_full" && value.applicationAuthorization !== "true") context.addIssue({ code: "custom", path: ["applicationAuthorization"], message: "Authorize applications within your selected job preferences." });
@@ -140,6 +143,7 @@ export async function POST(request: Request) {
     if (profileError) throw new Error(profileError.message);
 
     const scope = parsed.data.serviceType === "job_search_full" ? createApplicationScope({
+      ...parsed.data,
       targetRoles: parsed.data.targetJobTitles,
       preferredLocations: parsed.data.preferredLocations,
       remotePreference: parsed.data.remotePreference,

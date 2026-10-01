@@ -58,7 +58,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
     return vacancy && vacancy.status === "open" && vacancy.review_status === "approved" && !vacancy.duplicate_of
       && Date.now() - new Date(vacancy.last_seen_at).getTime() <= 72 * 3600000
       && match.status !== "rejected" && (match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))
-      && scoreVacancy(vacancy, candidate ?? {}).score >= 25;
+      && scoreVacancy(vacancy, candidate ?? {}, applicationScope).score >= 25;
   });
   const copyableJobs = matches.map((match) => {
     const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;

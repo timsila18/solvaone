@@ -7,8 +7,10 @@ import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { logAdminAction, requireAdmin } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { broaderPreferenceFields, validateBroaderPreferences } from "@/lib/job-desk/broader-preferences";
 
 const schema = z.object({
+  ...broaderPreferenceFields,
   targetRoles: z.string().trim().min(2).max(1000),
   preferredLocations: z.string().trim().max(1000),
   remotePreference: z.enum(["onsite", "hybrid", "remote", "flexible"]),
@@ -16,7 +18,7 @@ const schema = z.object({
   excludedRoles: z.string().trim().max(1000),
   excludedKeywords: z.string().trim().max(1000),
   evidence: z.string().trim().min(8).max(1000)
-});
+}).superRefine(validateBroaderPreferences);
 
 async function admin() {
   const user = await getCurrentUser();
@@ -57,7 +59,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
       if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of ||
           Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 ||
           !match.cover_letter || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:")) ||
-          applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile).score < 50) continue;
+          applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile, scope).score < 50) continue;
       const { data: authorized } = await db.from("job_desk_matches")
         .update({ status: "authorized", authorized_at: new Date().toISOString(), authorized_ip_hash: null })
         .eq("id", match.id).eq("status", "ready").select("id").maybeSingle();

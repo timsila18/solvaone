@@ -22,7 +22,8 @@ export async function reviewCandidateMatches(orderId: string, profile: Record<st
         locations: profile.preferred_locations,
         remotePreference: profile.remote_preference,
         experienceLevel: profile.experience_level,
-        cvFacts: profile.structured_profile
+        cvFacts: profile.structured_profile,
+        broaderPreferences: profile.broaderPreferences ?? null
       },
       vacancies: batch.map(({ id, title, company_name, location, workplace_type, description }) => ({ id, title, company_name, location, workplace_type, description: description.slice(0, 2600) }))
     };

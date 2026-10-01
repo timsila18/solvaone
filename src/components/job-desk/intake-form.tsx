@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { BriefcaseBusiness, Loader2, ScanText, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
+import { BroaderRoleFields } from "./broader-role-fields";
 
 const selectClass = "h-11 w-full rounded-lg border border-black/10 bg-white px-3 text-sm outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-white/15 dark:bg-white/10";
 
@@ -101,6 +102,7 @@ export function JobDeskIntakeForm() {
         <div className="mt-4"><Field label="Client instructions"><Textarea name="instructions" className="min-h-32" placeholder="Role priorities, industries to avoid, deadlines, tone, or other instructions" /></Field></div>
       </section>
 
+      {serviceType === "job_search_full" ? <BroaderRoleFields /> : null}
       {serviceType === "job_search_full" ? <section>
         <h2 className="border-b border-black/10 pb-4 text-lg font-black dark:border-white/10">Reusable application details</h2>
         <p className="mt-3 text-sm">Ask the client to confirm these answers once. Do not guess eligibility or upload identity documents here.</p>

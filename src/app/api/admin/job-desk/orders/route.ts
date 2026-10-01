@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 import { enqueueTask } from "@/lib/job-desk/automation";
 import { createApplicationScope } from "@/lib/job-desk/application-scope";
 import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
+import { broaderPreferenceFields, validateBroaderPreferences } from "@/lib/job-desk/broader-preferences";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -20,6 +21,7 @@ const allowedTypes = new Map([
 ]);
 
 const intakeSchema = z.object({
+  ...broaderPreferenceFields,
   fullName: z.string().trim().min(2).max(160),
   whatsappPhone: z.string().trim().regex(/^\+?[0-9][0-9\s-]{7,20}$/),
   email: z.string().trim().email().or(z.literal("")),
@@ -46,6 +48,7 @@ const intakeSchema = z.object({
   authorizationEvidence: z.string().trim().max(1000),
   ...applicantDetailsSchema.shape
 }).superRefine((input, context) => {
+  validateBroaderPreferences(input, context);
   if (input.serviceType === "job_search_full" && !input.email) context.addIssue({ code: "custom", path: ["email"], message: "Add the client's email for application updates." });
   if (input.serviceType === "job_search_full" && !input.targetJobTitles.trim()) context.addIssue({ code: "custom", path: ["targetJobTitles"], message: "Record authorized target roles." });
   if (input.serviceType === "job_search_full" && (input.applicationAuthorization !== "true" || input.authorizationEvidence.length < 8)) context.addIssue({ code: "custom", path: ["applicationAuthorization"], message: "Record the client's explicit application authorization and where it was given." });
@@ -131,6 +134,7 @@ export async function POST(request: Request) {
 
     const isPaid = parsed.data.paymentStatus === "paid" || parsed.data.paymentStatus === "waived";
     const scope = parsed.data.serviceType === "job_search_full" ? createApplicationScope({
+      ...parsed.data,
       targetRoles: parsed.data.targetJobTitles,
       preferredLocations: parsed.data.preferredLocations,
       remotePreference: parsed.data.remotePreference,

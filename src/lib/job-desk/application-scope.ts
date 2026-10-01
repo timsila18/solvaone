@@ -9,6 +9,10 @@ export type ApplicationScope = {
   authorizedAt: string;
   channel: "website" | "admin_recorded";
   evidence: string;
+  includeBroaderRoles?: boolean;
+  broaderRoles?: string[];
+  broaderSeniority?: "any" | "professional" | "senior";
+  minimumMonthlyKes?: number;
 };
 
 type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evidence"> & {
@@ -17,6 +21,10 @@ type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evide
   excludedEmployers: string;
   excludedRoles: string;
   excludedKeywords: string;
+  includeBroaderRoles?: string;
+  broaderRoles?: string;
+  broaderSeniority?: "any" | "professional" | "senior";
+  minimumMonthlyKes?: string;
 };
 
 const entries = (value: string) => value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
@@ -26,6 +34,8 @@ const terms = (value: string) => normalize(value).split(" ").filter((term) => te
 export function createApplicationScope(input: ScopeInput): ApplicationScope {
   const targetRoles = entries(input.targetRoles);
   if (!targetRoles.length) throw new Error("At least one target role is required for application authorization.");
+  const broaderRoles = entries(input.broaderRoles ?? "");
+  if (input.includeBroaderRoles === "true" && !broaderRoles.length) throw new Error("Record accepted broader roles before enabling them.");
   return {
     version: 1,
     targetRoles,
@@ -36,7 +46,11 @@ export function createApplicationScope(input: ScopeInput): ApplicationScope {
     excludedKeywords: entries(input.excludedKeywords),
     authorizedAt: new Date().toISOString(),
     channel: input.channel,
-    evidence: input.evidence.trim().slice(0, 1000)
+    evidence: input.evidence.trim().slice(0, 1000),
+    includeBroaderRoles: input.includeBroaderRoles === "true",
+    broaderRoles: input.includeBroaderRoles === "true" ? broaderRoles : [],
+    broaderSeniority: input.broaderSeniority ?? "professional",
+    minimumMonthlyKes: input.includeBroaderRoles === "true" ? Number(input.minimumMonthlyKes || 0) : 0
   };
 }
 
@@ -45,6 +59,9 @@ export function readApplicationScope(details: unknown): ApplicationScope | null 
   const scope = (details as { applicationScope?: unknown }).applicationScope;
   if (!scope || typeof scope !== "object") return null;
   const value = scope as Partial<ApplicationScope>;
+  if (value.includeBroaderRoles && (!Array.isArray(value.broaderRoles) || !value.broaderRoles.length || !value.broaderRoles.every(role => typeof role === "string" && role.trim()))) return null;
+  if (value.broaderSeniority && !["any", "professional", "senior"].includes(value.broaderSeniority)) return null;
+  if (value.minimumMonthlyKes !== undefined && (!Number.isFinite(value.minimumMonthlyKes) || value.minimumMonthlyKes < 0 || value.minimumMonthlyKes > 9999999)) return null;
   if (value.version !== 1 || !Array.isArray(value.targetRoles) || !value.targetRoles.length ||
       !value.targetRoles.every((item) => typeof item === "string" && item.trim()) ||
       !Array.isArray(value.preferredLocations) || !Array.isArray(value.excludedEmployers) ||
@@ -66,7 +83,8 @@ export function applicationScopeHold(scope: ApplicationScope, vacancy: {
   if (scope.excludedRoles.some((item) => title.includes(normalize(item)))) return "Role is excluded by the client.";
   if (scope.excludedKeywords.some((item) => advert.includes(normalize(item)))) return "Vacancy conflicts with a client exclusion.";
   const vacancyTerms = terms(vacancy.title);
-  if (!scope.targetRoles.some((role) => {
+  const authorizedRoles = [...scope.targetRoles, ...(scope.includeBroaderRoles ? scope.broaderRoles ?? [] : [])];
+  if (!authorizedRoles.some((role) => {
     const roleTerms = terms(role);
     const overlap = roleTerms.filter((term) => vacancyTerms.includes(term)).length;
     return roleTerms.length > 0 && overlap >= Math.min(2, roleTerms.length);

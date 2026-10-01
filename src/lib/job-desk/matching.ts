@@ -36,7 +36,7 @@ export function vacancyEligibility(vacancy: MatchableVacancy, profile: Record<st
   return null;
 }
 
-export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, unknown>) {
+export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, unknown>, scope?: { includeBroaderRoles?: boolean; broaderRoles?: string[]; broaderSeniority?: string; minimumMonthlyKes?: number } | null) {
   const blocker = vacancyEligibility(vacancy, profile);
   if (blocker) return { score: 0, reasons: [] as string[], gaps: [blocker] };
   const structured = (profile.structured_profile ?? {}) as Record<string, unknown>;
@@ -47,15 +47,28 @@ export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, 
   const titleWords = words(vacancy.title);
   const description = vacancy.description.toLowerCase();
   const overlap = Math.max(0, ...supportedTitles.map((title) => [...words(title)].filter((word) => titleWords.has(word)).length));
+  const broaderOverlap = scope?.includeBroaderRoles && (scope.broaderRoles ?? []).some(title => {
+    const terms = [...words(title)];
+    return terms.length > 0 && terms.every(term => titleWords.has(term));
+  });
   const matchingSkills = skills.filter((skill) => skill.length >= 3 && description.includes(skill.toLowerCase()));
   const industries = list(structured.industries).filter((industry) => industry.length > 3 && description.includes(industry.toLowerCase()));
   const reasons: string[] = [];
   const gaps: string[] = [];
   if (!supportedTitles.length && !skills.length) return { score: 0, reasons, gaps: ["Candidate has not supplied a target role or CV skill evidence."] };
-  if (overlap === 0 && matchingSkills.length < 2) return { score: 0, reasons, gaps: ["Role is not supported by the candidate's job history or skills."] };
+  const isBroader = overlap === 0;
+  if (isBroader && (!broaderOverlap || matchingSkills.length < 2)) return { score: 0, reasons, gaps: ["Broader role needs explicit opt-in, an accepted job title and at least two documented skills."] };
+  if (isBroader) {
+    if (scope?.broaderSeniority !== "any" && /\b(intern|internship|trainee|graduate|entry.level|junior)\b/i.test(vacancy.title)) return { score: 0, reasons, gaps: ["Broader role is below the accepted career level."] };
+    if (scope?.broaderSeniority === "senior" && !/\b(senior|lead|head|manager|supervisor|director)\b/i.test(vacancy.title)) return { score: 0, reasons, gaps: ["Broader role does not meet the senior-level preference."] };
+    if (scope?.minimumMonthlyKes) {
+      const salary = vacancy.description.match(/(?:KES|KSh)\s*([\d,]+)(?:\s*[-–]\s*(?:KES|KSh)?\s*([\d,]+))?\s*(?:per month|monthly|\/month|p\.?m\.?)/i);
+      if (!salary || Number(salary[1].replace(/,/g, "")) < scope.minimumMonthlyKes) return { score: 0, reasons, gaps: ["Advert does not confirm the minimum monthly KES salary."] };
+    }
+  }
   let score = Math.min(48, overlap * 23) + Math.min(32, matchingSkills.length * 8) + Math.min(10, industries.length * 5);
   if (overlap) reasons.push("Role aligns with target or documented experience");
-  else reasons.push("Related role supported by documented skills");
+  else { score += 20; reasons.push("Transferable-skills match: opted-in broader role supported by documented skills"); }
   if (matchingSkills.length) reasons.push(`CV skills: ${matchingSkills.slice(0, 5).join(", ")}`);
   if (vacancy.workplace_type === "remote") { score += 10; reasons.push("Remote arrangement is potentially accessible from Kenya"); }
   else if (/\b(kenya|nairobi|mombasa|kisumu|nakuru|eldoret)\b/i.test(vacancy.location)) { score += 10; reasons.push("Location is in Kenya"); }
