@@ -82,7 +82,7 @@ export async function matchOrder(orderId: string) {
   if (orderError) throw new Error(orderError.message);
   if (order?.service_type !== "job_search_full") throw new Error("Job matching is only available for job hunting orders.");
   if (!hasVerifiedJobDeskPayment(order)) throw new Error("A verified payment or approved waiver is required before job matching.");
-  const { data: approved } = await db.from("job_desk_documents").select("id,status").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+  const { data: approved } = await db.from("job_desk_documents").select("id,status,html").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
   if (approved?.status !== "approved") throw new Error("Approve the latest candidate CV before matching vacancies.");
   const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (profileError) throw new Error(profileError.message);
@@ -97,7 +97,7 @@ export async function matchOrder(orderId: string) {
   }
   const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
   const candidates = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort((a, b) => b.score - a.score).slice(0, 64);
-  const reviewed = await reviewCandidateMatches(orderId, { ...profile, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
+  const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
   const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
   let refreshedSources = 0;
   if (matches.length < 10) {
