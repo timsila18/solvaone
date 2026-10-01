@@ -82,7 +82,8 @@ try {
         browser('press', 'Enter');
       }
     } else continue;
-    handled.add(key);
+    const accepted = evaluate('JSON.stringify((()=>{const e=document.querySelector(' + JSON.stringify(selector) + '); if(!e)return false; if(e.type==="checkbox"||e.type==="radio")return e.checked; if(e.tagName==="SELECT")return !!e.value; if(e.getAttribute("role")==="combobox")return !!e.value && e.value.trim().toLowerCase()===' + JSON.stringify(answer.trim().toLowerCase()) + '; return !!e.value;})())');
+    if (accepted) handled.add(key);
   }
   if (![...handled].some(key => /resume|cv/i.test(key))) throw new Error('No supported CV upload field was found.');
   page = inspect();
@@ -99,8 +100,10 @@ try {
   browser('wait', '2000');
   page = inspect();
   if (!allowed(page.url)) throw new Error('Submission redirected outside the verified employer board; outcome needs review.');
-  if (!/thank you for applying|application (?:was |has been )?submitted|we (?:have )?received your application/i.test(page.body)) throw new Error('Submission confirmation was not visible. Check the employer portal before retrying.');
-  console.log(JSON.stringify({ status: 'submitted', confirmation: page.body.slice(0,500), finalUrl: page.url, clicked }));
+  const confirmation = page.body.match(/.{0,80}(?:thank you for applying|application (?:was |has been )?submitted|we (?:have )?received your application).{0,200}/i)?.[0];
+  const stillHasSubmit = evaluate("JSON.stringify([...document.querySelectorAll('button,input[type=submit]')].some(e=>e.getClientRects().length && /submit application/i.test(e.innerText||e.value||'')))");
+  if (!confirmation || stillHasSubmit) throw new Error('Submission confirmation was not visible. Check the employer portal before retrying.');
+  console.log(JSON.stringify({ status: 'submitted', confirmation, finalUrl: page.url, clicked }));
 } catch (error) {
   console.log(JSON.stringify(hold(error instanceof Error ? error.message.slice(0,500) : 'Portal application needs review.')));
 } finally { try { browser('close'); } catch {} }

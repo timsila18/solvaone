@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { FeedProvider } from "@/lib/job-desk/vacancy-feeds";
 
-export function AutomationControls({ action, id = "", label, provider, siteToken, companyName }: { action: "add_source" | "discover" | "match" | "prepare" | "authorize_link" | "run_queue" | "refresh_all"; id?: string; label: string; provider?: FeedProvider; siteToken?: string; companyName?: string }) {
+export function AutomationControls({ action, id = "", label, provider, siteToken, companyName }: { action: "add_source" | "discover" | "match" | "prepare" | "retry_application" | "authorize_link" | "run_queue" | "refresh_all"; id?: string; label: string; provider?: FeedProvider; siteToken?: string; companyName?: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const router = useRouter();

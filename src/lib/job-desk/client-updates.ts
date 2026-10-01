@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enqueueTask } from "./automation";
+import { applicationOutcome } from "./submission-preflight";
 
 export type ClientUpdate = "cv_review" | "cv_approved" | "matches_ready" | "application_submitted" | "application_needs_action";
 const clientUpdateEvents = new Set<ClientUpdate>(["cv_review", "cv_approved", "matches_ready", "application_submitted", "application_needs_action"]);
@@ -35,13 +36,24 @@ export async function sendClientUpdate(orderId: string, event: ClientUpdate, ref
   if (!from) throw new Error("Job Desk sender email is not configured.");
   let role: string | undefined;
   let company: string | undefined;
+  let outcome: string | undefined;
   if (event.startsWith("application_")) {
     const { data: match } = await db.from("job_desk_matches").select("vacancy:job_desk_vacancies(title,company_name)").eq("id", reference).eq("order_id", orderId).maybeSingle();
     const vacancy = Array.isArray(match?.vacancy) ? match.vacancy[0] : match?.vacancy;
     role = vacancy?.title;
     company = vacancy?.company_name;
+    if (event === "application_submitted") {
+      const { data: application, error: applicationError } = await db.from("job_desk_applications").select("status,method,provider_message_id,provider_response").eq("match_id", reference).eq("order_id", orderId).maybeSingle();
+      if (applicationError) throw new Error(applicationError.message);
+      if (application?.status !== "submitted") throw new Error("No submission evidence is available for this client update.");
+      outcome = applicationOutcome(application);
+    }
   }
   const content = clientUpdateContent(event, client.full_name, role, company);
+  if (outcome) {
+    content.subject = `SolvaOne Job Desk: ${outcome}${role ? ` - ${role}` : ""}`;
+    content.text = `Hello ${client.full_name.trim().split(/\s+/)[0]},\n\n${[role, company].filter(Boolean).join(" at ")}: ${outcome}.\nAn email provider acceptance does not confirm that the employer has received or read the application. We will not report an interview or employer response without evidence.\n\nQuestions? Reply or WhatsApp 0721537597.\n\nSolvaOne Job Desk`;
+  }
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": `job-desk-update-${event}-${reference}` },

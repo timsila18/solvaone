@@ -8,6 +8,7 @@ import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { runJobDeskWorker } from "@/lib/job-desk/worker";
 import { expiredDeadline } from "@/lib/job-desk/matching";
 import { queueClientUpdate } from "@/lib/job-desk/client-updates";
+import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -17,6 +18,7 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("discover"), sourceId: z.string().uuid() }),
   z.object({ action: z.literal("match"), orderId: z.string().uuid() }),
   z.object({ action: z.literal("prepare"), matchId: z.string().uuid() }),
+  z.object({ action: z.literal("retry_application"), matchId: z.string().uuid() }),
   z.object({ action: z.literal("authorize_link"), matchId: z.string().uuid() }),
   z.object({ action: z.literal("record_submission"), matchId: z.string().uuid(), confirmation: z.string().trim().min(5).max(300), personallySubmitted: z.literal(true) }),
   z.object({ action: z.literal("run_queue") }),
@@ -63,6 +65,23 @@ export async function POST(request: Request) {
       const { data: match } = await db.from("job_desk_matches").select("id,order_id,status").eq("id", input.matchId).single();
       if (!match || match.status !== "suggested") return NextResponse.json({ error: "Suggested match not found." }, { status: 409 });
       await enqueueTask("prepare", `prepare:${match.id}:${Date.now()}`, match.order_id, { matchId: match.id });
+      queued = true;
+    } else if (input.action === "retry_application") {
+      const { data: match, error: matchError } = await db.from("job_desk_matches").select("id,order_id,status,authorized_at,cover_letter").eq("id", input.matchId).single();
+      if (matchError || !match || match.status !== "needs_human") return NextResponse.json({ error: "Application is not awaiting admin action." }, { status: 409 });
+      const { data: application, error: applicationError } = await db.from("job_desk_applications").select("status,provider_response").eq("match_id", match.id).maybeSingle();
+      if (applicationError) throw new Error(applicationError.message);
+      if (!canRetrySubmission(application)) return NextResponse.json({ error: "Previous submission outcome is uncertain. Verify with the employer before retrying; automatic duplicates are blocked." }, { status: 409 });
+      const nextStatus = match.cover_letter && match.authorized_at ? "authorized" : "suggested";
+      const { data: claimed, error } = await db.from("job_desk_matches").update({ status: nextStatus }).eq("id", match.id).eq("status", "needs_human").select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!claimed) return NextResponse.json({ error: "Another retry is already in progress." }, { status: 409 });
+      try {
+        await enqueueTask(nextStatus === "authorized" ? "submit" : "prepare", `retry:${match.id}:${crypto.randomUUID()}`, match.order_id, { matchId: match.id });
+      } catch (cause) {
+        await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", match.id).eq("status", nextStatus);
+        throw cause;
+      }
       queued = true;
     } else if (input.action === "run_queue") {
       result = { processed: await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }) };

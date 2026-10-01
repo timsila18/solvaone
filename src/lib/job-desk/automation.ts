@@ -5,7 +5,7 @@ import { reviewCandidateMatches } from "./relevance";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
 
-export type Vacancy = { id: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
+export type Vacancy = { id: string; provider?: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
 
 export function plainText(html: string) {
   return cleanText(html);
@@ -109,8 +109,14 @@ export async function matchOrder(orderId: string) {
     const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id", ignoreDuplicates: true });
     if (matchError) throw new Error(matchError.message);
   }
-  const { data: top } = await db.from("job_desk_matches").select("id").eq("order_id", orderId).eq("status", "suggested").gte("score", 50).order("score", { ascending: false }).limit(10);
-  for (const item of top ?? []) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
+  const { data: top, error: topError } = await db.from("job_desk_matches").select("id,score,vacancy:job_desk_vacancies(provider,application_method,email_verified,application_email)").eq("order_id", orderId).eq("status", "suggested").gte("score", 50).order("score", { ascending: false }).limit(50);
+  if (topError) throw new Error(topError.message);
+  const routeRank = (item: NonNullable<typeof top>[number]) => {
+    const vacancy = Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy;
+    return vacancy?.application_method === "email" && vacancy.email_verified && vacancy.application_email ? 2 : vacancy?.provider === "greenhouse" ? 1 : 0;
+  };
+  // Prefer supported submission routes without weakening candidate relevance thresholds.
+  for (const item of [...(top ?? [])].sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score).slice(0, 10)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
   return matches.length;
