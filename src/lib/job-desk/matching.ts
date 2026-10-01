@@ -55,8 +55,11 @@ export function vacancyEligibility(vacancy: MatchableVacancy, profile: Record<st
   return null;
 }
 
-export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, unknown>, scope?: { includeBroaderRoles?: boolean; broaderRoles?: string[]; broaderSeniority?: string; minimumMonthlyKes?: number } | null) {
-  const blocker = vacancyEligibility(vacancy, profile);
+export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, unknown>, scope?: { includeBroaderRoles?: boolean; broaderRoles?: string[]; broaderSeniority?: string; minimumMonthlyKes?: number; includeUnspecifiedKenyaLocations?: boolean } | null) {
+  const scopedProfile = scope?.includeUnspecifiedKenyaLocations && skillText(vacancy.location) === "kenya"
+    ? { ...profile, preferred_locations: [...list(profile.preferred_locations), "Kenya"] }
+    : profile;
+  const blocker = vacancyEligibility(vacancy, scopedProfile);
   if (blocker) return { score: 0, reasons: [] as string[], gaps: [blocker] };
   const structured = (profile.structured_profile ?? {}) as Record<string, unknown>;
   const experience = Array.isArray(structured.experience) ? structured.experience as Array<Record<string, unknown>> : [];

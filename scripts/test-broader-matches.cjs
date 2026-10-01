@@ -33,6 +33,7 @@ const cityScope = createApplicationScope({ targetRoles: 'National Sales Manager'
 assert.deepEqual(cityScope.preferredLocations, ['Nairobi', 'Mombasa']);
 assert.match(applicationScopeHold(cityScope, { ...job, title: 'Sales Manager', location: 'Kenya' }), /outside/);
 const countryScope = { ...cityScope, includeUnspecifiedKenyaLocations: true };
+assert.ok(scoreVacancy({ ...job, location: 'Kenya' }, profile, { ...scope, includeUnspecifiedKenyaLocations: true }).score >= 50);
 assert.equal(applicationScopeHold(countryScope, { ...job, title: 'Sales Manager', location: 'Kenya' }), null);
 for (const location of ['Kisumu, Kenya', 'Western Region, Kenya', 'Eldoret']) {
   assert.match(applicationScopeHold(countryScope, { ...job, title: 'Sales Manager', location }), /outside/);
