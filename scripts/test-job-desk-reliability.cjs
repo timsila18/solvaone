@@ -1,6 +1,14 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const ts = require("typescript");
+const { Webhook } = require("svix");
+const { randomBytes } = require("node:crypto");
+const verifier = new Webhook(`whsec_${randomBytes(32).toString("base64")}`);
+const now = new Date();
+const fixture = '{"type":"email.delivered"}';
+const signature = verifier.sign("fixture", now, fixture);
+verifier.verify(fixture, { "svix-id": "fixture", "svix-timestamp": String(Math.floor(now.getTime() / 1000)), "svix-signature": signature });
+assert.throws(() => verifier.verify(fixture + " ", { "svix-id": "fixture", "svix-timestamp": String(Math.floor(now.getTime() / 1000)), "svix-signature": signature }));
 function load(file, requireStub = require) {
   const mod = { exports: {} };
   const code = ts.transpileModule(fs.readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;

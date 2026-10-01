@@ -202,9 +202,11 @@ async function submitMatch(matchId: string) {
     const names = client.full_name.trim().split(/\s+/);
     const cvFile = await createJobDeskCvDocx({ name: client.full_name, role: String((profile.structured_profile as { targetHeadline?: string } | null)?.targetHeadline ?? ""), contact: [client.email, client.whatsapp_phone].filter(Boolean).join("  |  "), content: cv.structured_content });
     if (!(await claimApplication(matchId, order.id, "portal", vacancy.apply_url))) return;
+    let portalConfirmation: { confirmation: string; finalUrl?: string } | undefined;
     try {
       const result = await runPortalApplication({ url: vacancy.apply_url, siteToken: source.site_token, firstName: names[0] ?? "", lastName: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedinUrl: details?.applicantLinkedinUrl, portfolioUrl: details?.portfolioUrl, portalAnswers: details?.portalAnswers, fieldAnswers: submissionCheck.fieldAnswers, fieldSelections: submissionCheck.fieldSelections, city: details?.currentCity, country: details?.currentCountry, coverLetter: match.cover_letter }, cvFile);
       if (result.status === "submitted" && result.confirmation) {
+        portalConfirmation = { confirmation: result.confirmation, finalUrl: result.finalUrl };
         const { error: confirmationError } = await db.from("job_desk_applications").update({ status: "submitted", provider_response: { confirmation: result.confirmation, finalUrl: result.finalUrl, clicked: true, verification_type: "portal_confirmation" }, submitted_at: new Date().toISOString(), error_message: null }).eq("match_id", matchId);
         if (confirmationError) throw new Error(confirmationError.message);
         await db.from("job_desk_matches").update({ status: "submitted", submitted_at: new Date().toISOString() }).eq("id", matchId);
@@ -213,6 +215,16 @@ async function submitMatch(matchId: string) {
       }
       await db.from("job_desk_applications").update({ status: "needs_human", provider_response: { clicked: result.clicked ?? true, finalUrl: result.finalUrl }, error_message: result.reason ?? "Portal submission needs review." }).eq("match_id", matchId);
     } catch (cause) {
+      if (portalConfirmation) {
+        const { error: recoveryError } = await db.from("job_desk_applications").update({ status: "submitted", provider_response: { ...portalConfirmation, clicked: true, verification_type: "portal_confirmation" }, submitted_at: new Date().toISOString(), error_message: "Portal confirmed; local confirmation required recovery." }).eq("match_id", matchId);
+        if (recoveryError) {
+          await logSystemEvent({ category: "job_desk.submission", level: "error", message: "Confirmed portal application could not be persisted. Do not resubmit.", metadata: { matchId, ...portalConfirmation } });
+          throw new Error("Portal confirmed application; persistence failed. Do not resubmit.");
+        }
+        await db.from("job_desk_matches").update({ status: "submitted", submitted_at: new Date().toISOString() }).eq("id", matchId);
+        await queueUpdateWithoutChangingSubmission(order.id, "application_submitted", matchId);
+        return;
+      }
       await db.from("job_desk_applications").update({ status: "needs_human", error_message: cause instanceof Error ? `Browser worker unavailable or outcome uncertain: ${cause.message.slice(0, 350)}` : "Portal outcome uncertain. Check before retrying." }).eq("match_id", matchId);
     }
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);

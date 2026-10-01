@@ -16,8 +16,10 @@ export async function POST(request: Request) {
   if (Buffer.byteLength(raw) > 65536) return NextResponse.json({ error: "Payload too large" }, { status: 413 });
   let payload: unknown;
   try {
-    payload = new Webhook(secret).verify(raw, { "svix-id": request.headers.get("svix-id") ?? "", "svix-timestamp": request.headers.get("svix-timestamp") ?? "", "svix-signature": request.headers.get("svix-signature") ?? "" });
+    new Webhook(secret).verify(raw, { "svix-id": request.headers.get("svix-id") ?? "", "svix-timestamp": request.headers.get("svix-timestamp") ?? "", "svix-signature": request.headers.get("svix-signature") ?? "" });
   } catch { return NextResponse.json({ error: "Invalid signature" }, { status: 401 }); }
+  try { payload = JSON.parse(raw); }
+  catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
   const parsed = eventSchema.safeParse(payload);
   if (!parsed.success) return NextResponse.json({ error: "Invalid event" }, { status: 400 });
   const event = parsed.data;
