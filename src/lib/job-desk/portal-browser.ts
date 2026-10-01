@@ -86,7 +86,8 @@ try {
         browser('press', 'Enter');
       }
     } else continue;
-    const accepted = evaluate('JSON.stringify((()=>{const e=document.querySelector(' + JSON.stringify(selector) + '); if(!e)return false; if(e.type==="checkbox"||e.type==="radio")return e.checked; if(e.tagName==="SELECT")return !!e.value; if(e.getAttribute("role")==="combobox")return !!e.value && e.value.trim().toLowerCase()===' + JSON.stringify(answer.trim().toLowerCase()) + '; return !!e.value;})())');
+    const expectedSelection = data.fieldSelections?.[key];
+    const accepted = evaluate('JSON.stringify((()=>{const e=document.querySelector(' + JSON.stringify(selector) + '); if(!e)return false; if(e.type==="checkbox"||e.type==="radio")return e.checked; if(e.tagName==="SELECT")return !!e.value; if(e.getAttribute("role")==="combobox"){const hidden=[...document.querySelectorAll("input[type=hidden]")].find(h=>h.name===' + JSON.stringify(key) + '); return !!hidden?.value && (' + JSON.stringify(expectedSelection) + '===undefined || hidden.value===' + JSON.stringify(expectedSelection) + ');} return !!e.value;})())');
     if (accepted) handled.add(key);
   }
   if (![...handled].some(key => /resume|cv/i.test(key))) throw new Error('No supported CV upload field was found.');
