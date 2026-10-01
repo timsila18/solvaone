@@ -15,9 +15,10 @@ type PacketProps = {
   location: string;
   details: ApplicantDetails | null;
   letter: string;
+  reason?: string | null;
 };
 
-export function PortalApplicationPacket({ matchId, url, title, company, name, email, phone, location, details, letter }: PacketProps) {
+export function PortalApplicationPacket({ matchId, url, title, company, name, email, phone, location, details, letter, reason }: PacketProps) {
   const [status, setStatus] = useState("");
   const confirmed = (value: string | undefined) => value && value !== "not_provided" && value !== "unsure" ? value : "Not confirmed";
   const answers = [
@@ -35,7 +36,8 @@ export function PortalApplicationPacket({ matchId, url, title, company, name, em
   }
 
   return <section className="mt-4 border-l-2 border-brand-blue pl-4 text-sm" aria-label={`Application packet for ${title} at ${company}`}>
-    <h3 className="font-bold">Portal application packet</h3>
+    <h3 className="font-bold">Application needs review: {title} at {company}</h3>
+    <p role="alert" className="mt-2 font-semibold">Submission is not confirmed.{reason ? ` Reason: ${reason}` : " Check the employer portal before attempting to submit."}</p>
     <p className="mt-1 text-xs text-black/60 dark:text-white/60">Open the official job page, use the verified details below, attach the approved CV, and record the employer's confirmation after submission. Leave unconfirmed answers for the client.</p>
     <div className="mt-3 flex flex-wrap gap-2">
       <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 bg-brand-blue px-3 text-xs font-bold text-white"><ExternalLink className="h-4 w-4" />Open application</a>
