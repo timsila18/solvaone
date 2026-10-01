@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { expiredDeadline, scoreVacancy, submissionHoldReason } from "../src/lib/job-desk/matching.ts";
 
+test("updated authorization replaces stale intake roles and locations for ranking", () => {
+  const profile = { target_job_titles: ["Marketing Officer"], preferred_locations: ["Nairobi"], structured_profile: { skills: ["Payroll"] } };
+  const vacancy = { title: "Payroll Officer", description: "Payroll processing", location: "Kisumu, Kenya", workplace_type: "onsite" };
+  assert.equal(scoreVacancy(vacancy, profile).score, 0);
+  assert.ok(scoreVacancy(vacancy, profile, { targetRoles: ["Payroll Officer"], preferredLocations: ["Kenya"], remotePreference: "flexible" }).score >= 25);
+  assert.equal(scoreVacancy({ ...vacancy, description: "Application deadline: 2025-01-10" }, profile, { targetRoles: ["Payroll Officer"], preferredLocations: ["Kenya"] }).score, 0);
+});
+
 test("remote role with matching skills ranks ahead of unrelated onsite role", () => {
   const profile = { target_job_titles: ["Data Engineer"], preferred_locations: ["Nairobi"], remote_preference: "remote", structured_profile: { skills: ["Python", "SQL", "Kafka"] } };
   const strong = scoreVacancy({ title: "Senior Data Engineer", description: "Build Python, SQL and Kafka pipelines", location: "Remote", workplace_type: "remote" }, profile);
