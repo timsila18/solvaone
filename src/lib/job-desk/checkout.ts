@@ -6,11 +6,18 @@ export async function reconcileJobDeskPayment(orderId: string) {
   const db = createSupabaseAdminClient();
   const { data: attempt } = await db.from("job_desk_payment_attempts").select("amount,mpesa_receipt_number").eq("order_id", orderId).eq("status", "successful").not("mpesa_receipt_number", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!attempt?.mpesa_receipt_number) return false;
-  const { data: order } = await db.from("job_desk_orders").select("amount,status,payment_status").eq("id", orderId).single();
+  const { data: order } = await db.from("job_desk_orders").select("amount,status,payment_status,service_type").eq("id", orderId).single();
   if (!order || Number(order.amount) !== Number(attempt.amount)) return false;
   if (order.payment_status !== "paid") {
     const { error } = await db.from("job_desk_orders").update({ payment_status: "paid", payment_method: "mpesa", payment_reference: attempt.mpesa_receipt_number, paid_at: new Date().toISOString(), status: order.status === "awaiting_payment" ? "intake" : order.status }).eq("id", orderId).neq("payment_status", "paid");
     if (error) throw new Error("Payment was received but the order needs reconciliation. Contact support with your M-Pesa receipt.");
+  }
+  if (order.service_type === "job_search_full" && (order.status === "awaiting_payment" || order.status === "intake")) {
+    const { data: cvFile } = await db.from("job_desk_intake_files").select("id").eq("order_id", orderId).eq("document_kind", "cv").eq("extraction_status", "succeeded").limit(1).maybeSingle();
+    if (cvFile) {
+      const { enqueueTask } = await import("./automation");
+      await enqueueTask("process_cv", `process_cv:${orderId}:paid`, orderId);
+    }
   }
   return true;
 }

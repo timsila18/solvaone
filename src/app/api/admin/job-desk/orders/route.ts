@@ -5,6 +5,7 @@ import { extractTextFromCvFile } from "@/lib/cv-extraction";
 import { checkRateLimit, clientIpFromHeaders, logAdminAction, rateLimitResponse, requireAdmin } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { enqueueTask } from "@/lib/job-desk/automation";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -158,6 +159,10 @@ export async function POST(request: Request) {
       extraction_warning: warning ?? null
     });
     if (intakeError) throw new Error(intakeError.message);
+
+    if (isPaid && extractionStatus === "succeeded") {
+      await enqueueTask("process_cv", `process_cv:${orderId}:intake`, orderId);
+    }
 
     await logAdminAction({
       adminId: user.id,

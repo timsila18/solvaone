@@ -12,7 +12,7 @@ import { cvDepthIssue } from "./cv-quality";
 
 type ProcessJobDeskOrderInput = {
   orderId: string;
-  adminId: string;
+  adminId?: string;
   force?: boolean;
 };
 
@@ -83,7 +83,7 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
     .single();
 
   if (orderError || !order) throw new Error(orderError?.message ?? "Job Desk order was not found.");
-  if (order.source_channel === "website" && !hasVerifiedJobDeskPayment(order)) throw new Error("Confirm payment before processing this website request.");
+  if (!hasVerifiedJobDeskPayment(order)) throw new Error("Confirm payment before processing this request.");
   if (order.service_type === "interview_coaching" || order.service_type === "linkedin_revamp") throw new Error("This service does not use the CV preparation workflow.");
   const { data: candidateProfile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (profileError || !candidateProfile) throw new Error(profileError?.message ?? "Candidate profile was not found.");
@@ -289,7 +289,7 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
       .eq("id", run.id);
 
     await db.from("job_desk_orders").update({ status: "cv_review" }).eq("id", orderId);
-    await logAdminAction({
+    if (adminId) await logAdminAction({
       adminId,
       action: "job_desk.cv_processed",
       targetType: "job_desk_order",

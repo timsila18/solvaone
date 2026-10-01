@@ -47,7 +47,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId);
     const { data: paidOrder } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", orderId).single();
     const { data: serviceOrder } = await db.from("job_desk_orders").select("service_type").eq("id", orderId).single();
-    if (serviceOrder?.service_type === "job_search_full" && hasVerifiedJobDeskPayment(paidOrder)) { await enqueueTask("match", `match:${orderId}:approval:${document.id}`, orderId); queued = true; }
+    if (serviceOrder?.service_type === "job_search_full" && hasVerifiedJobDeskPayment(paidOrder)) {
+      const { data: sources, error: sourceError } = await db.from("job_desk_sources").select("id").eq("active", true).limit(100);
+      if (sourceError) return NextResponse.json({ error: sourceError.message }, { status: 500 });
+      for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:approval:${document.id}`, null, { sourceId: source.id });
+      await enqueueTask("match", `match:${orderId}:approval:${document.id}`, orderId);
+      queued = true;
+    }
   } else if (parsed.data.action === "record_payment") {
     const { data: order, error: findError } = await db.from("job_desk_orders").select("id,payment_status,payment_reference,amount,source_channel,status,service_type").eq("id", orderId).single();
     if (findError || !order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
@@ -66,6 +72,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const { data: cv } = await db.from("job_desk_documents").select("id").eq("order_id", orderId).eq("document_type", "revamped_cv").eq("status", "approved").limit(1).maybeSingle();
     if (cv && order.service_type === "job_search_full") { await enqueueTask("match", `match:${orderId}:payment`, orderId); queued = true; }
+    else if (["cv_revamp", "cv_build", "job_search_full"].includes(order.service_type) && ["awaiting_payment", "intake", "failed", "awaiting_information"].includes(order.status)) {
+      const { data: intake } = await db.from("job_desk_intake_files").select("id").eq("order_id", orderId).eq("document_kind", "cv").eq("extraction_status", "succeeded").limit(1).maybeSingle();
+      if (intake) { await enqueueTask("process_cv", `process_cv:${orderId}:payment`, orderId); queued = true; }
+    }
   } else if (parsed.data.action === "save_answers") {
     const { data: questionnaire, error: findError } = await db.from("job_desk_questionnaires").select("id,questions,responses").eq("order_id", orderId).maybeSingle();
     if (findError || !questionnaire) return NextResponse.json({ error: "Process the CV before recording answers." }, { status: 409 });

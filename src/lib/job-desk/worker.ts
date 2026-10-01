@@ -6,6 +6,7 @@ import { discoverVacancies, enqueueTask, matchOrder, plainText, verifyVacancySti
 import { scoreVacancy, submissionHoldReason } from "./matching";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { createJobDeskCvDocx } from "./cv-docx";
+import { processJobDeskOrder } from "./service";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
@@ -124,6 +125,7 @@ async function submitMatch(matchId: string) {
 
 async function processTask(task: Task) {
   const db = createSupabaseAdminClient();
+  if (task.task_type === "process_cv" && task.order_id) return processJobDeskOrder({ orderId: task.order_id });
   if (task.task_type === "discover") return { count: await discoverVacancies(task.payload.sourceId) };
   if (task.task_type === "match" && task.order_id) return { count: await matchOrder(task.order_id) };
   if (task.task_type === "prepare" && task.payload.matchId) { await prepareMatch(task.payload.matchId); return { ok: true }; }

@@ -203,10 +203,17 @@ async function handleJobDeskCallback(callback: Record<string, any>, checkoutRequ
   if (!changed) return { ok: true, matched: true, duplicate: true, service: "job_desk" };
   await db.from("job_desk_payment_events").insert({ attempt_id: attempt.id, event_type: `callback_${outcome.status}`, details: { result_code: outcome.code, receipt: outcome.receipt } });
   if (outcome.status === "successful") {
-    const { data: order } = await db.from("job_desk_orders").select("id,amount,payment_status,status").eq("id", attempt.order_id).single();
+    const { data: order } = await db.from("job_desk_orders").select("id,amount,payment_status,status,service_type").eq("id", attempt.order_id).single();
     if (!order || Number(order.amount) !== Number(attempt.amount)) throw new Error("Paid Job Desk order amount mismatch; manual reconciliation required.");
     const { error: orderError } = await db.from("job_desk_orders").update({ payment_status: "paid", payment_method: "mpesa", payment_reference: outcome.receipt, paid_at: new Date().toISOString(), status: order.status === "awaiting_payment" ? "intake" : order.status }).eq("id", attempt.order_id).neq("payment_status", "paid");
     if (orderError) throw new Error(`Paid Job Desk order needs reconciliation: ${orderError.message}`);
+    if (order.service_type === "job_search_full" && (order.status === "awaiting_payment" || order.status === "intake")) {
+      const { data: cvFile } = await db.from("job_desk_intake_files").select("id").eq("order_id", attempt.order_id).eq("document_kind", "cv").eq("extraction_status", "succeeded").limit(1).maybeSingle();
+      if (cvFile) {
+        const { enqueueTask } = await import("@/lib/job-desk/automation");
+        await enqueueTask("process_cv", `process_cv:${attempt.order_id}:paid`, attempt.order_id);
+      }
+    }
   }
   return { ok: true, matched: true, status: outcome.status, service: "job_desk" };
 }

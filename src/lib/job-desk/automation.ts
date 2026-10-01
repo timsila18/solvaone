@@ -106,7 +106,7 @@ export async function matchOrder(orderId: string) {
     if (staleError) throw new Error(staleError.message);
   }
   for (const match of matches) {
-    const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id" });
+    const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id", ignoreDuplicates: true });
     if (matchError) throw new Error(matchError.message);
   }
   const { data: top } = await db.from("job_desk_matches").select("id").eq("order_id", orderId).eq("status", "suggested").gte("score", 50).order("score", { ascending: false }).limit(10);
