@@ -14,6 +14,8 @@ export type FeedVacancy = {
 };
 
 export const recommendedSources: FeedSource[] = [
+  { provider: "greenhouse", site_token: "jumia", company_name: "Jumia" },
+  { provider: "ashby", site_token: "M-KOPA", company_name: "M-KOPA" },
   { provider: "greenhouse", site_token: "scangroup", company_name: "WPP Scangroup" },
   { provider: "greenhouse", site_token: "oafkenya", company_name: "One Acre Fund Kenya" },
   { provider: "lever", site_token: "dlocal", company_name: "dLocal" },
@@ -40,7 +42,7 @@ export function isOfficialApplyUrl(provider: FeedProvider, token: string, rawUrl
     const url = new URL(String(rawUrl));
     if (url.protocol !== "https:") return false;
     const hosts: Record<FeedProvider, string[]> = {
-      greenhouse: ["boards.greenhouse.io", "job-boards.greenhouse.io"],
+      greenhouse: ["boards.greenhouse.io", "job-boards.greenhouse.io", "job-boards.eu.greenhouse.io"],
       lever: ["jobs.lever.co"],
       ashby: ["jobs.ashbyhq.com"],
       smartrecruiters: ["jobs.smartrecruiters.com"]
@@ -58,10 +60,10 @@ export function normalizeFeedJob(source: FeedSource, item: Record<string, any>):
   const provider = source.provider;
   if (provider === "ashby" && item.isListed === false) return null;
   const title = cleanText(provider === "greenhouse" ? item.title : provider === "lever" ? item.text : provider === "smartrecruiters" ? item.name : item.title).slice(0, 300);
-  const location = cleanText(provider === "greenhouse" ? item.location?.name : provider === "lever" ? item.categories?.location : provider === "smartrecruiters" ? item.location?.fullLocation ?? item.location?.city : item.location).slice(0, 300);
+  const location = cleanText(provider === "greenhouse" ? item.location?.name : provider === "lever" ? item.categories?.location : provider === "smartrecruiters" ? item.location?.fullLocation ?? [item.location?.city, item.location?.country === "ke" ? "Kenya" : item.location?.country].filter(Boolean).join(", ") : item.location).slice(0, 300);
   const rawUrl = provider === "greenhouse" ? item.absolute_url : provider === "lever" ? item.hostedUrl : provider === "smartrecruiters" ? item.applyUrl : item.applyUrl ?? item.jobUrl;
   if (!title || !isOfficialApplyUrl(provider, source.site_token, rawUrl)) return null;
-  const description = cleanText(provider === "greenhouse" ? item.content : provider === "lever" ? item.descriptionPlain ?? item.description : provider === "smartrecruiters" ? item.jobAd?.sections?.jobDescription?.text : item.descriptionPlain ?? item.descriptionHtml);
+  const description = cleanText(provider === "greenhouse" ? item.content : provider === "lever" ? [item.descriptionPlain ?? item.description, ...(Array.isArray(item.lists) ? item.lists.map((section: Record<string, unknown>) => `${section.text ?? ""} ${section.content ?? ""}`) : []), item.additionalPlain ?? item.additional].filter(Boolean).join(" ") : provider === "smartrecruiters" ? Object.values(item.jobAd?.sections ?? {}).map((section: any) => `${section.title ?? ""} ${section.text ?? ""}`).join(" ") : item.descriptionPlain ?? item.descriptionHtml);
   const date = provider === "greenhouse" ? item.updated_at : provider === "lever" ? item.createdAt : provider === "smartrecruiters" ? item.releasedDate : item.publishedAt;
   const externalId = provider === "ashby" ? createHash("sha256").update(String(item.jobUrl ?? rawUrl)).digest("hex") : String(item.id ?? "");
   if (!externalId) return null;
@@ -108,22 +110,34 @@ export async function fetchFeedJobs(source: FeedSource): Promise<Record<string, 
     if (!Array.isArray(body.jobs) || body.jobs.length > 1500) throw new Error("Ashby feed was incomplete or too large.");
     return body.jobs;
   }
-  const list = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings?limit=100&offset=0`);
-  if (!Array.isArray(list.content) || Number(list.totalFound ?? 0) > 100) throw new Error("SmartRecruiters board has over 100 postings; review source before importing.");
+  const postings = await fetchSmartRecruitersPostings(token);
   const jobs: Record<string, any>[] = [];
-  for (let start = 0; start < list.content.length; start += 5) {
-    const page = await Promise.all(list.content.slice(start, start + 5).map((item: Record<string, any>) => fetchJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings/${encodeURIComponent(String(item.id))}`)));
+  for (let start = 0; start < postings.length; start += 5) {
+    const page = await Promise.all(postings.slice(start, start + 5).map((item: Record<string, any>) => fetchJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings/${encodeURIComponent(String(item.id))}`)));
     jobs.push(...page);
   }
   return jobs;
 }
 
+async function fetchSmartRecruitersPostings(token: string) {
+  const postings: Record<string, any>[] = [];
+  let total = 0;
+  do {
+    const page = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings?limit=100&offset=${postings.length}`);
+    if (!Array.isArray(page.content) || !Number.isInteger(page.totalFound) || page.totalFound < 0 || page.totalFound > 1500) throw new Error("SmartRecruiters feed was incomplete or too large.");
+    total = page.totalFound;
+    if (!page.content.length && postings.length < total) throw new Error("SmartRecruiters returned an incomplete page; existing vacancies were retained.");
+    postings.push(...page.content);
+  } while (postings.length < total);
+  if (new Set(postings.map(item => item.id)).size !== postings.length) throw new Error("SmartRecruiters pagination repeated postings; existing vacancies were retained.");
+  return postings;
+}
+
 export async function feedStillListsJob(source: FeedSource, externalId: string) {
   const token = encodeURIComponent(source.site_token);
   if (source.provider === "smartrecruiters") {
-    const body = await fetchJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings?limit=100&offset=0`);
-    if (!Array.isArray(body.content) || Number(body.totalFound ?? 0) > 100) throw new Error("Official board listing could not be verified.");
-    return body.content.some((item: Record<string, any>) => String(item.id) === externalId);
+    const postings = await fetchSmartRecruitersPostings(token);
+    return postings.some((item: Record<string, any>) => String(item.id) === externalId);
   }
   const items = await fetchFeedJobs(source);
   return items.some((item) => {

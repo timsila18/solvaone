@@ -276,7 +276,7 @@ async function processTask(task: Task) {
   const db = createSupabaseAdminClient();
   if (task.task_type === "process_cv" && task.order_id) return processJobDeskOrder({ orderId: task.order_id });
   if (task.task_type === "discover") return { count: await discoverVacancies(task.payload.sourceId) };
-  if (task.task_type === "match" && task.order_id) return { count: await matchOrder(task.order_id) };
+  if (task.task_type === "match" && task.order_id) return matchOrder(task.order_id);
   if (task.task_type === "prepare" && task.payload.matchId) { await prepareMatch(task.payload.matchId); return { ok: true }; }
   if (task.task_type === "submit" && task.payload.matchId) {
     await submitMatch(task.payload.matchId);

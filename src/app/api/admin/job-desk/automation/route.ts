@@ -9,6 +9,7 @@ import { runJobDeskWorker } from "@/lib/job-desk/worker";
 import { expiredDeadline } from "@/lib/job-desk/matching";
 import { queueClientUpdate } from "@/lib/job-desk/client-updates";
 import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
+import { recommendedSources } from "@/lib/job-desk/vacancy-feeds";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -23,6 +24,7 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("record_submission"), matchId: z.string().uuid(), confirmation: z.string().trim().min(5).max(300), personallySubmitted: z.literal(true) }),
   z.object({ action: z.literal("run_queue") }),
   z.object({ action: z.literal("refresh_all") }),
+  z.object({ action: z.literal("connect_catalogue") }),
   z.object({ action: z.literal("review_vacancy"), vacancyId: z.string().uuid(), decision: z.enum(["approve", "reject"]) }),
   z.object({ action: z.literal("add_vacancy"), companyName: z.string().min(2).max(150), title: z.string().min(3).max(250), location: z.string().max(200), description: z.string().min(100).max(18000), applyUrl: z.string().url().max(1000), applicationMethod: z.enum(["portal", "email"]), applicationEmail: z.string().email().optional(), emailVerified: z.boolean().default(false) })
 ]);
@@ -85,6 +87,20 @@ export async function POST(request: Request) {
       queued = true;
     } else if (input.action === "run_queue") {
       result = { processed: await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }) };
+    } else if (input.action === "connect_catalogue") {
+      let count = 0;
+      for (const source of recommendedSources) {
+        const { data: existing, error: readError } = await db.from("job_desk_sources").select("id").eq("provider", source.provider).eq("site_token", source.site_token).maybeSingle();
+        if (readError) throw new Error(readError.message);
+        if (existing) continue;
+        const { data: added, error } = await db.from("job_desk_sources").upsert({ ...source, active: true }, { onConflict: "provider,site_token", ignoreDuplicates: true }).select("id").maybeSingle();
+        if (error) throw new Error(error.message);
+        if (!added) continue;
+        await enqueueTask("discover", `discover:${added.id}:${Date.now()}`, null, { sourceId: added.id });
+        count += 1;
+      }
+      result = { queued: count };
+      queued = true;
     } else if (input.action === "refresh_all") {
       const { data: sources, error } = await db.from("job_desk_sources").select("id").eq("active", true).limit(100);
       if (error) throw new Error(error.message);

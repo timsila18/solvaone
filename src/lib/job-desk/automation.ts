@@ -99,6 +99,19 @@ export async function matchOrder(orderId: string) {
   const candidates = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort((a, b) => b.score - a.score).slice(0, 24);
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
   const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
+  let refreshedSources = 0;
+  if (matches.length < 3) {
+    const { data: sources, error: sourceError } = await db.from("job_desk_sources").select("id,last_synced_at").eq("active", true).limit(100);
+    if (sourceError) throw new Error(sourceError.message);
+    const cutoff = Date.now() - 2 * 3600000;
+    const window = Math.floor(Date.now() / (2 * 3600000));
+    for (const source of sources ?? []) {
+      if (!source.last_synced_at || new Date(source.last_synced_at).getTime() < cutoff) {
+        const task = await enqueueTask("discover", `coverage-refresh:${source.id}:${window}`, null, { sourceId: source.id });
+        if (task) refreshedSources += 1;
+      }
+    }
+  }
   const selected = new Set(matches.map((item) => item.vacancy.id));
   const { data: oldMatches, error: oldError } = await db.from("job_desk_matches").select("id,vacancy_id").eq("order_id", orderId).in("status", ["suggested", "preparing", "ready"]).limit(500);
   if (oldError) throw new Error(oldError.message);
@@ -121,7 +134,7 @@ export async function matchOrder(orderId: string) {
   for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score).slice(0, 10)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
-  return matches.length;
+  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.filter(item => item.score >= 50 && (item.vacancy.application_method === "email" && item.vacancy.email_verified && item.vacancy.application_email || item.vacancy.provider === "greenhouse")).length, refreshedSources } };
 }
 
 export function createAuthorizationToken() {
