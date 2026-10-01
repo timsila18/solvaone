@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { JobDeskIntakeForm } from "@/components/job-desk/intake-form";
 import { AutomationControls } from "@/components/job-desk/automation-controls";
+import { ShareIntakeLink } from "@/components/job-desk/share-intake-link";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { formatKes } from "@/lib/utils";
 
@@ -28,12 +29,12 @@ export default async function JobDeskPage() {
     <AppShell email={user.email} isAdmin>
       <div className="flex flex-col justify-between gap-4 border-b border-black/10 pb-6 dark:border-white/10 md:flex-row md:items-end">
         <div><h1 className="text-3xl font-black">SolvaOne Job Desk</h1><p className="mt-2 max-w-2xl text-sm text-black/55 dark:text-white/55">Manual WhatsApp intake, payment recording, structured candidate profiles, and approval-ready CV processing.</p></div>
-        <div className="flex items-center gap-4 text-sm font-bold text-brand-blue"><AutomationControls action="run_queue" label="Process queue now" /><Link href="/dashboard/admin/job-desk/vacancies">Vacancies and sources</Link><Link href="/dashboard/admin">Admin dashboard</Link></div>
+        <div className="flex flex-wrap items-center gap-4 text-sm font-bold text-brand-blue"><AutomationControls action="run_queue" label="Process queue now" /><Link href="/dashboard/admin/job-desk/review">Needs your attention</Link><Link href="/dashboard/admin/job-desk/vacancies">Vacancies and sources</Link><Link href="/dashboard/admin">Admin dashboard</Link></div>
       </div>
 
       <div className="flex flex-col justify-between gap-3 border-b border-black/10 py-5 dark:border-white/10 sm:flex-row sm:items-center">
         <div><h2 className="font-black">Client submission link</h2><p className="mt-1 break-all text-sm text-black/55 dark:text-white/55">https://solvaone.co.ke/job-desk</p></div>
-        <Link href="/job-desk" target="_blank" className="inline-flex h-10 items-center justify-center rounded-lg bg-brand-blue px-4 text-sm font-bold text-white">View client form</Link>
+        <div className="flex flex-wrap items-center gap-2"><ShareIntakeLink /><Link href="/job-desk" target="_blank" className="inline-flex h-10 items-center justify-center bg-brand-blue px-4 text-sm font-bold text-white">View client form</Link></div>
       </div>
 
       <div className="grid border-b border-black/10 dark:border-white/10 sm:grid-cols-2 xl:grid-cols-7">

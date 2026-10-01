@@ -14,6 +14,9 @@ export type FeedVacancy = {
 };
 
 export const recommendedSources: FeedSource[] = [
+  { provider: "greenhouse", site_token: "scangroup", company_name: "WPP Scangroup" },
+  { provider: "greenhouse", site_token: "oafkenya", company_name: "One Acre Fund Kenya" },
+  { provider: "lever", site_token: "dlocal", company_name: "dLocal" },
   { provider: "greenhouse", site_token: "gitlab", company_name: "GitLab" },
   { provider: "greenhouse", site_token: "canonical", company_name: "Canonical" },
   { provider: "lever", site_token: "binance", company_name: "Binance" },

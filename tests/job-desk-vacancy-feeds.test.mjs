@@ -7,6 +7,9 @@ test("catalogue contains verified provider types and no duplicate boards", () =>
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(keys.some((key) => key.startsWith("ashby:")));
   assert.ok(keys.some((key) => key.startsWith("smartrecruiters:")));
+  assert.ok(keys.includes("greenhouse:scangroup"));
+  assert.ok(keys.includes("greenhouse:oafkenya"));
+  assert.ok(keys.includes("lever:dlocal"));
 });
 
 test("only official board links for the configured company are accepted", () => {

@@ -56,7 +56,7 @@ export default async function VacanciesPage() {
       <h2 className="text-lg font-bold">Source catalogue</h2>
       <p className="mt-1 text-sm text-black/55 dark:text-white/55">Official employer-hosted feeds are shared across all clients. Sources refresh daily; use Refresh for an immediate check.</p>
       <div className="mt-4 divide-y divide-black/10 dark:divide-white/10">
-        {recommendedSources.map((source) => <div key={`${source.provider}:${source.site_token}`} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"><span><b>{source.company_name}</b> · {source.provider}</span><span className="text-xs font-semibold text-brand-blue">{configured.has(`${source.provider}:${source.site_token.toLowerCase()}`) ? "Connected" : "Not connected"}</span></div>)}
+        {recommendedSources.map((source) => <div key={`${source.provider}:${source.site_token}`} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"><span><b>{source.company_name}</b> · {source.provider}</span>{configured.has(`${source.provider}:${source.site_token.toLowerCase()}`) ? <span className="text-xs font-semibold text-brand-blue">Connected</span> : <AutomationControls action="add_source" label="Connect source" provider={source.provider} siteToken={source.site_token} companyName={source.company_name} />}</div>)}
       </div>
     </section>
     <section className="border-t border-black/10 py-7 dark:border-white/10">
