@@ -49,6 +49,9 @@ export async function sendClientUpdate(orderId: string, event: ClientUpdate, ref
     signal: AbortSignal.timeout(20000)
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.id) throw new Error(`Could not send client update (${response.status}).`);
+  if (!response.ok || !result.id) {
+    const providerMessage = typeof result.message === "string" ? result.message.slice(0, 250) : "Check the Resend API key and verified sender domain.";
+    throw new Error(`Could not send client update (${response.status}): ${providerMessage}`);
+  }
   return { providerMessageId: result.id, recipient: email, event };
 }

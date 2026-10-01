@@ -54,6 +54,9 @@ export async function POST(request: Request) {
     } else if (input.action === "match") {
       const { data: order } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").eq("id", input.orderId).single();
       if (!hasVerifiedJobDeskPayment(order)) return NextResponse.json({ error: "Verify the payment record before matching jobs." }, { status: 409 });
+      const { data: latestCv, error: cvError } = await db.from("job_desk_documents").select("status").eq("order_id", input.orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+      if (cvError) throw new Error(cvError.message);
+      if (latestCv?.status !== "approved") return NextResponse.json({ error: latestCv ? "Review and approve the latest CV before matching jobs." : "Prepare the CV and profile, then approve the CV before matching jobs." }, { status: 409 });
       await enqueueTask("match", `match:${input.orderId}:${Date.now()}`, input.orderId);
       queued = true;
     } else if (input.action === "prepare") {

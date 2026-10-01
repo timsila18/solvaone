@@ -108,9 +108,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     const { error } = await db.from("job_desk_questionnaires").update({ responses: answers, status: complete ? "answered" : "open" }).eq("id", questionnaire.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else {
-    const { data: order } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference,source_channel").eq("id", orderId).single();
+    const { data: order } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference,source_channel,service_type").eq("id", orderId).single();
     if (!order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
     if (order.source_channel === "website" && !hasVerifiedJobDeskPayment(order) && parsed.data.status !== "cancelled") return NextResponse.json({ error: "Confirm payment before advancing this website request." }, { status: 409 });
+    if (["approved", "active"].includes(parsed.data.status) && ["job_search_full", "cv_revamp", "cv_build"].includes(order.service_type)) {
+      const { data: latestCv, error: cvError } = await db.from("job_desk_documents").select("status").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+      if (cvError) return NextResponse.json({ error: cvError.message }, { status: 500 });
+      if (latestCv?.status !== "approved") return NextResponse.json({ error: latestCv ? "Review and approve the latest CV before advancing this order." : "Prepare and approve the CV before advancing this order." }, { status: 409 });
+    }
     const { error } = await db.from("job_desk_orders").update({ status: parsed.data.status }).eq("id", orderId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
