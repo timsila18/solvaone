@@ -1,0 +1,30 @@
+name: Job Desk Queue Recovery
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: job-desk-production-worker
+  cancel-in-progress: false
+
+jobs:
+  drain-queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Process durable production tasks
+        env:
+          WORKER_SECRET: ${{ secrets.SOLVAONE_JOB_DESK_WORKER_SECRET }}
+        run: |
+          if [ -z "$WORKER_SECRET" ]; then
+            echo 'Missing Job Desk worker secret.'
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error \
+            --max-time 330 \
+            --header "Authorization: Bearer $WORKER_SECRET" \
+            'https://solvaone.co.ke/api/job-desk/worker'

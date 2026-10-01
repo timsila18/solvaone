@@ -19,3 +19,12 @@ When no verified email provider is configured, authorized email applications pau
 Operational checks: inspect `job_desk_tasks` for failed tasks, `job_desk_sources.last_error` for feed failures, `job_desk_applications` for `needs_human`, and Supabase cron run history for scheduler health. Use the admin controls to retry a failed feed or matching run after fixing the cause. Do not mark a portal application submitted without an external confirmation.
 
 Discovery targets ten suitable openings, not ten guaranteed submissions. The catalogue includes Talent Safari, The Global Talent Co and the official Accor Kenya feed (country-filtered before pagination). Matching reviews up to 64 evidence candidates with full adverts, cached per order/profile/input/review version. Explicit mandatory requirements require documented CV evidence; missing requirements prevent selection. The coverage panel displays reviewed counts and rejection examples. When fewer than ten matches exist, stale sources refresh and rematch; existing submission locks prevent duplicate sending. Regional/national title modifiers do not exclude related sales-manager titles. City-country input such as `Nairobi, Kenya, Mombasa, Kenya` authorizes those cities, not all of Kenya. Unsupported portals remain assisted handoffs, never confirmed submissions.
+# Frequent Queue Recovery
+
+The GitHub `Job Desk Queue Recovery` workflow runs approximately every five
+minutes and can also be dispatched manually. GitHub schedules may be delayed.
+It calls the production worker using a dedicated repository secret,
+`SOLVAONE_JOB_DESK_WORKER_SECRET`, matching the server-only Vercel
+`JOB_DESK_WORKER_SECRET`. The daily Vercel cron remains a fallback. No checkout
+or repository write permission is granted to the workflow. Task leases and
+submission locks remain responsible for preventing duplicate processing/sends.
