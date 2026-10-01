@@ -2,13 +2,22 @@ import { createHash } from "node:crypto";
 import { createOpenAIClient } from "@/lib/openai";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { logSystemEvent } from "@/lib/security";
 import { discoverVacancies, enqueueTask, matchOrder, plainText, verifyVacancyStillOpen } from "./automation";
 import { scoreVacancy, submissionHoldReason } from "./matching";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { createJobDeskCvDocx } from "./cv-docx";
 import { processJobDeskOrder } from "./service";
+import { queueClientUpdate, sendClientUpdate, type ClientUpdate } from "./client-updates";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
+
+async function queueUpdateWithoutChangingSubmission(orderId: string, event: ClientUpdate, matchId: string) {
+  try { await queueClientUpdate(orderId, event, matchId); }
+  catch (cause) {
+    await logSystemEvent({ category: "job_desk.client_email", level: "error", message: cause instanceof Error ? cause.message : "Could not queue client update", metadata: { orderId, matchId, event } });
+  }
+}
 
 async function prepareMatch(matchId: string) {
   const db = createSupabaseAdminClient();
@@ -63,6 +72,7 @@ async function submitMatch(matchId: string) {
   if (latestCv?.status !== "approved") {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: match.order_id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "A newer CV is awaiting approval. Recheck the application before submission." }, { onConflict: "match_id" });
+    await queueUpdateWithoutChangingSubmission(match.order_id, "application_needs_action", matchId);
     return;
   }
   const { data: cv } = await db.from("job_desk_documents").select("html,title,structured_content").eq("order_id", match.order_id).eq("document_type", "revamped_cv").eq("status", "approved").order("version", { ascending: false }).limit(1).maybeSingle();
@@ -74,11 +84,13 @@ async function submitMatch(matchId: string) {
   if (pauseReason) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: pauseReason }, { onConflict: "match_id" });
+    await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
   if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || scoreVacancy(vacancy, profile).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:")) || vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "Application portal or unverified email requires human submission." }, { onConflict: "match_id" });
+    await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
   try {
@@ -86,11 +98,13 @@ async function submitMatch(matchId: string) {
   } catch (cause) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", error_message: cause instanceof Error ? cause.message : "Official vacancy source could not be checked." }, { onConflict: "match_id" });
+    await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
-  if (!process.env.RESEND_API_KEY || !process.env.FROM_EMAIL) {
+  if (!process.env.RESEND_API_KEY || !(process.env.JOB_DESK_FROM_EMAIL ?? process.env.FROM_EMAIL)) {
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "email", status: "needs_human", error_message: "Verified email provider is not configured." }, { onConflict: "match_id" });
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+    await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
   const { data: existing } = await db.from("job_desk_applications").select("status,provider_message_id").eq("match_id", matchId).maybeSingle();
@@ -98,6 +112,7 @@ async function submitMatch(matchId: string) {
   if (existing?.status === "sending") {
     await db.from("job_desk_applications").update({ status: "needs_human", error_message: "Submission outcome unknown after worker interruption. Check provider before retrying." }).eq("match_id", matchId);
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+    await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
   const candidate = (profile.structured_profile ?? {}) as { targetHeadline?: string; location?: string };
@@ -111,15 +126,17 @@ async function submitMatch(matchId: string) {
   if (saveError) throw new Error(saveError.message);
   const content = `${match.cover_letter}\n\nApplication submitted with the candidate's express authorization. Candidate contact: ${client.email ?? "Not provided"}; ${client.whatsapp_phone}.`;
   try {
-    const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": `job-desk-${matchId}` }, body: JSON.stringify({ from: process.env.FROM_EMAIL, to: [vacancy.application_email], reply_to: client.email || undefined, subject: `Application: ${vacancy.title} - ${client.full_name}`, text: content, attachments: [{ filename: `${client.full_name.replace(/[^a-z0-9 -]/gi, "").trim() || "Candidate"}-CV.docx`, content: attachment.toString("base64") }] }), signal: AbortSignal.timeout(20000) });
+    const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": `job-desk-${matchId}` }, body: JSON.stringify({ from: process.env.JOB_DESK_FROM_EMAIL ?? process.env.FROM_EMAIL, to: [vacancy.application_email], reply_to: client.email || undefined, subject: `Application: ${vacancy.title} - ${client.full_name}`, text: content, attachments: [{ filename: `${client.full_name.replace(/[^a-z0-9 -]/gi, "").trim() || "Candidate"}-CV.docx`, content: attachment.toString("base64") }] }), signal: AbortSignal.timeout(20000) });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.id) throw new Error(`Email provider rejected application (${response.status}).`);
     await db.from("job_desk_applications").update({ status: "submitted", provider_message_id: result.id, provider_response: { id: result.id }, submitted_at: new Date().toISOString(), error_message: null }).eq("match_id", matchId);
     await db.from("job_desk_matches").update({ status: "submitted", submitted_at: new Date().toISOString() }).eq("id", matchId);
+    await queueUpdateWithoutChangingSubmission(order.id, "application_submitted", matchId);
   } catch (cause) {
     // Provider outcome may be uncertain after a timeout. Never retry without review.
     await db.from("job_desk_applications").update({ status: "needs_human", error_message: cause instanceof Error ? cause.message : "Submission outcome unknown" }).eq("match_id", matchId);
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+    await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
   }
 }
 
@@ -130,6 +147,7 @@ async function processTask(task: Task) {
   if (task.task_type === "match" && task.order_id) return { count: await matchOrder(task.order_id) };
   if (task.task_type === "prepare" && task.payload.matchId) { await prepareMatch(task.payload.matchId); return { ok: true }; }
   if (task.task_type === "submit" && task.payload.matchId) { await submitMatch(task.payload.matchId); return { ok: true }; }
+  if (task.task_type === "notify_client" && task.order_id && task.payload.event && task.payload.reference) return sendClientUpdate(task.order_id, task.payload.event as ClientUpdate, task.payload.reference);
   if (task.task_type === "schedule") {
     const day = new Date().toISOString().slice(0, 10);
     const { data: sources } = await db.from("job_desk_sources").select("id").eq("active", true);

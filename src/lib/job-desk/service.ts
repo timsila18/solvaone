@@ -289,6 +289,12 @@ export async function processJobDeskOrder({ orderId, adminId, force = false }: P
       .eq("id", run.id);
 
     await db.from("job_desk_orders").update({ status: "cv_review" }).eq("id", orderId);
+    try {
+      const { queueClientUpdate } = await import("./client-updates");
+      await queueClientUpdate(orderId, "cv_review", savedDocument.id);
+    } catch (cause) {
+      await logSystemEvent({ category: "job_desk.client_email", level: "error", message: cause instanceof Error ? cause.message : "Could not queue CV update", metadata: { orderId, documentId: savedDocument.id } });
+    }
     if (adminId) await logAdminAction({
       adminId,
       action: "job_desk.cv_processed",

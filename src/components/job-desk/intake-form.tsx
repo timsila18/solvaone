@@ -16,6 +16,7 @@ export function JobDeskIntakeForm() {
   const [previewMessage, setPreviewMessage] = useState("");
   const [error, setError] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("paid");
+  const [serviceType, setServiceType] = useState("job_search_full");
   const needsPaymentProof = paymentStatus === "paid" || paymentStatus === "partially_paid";
 
   async function prefill() {
@@ -64,14 +65,14 @@ export function JobDeskIntakeForm() {
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label="Full name"><Input name="fullName" required /></Field>
           <Field label="WhatsApp number"><Input name="whatsappPhone" required placeholder="+254 7XX XXX XXX" /></Field>
-          <Field label="Email"><Input name="email" type="email" /></Field>
+          <Field label="Client email"><Input name="email" type="email" required={serviceType === "job_search_full"} /></Field>
           <Field label="Lead source">
             <select name="source" defaultValue="whatsapp" className={selectClass}>
               <option value="whatsapp">WhatsApp</option><option value="tiktok">TikTok</option><option value="website">Website</option><option value="referral">Referral</option><option value="other">Other</option>
             </select>
           </Field>
           <Field label="Service">
-            <select name="serviceType" defaultValue="job_search_full" className={selectClass}>
+            <select name="serviceType" value={serviceType} onChange={(event) => setServiceType(event.target.value)} className={selectClass}>
               <option value="job_search_full">Job Desk full service</option><option value="cv_revamp">CV revamp only</option><option value="cv_build">CV build from source information</option>
             </select>
           </Field>

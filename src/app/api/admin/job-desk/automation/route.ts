@@ -7,6 +7,7 @@ import { createAuthorizationToken, enqueueTask } from "@/lib/job-desk/automation
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { runJobDeskWorker } from "@/lib/job-desk/worker";
 import { expiredDeadline } from "@/lib/job-desk/matching";
+import { queueClientUpdate } from "@/lib/job-desk/client-updates";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -89,6 +90,8 @@ export async function POST(request: Request) {
       const { error } = await db.from("job_desk_applications").upsert({ match_id: match.id, order_id: match.order_id, method: vacancy!.application_method, status: "submitted", recipient: vacancy!.application_email ?? null, provider_response: { confirmation: input.confirmation, recorded_by: user.id, verification_type: vacancy!.application_method === "email" ? "gmail_message_id" : "employer_reference" }, submitted_at: now, error_message: null }, { onConflict: "match_id" });
       if (error) throw new Error(error.message);
       await db.from("job_desk_matches").update({ status: "submitted", submitted_at: now }).eq("id", match.id);
+      try { await queueClientUpdate(match.order_id, "application_submitted", match.id); }
+      catch (cause) { await logSystemEvent({ category: "job_desk.client_email", level: "error", message: cause instanceof Error ? cause.message : "Could not queue submission update", metadata: { orderId: match.order_id, matchId: match.id } }); }
       result = { confirmation: input.confirmation };
     } else {
       const { data: match } = await db.from("job_desk_matches").select("id,order_id,status,cover_letter,reasons,vacancy:job_desk_vacancies(status,review_status,duplicate_of,last_seen_at,description)").eq("id", input.matchId).single();

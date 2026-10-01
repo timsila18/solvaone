@@ -4,6 +4,7 @@ import { JobDeskOrderActions } from "@/components/job-desk/order-actions";
 import { AutomationControls } from "@/components/job-desk/automation-controls";
 import { ManualSubmissionForm } from "@/components/job-desk/manual-submission-form";
 import { EmailHandoff } from "@/components/job-desk/email-handoff";
+import { ClientEmailForm } from "@/components/job-desk/client-email-form";
 import { QuestionnaireResponseForm } from "@/components/job-desk/questionnaire-response-form";
 import { CopyCandidateDetails, CopyMatches } from "@/components/job-desk/copy-matches";
 import { BatchAuthorizationControl } from "@/components/job-desk/batch-authorization-control";
@@ -75,6 +76,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
       <div className="grid gap-6 py-7 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="space-y-6">
           <Panel title="Order"><Detail label="Payment" value={`${order.payment_status} · ${formatKes(order.amount)}`} /><Detail label="Reference" value={order.payment_reference || "Not recorded"} /><Detail label="Channel" value={order.source_channel} /><Detail label="Created" value={new Date(order.created_at).toLocaleString()} /></Panel>
+          {isJobSearch ? <Panel title="Client contact"><ClientEmailForm orderId={orderId} email={client?.email ?? ""} /></Panel> : null}
           {order.instructions ? <Panel title="Client instructions"><p className="whitespace-pre-wrap text-sm leading-6">{order.instructions}</p></Panel> : null}
           {order.service_type === "interview_coaching" ? <Panel title="Interview coaching"><Detail label="Position" value={serviceDetails.positionName || "Not provided"} /><Detail label="Organization" value={serviceDetails.organizationName || "Not provided"} /><Detail label="Phone" value={client?.whatsapp_phone || "Not provided"} /></Panel> : null}
           {order.service_type === "linkedin_revamp" ? <Panel title="LinkedIn revamp"><Detail label="Profile" value={serviceDetails.linkedInUrl || "Not provided"} /><Detail label="Contact email" value={serviceDetails.linkedInEmail || "Not provided"} /><p className="text-xs">Clients must not share account passwords. Send recommended profile changes for them to apply.</p></Panel> : null}

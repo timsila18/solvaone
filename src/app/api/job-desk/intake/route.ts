@@ -42,6 +42,7 @@ const schema = z.object({
   website: z.string().max(200).default("")
 }).superRefine((value, context) => {
   if (value.serviceType === "job_search_full" && value.targetJobTitles.length < 2) context.addIssue({ code: "custom", path: ["targetJobTitles"], message: "Target role is required." });
+  if (value.serviceType === "job_search_full" && !value.email) context.addIssue({ code: "custom", path: ["email"], message: "An email address is required for application updates." });
   if (value.serviceType === "interview_coaching" && (!value.positionName || !value.organizationName)) context.addIssue({ code: "custom", path: ["positionName"], message: "Position and organization are required." });
   if (value.serviceType === "linkedin_revamp" && (!/^https:\/\/(?:www\.)?linkedin\.com\/in\/[a-z0-9%_-]+\/?(?:\?.*)?$/i.test(value.linkedInUrl) || !value.linkedInEmail)) context.addIssue({ code: "custom", path: ["linkedInUrl"], message: "A LinkedIn profile link and contact email are required." });
   if (/\bpassword\s*[:=]/i.test(value.instructions)) context.addIssue({ code: "custom", path: ["instructions"], message: "Do not send account passwords." });

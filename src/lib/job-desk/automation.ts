@@ -112,6 +112,7 @@ export async function matchOrder(orderId: string) {
   const { data: top } = await db.from("job_desk_matches").select("id").eq("order_id", orderId).eq("status", "suggested").gte("score", 50).order("score", { ascending: false }).limit(10);
   for (const item of top ?? []) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
+  if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
   return matches.length;
 }
 

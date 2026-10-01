@@ -38,6 +38,7 @@ const intakeSchema = z.object({
   paymentReference: z.string().max(160),
   consentToProcess: z.literal("true")
 }).superRefine((input, context) => {
+  if (input.serviceType === "job_search_full" && !input.email) context.addIssue({ code: "custom", path: ["email"], message: "Add the client's email for application updates." });
   if (["paid", "partially_paid"].includes(input.paymentStatus)) {
     if (input.amount <= 0) context.addIssue({ code: "custom", path: ["amount"], message: "Enter the verified amount paid." });
     if (input.paymentReference.trim().length < 3) context.addIssue({ code: "custom", path: ["paymentReference"], message: "Enter the verified payment reference." });

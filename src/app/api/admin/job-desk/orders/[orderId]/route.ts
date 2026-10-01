@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 import { enqueueTask } from "@/lib/job-desk/automation";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { runJobDeskWorker } from "@/lib/job-desk/worker";
+import { queueClientUpdate } from "@/lib/job-desk/client-updates";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,6 +15,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve_cv") }),
   z.object({ action: z.literal("record_payment"), amount: z.number().positive().max(1000000), method: z.enum(["mpesa", "cash", "bank", "manual", "other"]), reference: z.string().trim().min(3).max(160) }),
   z.object({ action: z.literal("save_answers"), answers: z.record(z.string().max(4000)) }),
+  z.object({ action: z.literal("set_client_email"), email: z.string().trim().email().max(254) }),
   z.object({ action: z.literal("set_status"), status: z.enum(["intake", "awaiting_information", "cv_review", "approved", "active", "paused", "completed", "cancelled", "failed"]) })
 ]);
 
@@ -47,6 +49,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const { error: statusError } = await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId).in("status", ["cv_review", "approved"]);
     if (statusError) return NextResponse.json({ error: statusError.message }, { status: 500 });
+    await queueClientUpdate(orderId, "cv_approved", document.id);
     const { data: paidOrder } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", orderId).single();
     const { data: serviceOrder } = await db.from("job_desk_orders").select("service_type").eq("id", orderId).single();
     if (serviceOrder?.service_type === "job_search_full" && hasVerifiedJobDeskPayment(paidOrder)) {
@@ -78,6 +81,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
       const { data: intake } = await db.from("job_desk_intake_files").select("id").eq("order_id", orderId).eq("document_kind", "cv").eq("extraction_status", "succeeded").limit(1).maybeSingle();
       if (intake) { await enqueueTask("process_cv", `process_cv:${orderId}:payment`, orderId); queued = true; }
     }
+  } else if (parsed.data.action === "set_client_email") {
+    const { data: order, error: findError } = await db.from("job_desk_orders").select("client_id").eq("id", orderId).single();
+    if (findError || !order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
+    const { error } = await db.from("job_desk_clients").update({ email: parsed.data.email }).eq("id", order.client_id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else if (parsed.data.action === "save_answers") {
     const { data: questionnaire, error: findError } = await db.from("job_desk_questionnaires").select("id,questions,responses").eq("order_id", orderId).maybeSingle();
     if (findError || !questionnaire) return NextResponse.json({ error: "Process the CV before recording answers." }, { status: 409 });
