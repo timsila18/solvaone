@@ -10,7 +10,7 @@ import { queueClientUpdate } from "@/lib/job-desk/client-updates";
 import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve_cv") }),

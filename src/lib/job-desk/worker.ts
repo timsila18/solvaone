@@ -11,6 +11,7 @@ import { processJobDeskOrder } from "./service";
 import { queueClientUpdate, sendClientUpdate, type ClientUpdate } from "./client-updates";
 import { applicationScopeHold, readApplicationScope } from "./application-scope";
 import { readApplicantDetails } from "./applicant-details";
+import { canAutomatePortal, runPortalApplication } from "./portal-browser";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
@@ -105,16 +106,16 @@ async function submitMatch(matchId: string) {
     }
   }
   const cvPlain = plainText(String(cv.html));
-  const pauseReason = submissionHoldReason(String(vacancy?.description ?? ""), client.email ?? null, cvPlain.length);
+  const pauseReason = submissionHoldReason(vacancy?.application_method === "portal" ? "" : String(vacancy?.description ?? ""), client.email ?? null, cvPlain.length);
   if (pauseReason) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: pauseReason }, { onConflict: "match_id" });
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
-  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || scoreVacancy(vacancy, profile).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:")) || vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email) {
+  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || scoreVacancy(vacancy, profile).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
-    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "Application portal or unverified email requires human submission." }, { onConflict: "match_id" });
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "Vacancy is stale or no longer suitable." }, { onConflict: "match_id" });
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
@@ -126,16 +127,46 @@ async function submitMatch(matchId: string) {
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
-  if (!process.env.RESEND_API_KEY || !(process.env.JOB_DESK_FROM_EMAIL ?? process.env.FROM_EMAIL)) {
-    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "email", status: "needs_human", error_message: "Verified email provider is not configured." }, { onConflict: "match_id" });
+  const { data: existing } = await db.from("job_desk_applications").select("status,provider_message_id").eq("match_id", matchId).maybeSingle();
+  if (existing?.status === "submitted") return;
+  if (existing?.status === "sending") {
+    await db.from("job_desk_applications").update({ status: "needs_human", error_message: "Submission outcome unknown after worker interruption. Check the provider before retrying." }).eq("match_id", matchId);
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
-  const { data: existing } = await db.from("job_desk_applications").select("status,provider_message_id").eq("match_id", matchId).maybeSingle();
-  if (existing?.status === "submitted") return;
-  if (existing?.status === "sending") {
-    await db.from("job_desk_applications").update({ status: "needs_human", error_message: "Submission outcome unknown after worker interruption. Check provider before retrying." }).eq("match_id", matchId);
+  if (vacancy.application_method === "portal") {
+    const { data: source } = vacancy.source_id ? await db.from("job_desk_sources").select("provider,site_token,active").eq("id", vacancy.source_id).maybeSingle() : { data: null };
+    const supported = source?.active && canAutomatePortal(source.provider, source.site_token, vacancy.apply_url);
+    if (!supported) {
+      await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "portal", status: "needs_human", error_message: "This employer portal does not yet have a tested browser adapter." }, { onConflict: "match_id" });
+      await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+      await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
+      return;
+    }
+    const details = readApplicantDetails(order.service_details);
+    const names = client.full_name.trim().split(/\s+/);
+    const cvFile = await createJobDeskCvDocx({ name: client.full_name, role: String((profile.structured_profile as { targetHeadline?: string } | null)?.targetHeadline ?? ""), contact: [client.email, client.whatsapp_phone].filter(Boolean).join("  |  "), content: cv.structured_content });
+    const { error: saveError } = await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "portal", status: "sending", recipient: vacancy.apply_url }, { onConflict: "match_id" });
+    if (saveError) throw new Error(saveError.message);
+    try {
+      const result = await runPortalApplication({ url: vacancy.apply_url, siteToken: source.site_token, firstName: names[0] ?? "", lastName: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedinUrl: details?.applicantLinkedinUrl, city: details?.currentCity, country: details?.currentCountry, coverLetter: match.cover_letter }, cvFile);
+      if (result.status === "submitted" && result.confirmation) {
+        await db.from("job_desk_applications").update({ status: "submitted", provider_response: { confirmation: result.confirmation, finalUrl: result.finalUrl }, submitted_at: new Date().toISOString(), error_message: null }).eq("match_id", matchId);
+        await db.from("job_desk_matches").update({ status: "submitted", submitted_at: new Date().toISOString() }).eq("id", matchId);
+        await queueUpdateWithoutChangingSubmission(order.id, "application_submitted", matchId);
+        return;
+      }
+      await db.from("job_desk_applications").update({ status: "needs_human", error_message: result.reason ?? "Portal submission needs review." }).eq("match_id", matchId);
+    } catch (cause) {
+      await db.from("job_desk_applications").update({ status: "needs_human", error_message: cause instanceof Error ? `Browser worker unavailable or outcome uncertain: ${cause.message.slice(0, 350)}` : "Portal outcome uncertain. Check before retrying." }).eq("match_id", matchId);
+    }
+    await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+    await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
+    return;
+  }
+  if (vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email || !process.env.RESEND_API_KEY || !(process.env.JOB_DESK_FROM_EMAIL ?? process.env.FROM_EMAIL)) {
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "email", status: "needs_human", error_message: "Verified email provider is not configured." }, { onConflict: "match_id" });
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;

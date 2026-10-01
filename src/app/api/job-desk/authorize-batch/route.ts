@@ -9,7 +9,7 @@ import { runJobDeskWorker } from "@/lib/job-desk/worker";
 import { checkRateLimit, clientIpFromHeaders, rateLimitResponse } from "@/lib/security";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 const schema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{40,60}$/), matchIds: z.array(z.string().uuid()).min(1).max(10), authorized: z.literal(true) });
 
 export async function POST(request: Request) {

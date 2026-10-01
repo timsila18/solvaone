@@ -10,7 +10,7 @@ import { expiredDeadline } from "@/lib/job-desk/matching";
 import { queueClientUpdate } from "@/lib/job-desk/client-updates";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("add_source"), provider: z.enum(["greenhouse", "lever", "ashby", "smartrecruiters"]), siteToken: z.string().regex(/^[a-zA-Z0-9_-]{2,80}$/), companyName: z.string().min(2).max(120) }),
