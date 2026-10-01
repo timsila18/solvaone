@@ -12,6 +12,8 @@ export type PortalApplication = {
   linkedinUrl?: string;
   city?: string;
   country?: string;
+  portalAnswers?: string;
+  portfolioUrl?: string;
   coverLetter: string;
 };
 
@@ -44,7 +46,9 @@ try {
   let page = inspect();
   if (!allowed(page.url)) throw new Error('Application redirected outside the verified employer board.');
   if (page.challenge || /security challenge|verify you are human|complete (?:an? )?assessment|identity verification required/i.test(page.body)) throw new Error('The portal requires a challenge or assessment.');
-  const values = { first_name: data.firstName, last_name: data.lastName, email: data.email, phone: data.phone, linkedin_profile: data.linkedinUrl, website: data.linkedinUrl };
+  const values = { first_name: data.firstName, last_name: data.lastName, email: data.email, phone: data.phone, linkedin_profile: data.linkedinUrl, website: data.portfolioUrl };
+  const normalize = text => String(text || '').replace(/\*/g, '').replace(/\s+Select\.\.\.$/i, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const confirmedAnswers = new Map(String(data.portalAnswers || '').split(/\r?\n/).map(line => { const i = line.indexOf(' = '); return i > 0 ? [normalize(line.slice(0,i)), line.slice(i+3).trim()] : null; }).filter(Boolean));
   const handled = new Set();
   for (const field of page.fields) {
     const key = field.name || field.id;
@@ -59,11 +63,34 @@ try {
       handled.add(key);
     }
   }
+  for (const field of page.fields) {
+    const key = field.name || field.id;
+    if (!key || handled.has(key) || field.type === 'file') continue;
+    const answer = confirmedAnswers.get(normalize(field.label));
+    if (!answer) continue;
+    const selector = field.id ? '[id=' + JSON.stringify(field.id) + ']' : '[name=' + JSON.stringify(field.name) + ']';
+    if (field.tag === 'SELECT') {
+      browser('select', selector, answer);
+    } else if (field.type === 'checkbox' || field.type === 'radio') {
+      if (!/^(yes|true|acknowledge|confirm)\b/i.test(answer)) continue;
+      browser('check', selector);
+    } else if (['text','email','tel','url','textarea',''].includes(field.type)) {
+      browser('fill', selector, answer);
+      const combo = evaluate('JSON.stringify(document.querySelector(' + JSON.stringify(selector) + ')?.getAttribute("role"))');
+      if (combo === 'combobox') {
+        browser('press', 'ArrowDown');
+        browser('press', 'Enter');
+      }
+    } else continue;
+    handled.add(key);
+  }
   if (![...handled].some(key => /resume|cv/i.test(key))) throw new Error('No supported CV upload field was found.');
   page = inspect();
   if (!allowed(page.url)) throw new Error('Application moved outside the verified employer board.');
-  const unknown = page.fields.filter(f => (f.required || /\*\s*$/.test(f.label)) && !handled.has(f.name || f.id));
-  if (unknown.length) throw new Error('Unanswered required questions: ' + unknown.map(f => f.label || f.name || f.id || 'unnamed field').join(', ').slice(0, 300));
+  const completedGroups = evaluate("JSON.stringify([...document.querySelectorAll('input[type=checkbox],input[type=radio]')].filter(e=>e.checked && e.name).map(e=>e.name))");
+  const unknown = page.fields.filter(f => (f.required || /\*\s*$/.test(f.label)) && !handled.has(f.name || f.id) && !completedGroups.includes(f.name) && !( !f.name && !f.id && page.fields.some(other => other.id && handled.has(other.id) && normalize(other.label) === normalize(f.label))));
+  const questions = [...new Set(unknown.map(f => normalize(f.label) || f.name || f.id || 'unnamed field'))];
+  if (questions.length) throw new Error('Client answers or documents needed: ' + questions.join('; ').slice(0, 900));
   if (page.challenge || /security challenge|verify you are human|complete (?:an? )?assessment|identity verification required/i.test(page.body)) throw new Error('The portal requires a challenge or assessment.');
   const submit = evaluate("JSON.stringify([...document.querySelectorAll('button,input[type=submit]')].filter(e=>e.getClientRects().length && /submit application|apply now|submit/i.test((e.innerText||e.value||'').trim())).map(e=>({id:e.id,type:e.type,text:(e.innerText||e.value||'').trim()})))");
   if (!Array.isArray(submit) || submit.length !== 1 || submit[0].text.toLowerCase() !== 'submit application') throw new Error('No unambiguous application submission button.');

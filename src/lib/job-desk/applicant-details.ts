@@ -9,7 +9,8 @@ export const applicantDetailsSchema = z.object({
   sponsorshipNeeded: z.enum(["yes", "no", "unsure", "not_provided"]).default("not_provided"),
   noticePeriod: z.string().trim().max(120).default(""),
   applicantLinkedinUrl: optionalUrl.default(""),
-  portfolioUrl: optionalUrl.default("")
+  portfolioUrl: optionalUrl.default(""),
+  portalAnswers: z.string().trim().max(20000).default("")
 });
 
 export type ApplicantDetails = z.infer<typeof applicantDetailsSchema>;

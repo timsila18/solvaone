@@ -34,6 +34,7 @@ export function ApplicantDetailsForm({ orderId, details }: { orderId: string; de
       <label className="block text-xs font-bold">Notice period<input name="noticePeriod" defaultValue={details?.noticePeriod ?? ""} maxLength={120} className={inputClass} /></label>
       <label className="block text-xs font-bold">LinkedIn profile<input name="applicantLinkedinUrl" type="url" defaultValue={details?.applicantLinkedinUrl ?? ""} maxLength={500} className={inputClass} /></label>
       <label className="block text-xs font-bold">Portfolio URL<input name="portfolioUrl" type="url" defaultValue={details?.portfolioUrl ?? ""} maxLength={500} className={inputClass} /></label>
+      <label className="block text-xs font-bold">Client-confirmed portal answers<textarea name="portalAnswers" defaultValue={details?.portalAnswers ?? ""} maxLength={20000} rows={8} placeholder={'One question and answer per line:\nAre you a former One Acre Fund staff member? = No'} className="mt-1 w-full border border-black/20 bg-white p-2 text-sm text-black" /></label>
       <button disabled={busy} className="h-10 bg-brand-blue px-3 text-sm font-bold text-white disabled:opacity-50">Save answers</button>
       {message ? <p role="status" className="text-xs">{message}</p> : null}
     </form>
