@@ -31,6 +31,12 @@ assert.match(applicationScopeHold(salesScope, { ...job, title: 'Engineering Mana
 assert.match(applicationScopeHold(salesScope, { ...job, title: 'Sales Manager', location: 'London' }), /outside/);
 const cityScope = createApplicationScope({ targetRoles: 'National Sales Manager', preferredLocations: 'Nairobi, Kenya, Mombasa, Kenya', remotePreference: 'flexible', excludedEmployers: '', excludedRoles: '', excludedKeywords: '', channel: 'admin_recorded', evidence: 'Only Nairobi and Mombasa' });
 assert.deepEqual(cityScope.preferredLocations, ['Nairobi', 'Mombasa']);
+assert.match(applicationScopeHold(cityScope, { ...job, title: 'Sales Manager', location: 'Kenya' }), /outside/);
+const countryScope = { ...cityScope, includeUnspecifiedKenyaLocations: true };
+assert.equal(applicationScopeHold(countryScope, { ...job, title: 'Sales Manager', location: 'Kenya' }), null);
+for (const location of ['Kisumu, Kenya', 'Western Region, Kenya', 'Eldoret']) {
+  assert.match(applicationScopeHold(countryScope, { ...job, title: 'Sales Manager', location }), /outside/);
+}
 assert.match(applicationScopeHold(cityScope, { ...job, title: 'Sales Manager', location: 'Kisumu, Kenya' }), /outside/);
 assert.throws(() => createApplicationScope({ ...scope, targetRoles: 'Accountant', preferredLocations: '', excludedEmployers: '', excludedRoles: '', excludedKeywords: '', includeBroaderRoles: 'true', broaderRoles: '' }));
 console.log('Broader-role opt-in, skill evidence, salary, seniority, location and exclusion tests passed. No applications sent.');

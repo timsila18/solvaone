@@ -13,6 +13,7 @@ const schema = z.object({
   ...broaderPreferenceFields,
   targetRoles: z.string().trim().min(2).max(1000),
   preferredLocations: z.string().trim().max(1000),
+  includeUnspecifiedKenyaLocations: z.enum(["true", "false"]).optional(),
   remotePreference: z.enum(["onsite", "hybrid", "remote", "flexible"]),
   excludedEmployers: z.string().trim().max(1000),
   excludedRoles: z.string().trim().max(1000),

@@ -13,6 +13,7 @@ export type ApplicationScope = {
   broaderRoles?: string[];
   broaderSeniority?: "any" | "professional" | "senior";
   minimumMonthlyKes?: number;
+  includeUnspecifiedKenyaLocations?: boolean;
 };
 
 type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evidence"> & {
@@ -25,6 +26,7 @@ type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evide
   broaderRoles?: string;
   broaderSeniority?: "any" | "professional" | "senior";
   minimumMonthlyKes?: string;
+  includeUnspecifiedKenyaLocations?: string;
 };
 
 const entries = (value: string) => value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
@@ -41,6 +43,7 @@ export function createApplicationScope(input: ScopeInput): ApplicationScope {
     version: 1,
     targetRoles,
     preferredLocations: locationEntries(entries(input.preferredLocations)),
+    includeUnspecifiedKenyaLocations: input.includeUnspecifiedKenyaLocations === "true",
     remotePreference: input.remotePreference,
     excludedEmployers: entries(input.excludedEmployers),
     excludedRoles: entries(input.excludedRoles),
@@ -60,6 +63,7 @@ export function readApplicationScope(details: unknown): ApplicationScope | null 
   const scope = (details as { applicationScope?: unknown }).applicationScope;
   if (!scope || typeof scope !== "object") return null;
   const value = scope as Partial<ApplicationScope>;
+  if (value.includeUnspecifiedKenyaLocations !== undefined && typeof value.includeUnspecifiedKenyaLocations !== "boolean") return null;
   if (value.includeBroaderRoles && (!Array.isArray(value.broaderRoles) || !value.broaderRoles.length || !value.broaderRoles.every(role => typeof role === "string" && role.trim()))) return null;
   if (value.broaderSeniority && !["any", "professional", "senior"].includes(value.broaderSeniority)) return null;
   if (value.minimumMonthlyKes !== undefined && (!Number.isFinite(value.minimumMonthlyKes) || value.minimumMonthlyKes < 0 || value.minimumMonthlyKes > 9999999)) return null;
@@ -92,6 +96,7 @@ export function applicationScopeHold(scope: ApplicationScope, vacancy: {
   })) return "Role is outside the client's authorized target roles.";
   if (scope.remotePreference !== "flexible" && vacancy.workplace_type !== scope.remotePreference) return `Client authorized ${scope.remotePreference} roles only.`;
   if (scope.preferredLocations.length && vacancy.workplace_type !== "remote" &&
+      !(scope.includeUnspecifiedKenyaLocations && location === "kenya") &&
       !scope.preferredLocations.some((item) => normalize(item) === "kenya" ? /\b(kenya|nairobi|mombasa|kisumu|nakuru|eldoret)\b/.test(location) : location.includes(normalize(item)))) {
     return "Location is outside the client's authorized locations.";
   }

@@ -52,6 +52,7 @@ export function ScopeAuthorizationForm(props: Props) {
     <p className="text-xs leading-5">For an existing order, first ask the client once whether SolvaOne may apply within this exact scope. A CV sent on WhatsApp is not enough by itself.</p>
     <label className="grid gap-1 text-xs font-bold">Authorized target roles<input name="targetRoles" defaultValue={props.targetRoles} required maxLength={1000} className={fieldClass} /></label>
     <label className="grid gap-1 text-xs font-bold">Preferred locations<input name="preferredLocations" defaultValue={props.preferredLocations} maxLength={1000} className={fieldClass} /></label>
+    <label className="flex items-start gap-3 text-sm"><input type="checkbox" name="includeUnspecifiedKenyaLocations" value="true" className="mt-1 h-4 w-4 accent-brand-blue" /><span>Include Kenya-wide adverts with no city specified</span></label>
     <label className="grid gap-1 text-xs font-bold">Work arrangement<select name="remotePreference" defaultValue={props.remotePreference} className={fieldClass}><option value="flexible">Flexible</option><option value="onsite">On-site</option><option value="hybrid">Hybrid</option><option value="remote">Remote</option></select></label>
     <label className="grid gap-1 text-xs font-bold">Employers to exclude<input name="excludedEmployers" maxLength={1000} className={fieldClass} /></label>
     <label className="grid gap-1 text-xs font-bold">Roles to exclude<input name="excludedRoles" maxLength={1000} className={fieldClass} /></label>
