@@ -29,6 +29,7 @@ export function JobDeskIntakeForm() {
       for (const [name, raw] of Object.entries(body.fields as Record<string, unknown>)) {
         const control = formRef.current?.elements.namedItem(name);
         if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement)) continue;
+        if ((name === "applicantLinkedinUrl" || name === "portfolioUrl") && raw && (typeof raw !== "string" || !raw.startsWith("https://"))) continue;
         if (name === "remotePreference") { if (control.value === "flexible" && raw !== "flexible") control.value = String(raw); }
         else if (!control.value.trim() && raw) control.value = Array.isArray(raw) ? raw.join(", ") : String(raw);
       }
@@ -99,6 +100,20 @@ export function JobDeskIntakeForm() {
         </div>
         <div className="mt-4"><Field label="Client instructions"><Textarea name="instructions" className="min-h-32" placeholder="Role priorities, industries to avoid, deadlines, tone, or other instructions" /></Field></div>
       </section>
+
+      {serviceType === "job_search_full" ? <section>
+        <h2 className="border-b border-black/10 pb-4 text-lg font-black dark:border-white/10">Reusable application details</h2>
+        <p className="mt-3 text-sm">Ask the client to confirm these answers once. Do not guess eligibility or upload identity documents here.</p>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <Field label="Current city"><Input name="currentCity" maxLength={120} placeholder="e.g. Nairobi" /></Field>
+          <Field label="Current country"><Input name="currentCountry" maxLength={120} placeholder="e.g. Kenya" /></Field>
+          <Field label="Eligible to work in Kenya"><select name="kenyaWorkEligibility" defaultValue="not_provided" className={selectClass}><option value="not_provided">Not confirmed</option><option value="yes">Yes, confirmed by client</option><option value="no">No</option><option value="unsure">Unsure</option></select></Field>
+          <Field label="Needs employer visa sponsorship"><select name="sponsorshipNeeded" defaultValue="not_provided" className={selectClass}><option value="not_provided">Not confirmed</option><option value="yes">Yes</option><option value="no">No</option><option value="unsure">Unsure</option></select></Field>
+          <Field label="Notice period or earliest start"><Input name="noticePeriod" maxLength={120} placeholder="e.g. Immediately, 30 days" /></Field>
+          <Field label="LinkedIn profile"><Input name="applicantLinkedinUrl" type="url" maxLength={500} placeholder="https://www.linkedin.com/in/..." /></Field>
+          <Field label="Portfolio or professional site"><Input name="portfolioUrl" type="url" maxLength={500} placeholder="https://..." /></Field>
+        </div>
+      </section> : null}
 
       <section>
         <div className="flex items-center gap-3 border-b border-black/10 pb-4 dark:border-white/10">

@@ -11,6 +11,7 @@ import { BatchAuthorizationControl } from "@/components/job-desk/batch-authoriza
 import { ScopeAuthorizationForm } from "@/components/job-desk/scope-authorization-form";
 import { scoreVacancy } from "@/lib/job-desk/matching";
 import { applicationScopeHold, readApplicationScope } from "@/lib/job-desk/application-scope";
+import { readApplicantDetails } from "@/lib/job-desk/applicant-details";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { formatKes } from "@/lib/utils";
 import { FileDown } from "lucide-react";
@@ -40,6 +41,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   if (candidateError) throw new Error(`Could not load candidate profile: ${candidateError.message}`);
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   const serviceDetails = (order.service_details ?? {}) as Record<string, unknown>;
+  const applicantDetails = readApplicantDetails(serviceDetails);
   const applicationScope = order.application_authorized ? readApplicationScope(order.service_details) : null;
   const isJobSearch = order.service_type === "job_search_full";
   const isCvService = isJobSearch || order.service_type === "cv_revamp" || order.service_type === "cv_build";
@@ -60,7 +62,12 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   const extracted = (candidate?.structured_profile ?? {}) as Record<string, unknown>;
   const candidateDetails = [
     `Name: ${client?.full_name ?? ""}`, `Email: ${client?.email ?? ""}`, `Phone: ${client?.whatsapp_phone ?? ""}`,
-    `Location: ${String(extracted.location ?? "")}`, `LinkedIn: ${String(extracted.linkedIn ?? "")}`,
+    `Location: ${[applicantDetails?.currentCity, applicantDetails?.currentCountry].filter(Boolean).join(", ") || String(extracted.location ?? "")}`,
+    `LinkedIn: ${applicantDetails?.applicantLinkedinUrl || String(extracted.linkedIn ?? "")}`,
+    `Portfolio: ${applicantDetails?.portfolioUrl || "Not provided"}`,
+    `Kenya work eligibility (client-declared): ${applicantDetails?.kenyaWorkEligibility && applicantDetails.kenyaWorkEligibility !== "not_provided" ? applicantDetails.kenyaWorkEligibility : "Not confirmed"}`,
+    `Sponsorship needed (client-declared): ${applicantDetails?.sponsorshipNeeded && applicantDetails.sponsorshipNeeded !== "not_provided" ? applicantDetails.sponsorshipNeeded : "Not confirmed"}`,
+    `Notice period: ${applicantDetails?.noticePeriod || "Not provided"}`,
     `Professional summary: ${String(extracted.professionalSummary ?? "")}`,
     `Skills: ${Array.isArray(extracted.skills) ? extracted.skills.join(", ") : ""}`,
     `Tools: ${Array.isArray(extracted.tools) ? extracted.tools.join(", ") : ""}`,
@@ -80,6 +87,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
         <aside className="space-y-6">
           <Panel title="Order"><Detail label="Payment" value={`${order.payment_status} · ${formatKes(order.amount)}`} /><Detail label="Reference" value={order.payment_reference || "Not recorded"} /><Detail label="Channel" value={order.source_channel} /><Detail label="Created" value={new Date(order.created_at).toLocaleString()} /></Panel>
           {isJobSearch ? <Panel title="Client contact"><ClientEmailForm orderId={orderId} email={client?.email ?? ""} /></Panel> : null}
+          {isJobSearch ? <Panel title="Reusable application details"><Detail label="Current location" value={[applicantDetails?.currentCity, applicantDetails?.currentCountry].filter(Boolean).join(", ") || "Not provided"} /><Detail label="Kenya work eligibility (client-declared)" value={applicantDetails?.kenyaWorkEligibility && applicantDetails.kenyaWorkEligibility !== "not_provided" ? applicantDetails.kenyaWorkEligibility : "Not confirmed"} /><Detail label="Sponsorship needed (client-declared)" value={applicantDetails?.sponsorshipNeeded && applicantDetails.sponsorshipNeeded !== "not_provided" ? applicantDetails.sponsorshipNeeded : "Not confirmed"} /><Detail label="Notice period" value={applicantDetails?.noticePeriod || "Not provided"} /><Detail label="LinkedIn" value={applicantDetails?.applicantLinkedinUrl || "Not provided"} /><Detail label="Portfolio" value={applicantDetails?.portfolioUrl || "Not provided"} /><p className="text-xs leading-5 text-black/60 dark:text-white/60">Use these confirmed answers for common portal fields. Identity checks still require the client through the employer's official process.</p></Panel> : null}
           {isJobSearch ? <Panel title="Application authorization">{applicationScope ? <><Detail label="Recorded" value={new Date(applicationScope.authorizedAt).toLocaleString()} /><Detail label="Target roles" value={applicationScope.targetRoles.join(", ")} /><Detail label="Locations" value={applicationScope.preferredLocations.join(", ") || "Kenya-eligible roles"} /><Detail label="Employers excluded" value={applicationScope.excludedEmployers.join(", ") || "None"} /><Detail label="Roles excluded" value={applicationScope.excludedRoles.join(", ") || "None"} /><Detail label="Other exclusions" value={applicationScope.excludedKeywords.join(", ") || "None"} /></> : null}<ScopeAuthorizationForm orderId={orderId} authorized={Boolean(applicationScope)} targetRoles={(candidate?.target_job_titles ?? []).join(", ")} preferredLocations={(candidate?.preferred_locations ?? []).join(", ")} remotePreference={candidate?.remote_preference ?? "flexible"} /></Panel> : null}
           {order.instructions ? <Panel title="Client instructions"><p className="whitespace-pre-wrap text-sm leading-6">{order.instructions}</p></Panel> : null}
           {order.service_type === "interview_coaching" ? <Panel title="Interview coaching"><Detail label="Position" value={String(serviceDetails.positionName || "Not provided")} /><Detail label="Organization" value={String(serviceDetails.organizationName || "Not provided")} /><Detail label="Phone" value={client?.whatsapp_phone || "Not provided"} /></Panel> : null}

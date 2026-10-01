@@ -10,6 +10,7 @@ import { createJobDeskCvDocx } from "./cv-docx";
 import { processJobDeskOrder } from "./service";
 import { queueClientUpdate, sendClientUpdate, type ClientUpdate } from "./client-updates";
 import { applicationScopeHold, readApplicationScope } from "./application-scope";
+import { readApplicantDetails } from "./applicant-details";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
@@ -42,7 +43,7 @@ async function prepareMatch(matchId: string) {
   if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) throw new Error("Vacancy is closed, unreviewed, duplicated or stale.");
   if (scoreVacancy(vacancy, profile).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) throw new Error("Vacancy needs a fresh CV-based suitability review before preparation.");
   if (!(await verifyVacancyStillOpen(vacancy))) throw new Error("Vacancy is no longer listed by its official source.");
-  const prompt = JSON.stringify({ candidate: profile?.structured_profile, cv: plainText(cv.html).slice(0, 14000), clientName: client.full_name, role: vacancy.title, company: vacancy.company_name, description: vacancy.description.slice(0, 10000) });
+  const prompt = JSON.stringify({ candidate: profile?.structured_profile, applicantDetails: readApplicantDetails(order.service_details), cv: plainText(cv.html).slice(0, 14000), clientName: client.full_name, role: vacancy.title, company: vacancy.company_name, description: vacancy.description.slice(0, 10000) });
   const fingerprint = createHash("sha256").update(prompt).digest("hex");
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
   const { data: previous } = await db.from("job_desk_ai_runs").select("output_payload").eq("order_id", order.id).eq("operation", "match_cover_letter").eq("input_fingerprint", fingerprint).eq("status", "succeeded").maybeSingle();

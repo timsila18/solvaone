@@ -7,6 +7,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { enqueueTask } from "@/lib/job-desk/automation";
 import { createApplicationScope } from "@/lib/job-desk/application-scope";
+import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -42,7 +43,8 @@ const intakeSchema = z.object({
   paymentReference: z.string().max(160),
   consentToProcess: z.literal("true"),
   applicationAuthorization: z.string().optional(),
-  authorizationEvidence: z.string().trim().max(1000)
+  authorizationEvidence: z.string().trim().max(1000),
+  ...applicantDetailsSchema.shape
 }).superRefine((input, context) => {
   if (input.serviceType === "job_search_full" && !input.email) context.addIssue({ code: "custom", path: ["email"], message: "Add the client's email for application updates." });
   if (input.serviceType === "job_search_full" && !input.targetJobTitles.trim()) context.addIssue({ code: "custom", path: ["targetJobTitles"], message: "Record authorized target roles." });
@@ -152,7 +154,7 @@ export async function POST(request: Request) {
       source_channel: parsed.data.source,
       instructions: parsed.data.instructions || null,
       application_authorized: Boolean(scope),
-      service_details: scope ? { applicationScope: scope } : {}
+      service_details: { applicantDetails: applicantDetailsSchema.parse(parsed.data), ...(scope ? { applicationScope: scope } : {}) }
     });
     if (orderError) throw new Error(orderError.message);
 

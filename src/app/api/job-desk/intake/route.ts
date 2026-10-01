@@ -8,6 +8,7 @@ import { startJobDeskPayment } from "@/lib/job-desk/checkout";
 import { getJobDeskService } from "@/lib/job-desk/services";
 import { normalizeSafaricomPhone } from "@/lib/payments";
 import { createApplicationScope } from "@/lib/job-desk/application-scope";
+import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -44,6 +45,7 @@ const schema = z.object({
   pastedCvText: z.string().trim().max(50000),
   consentToProcess: z.literal("true"),
   applicationAuthorization: z.string().optional(),
+  ...applicantDetailsSchema.shape,
   website: z.string().max(200).default("")
 }).superRefine((value, context) => {
   if (value.serviceType === "job_search_full" && value.targetJobTitles.length < 2) context.addIssue({ code: "custom", path: ["targetJobTitles"], message: "Target role is required." });
@@ -151,7 +153,7 @@ export async function POST(request: Request) {
       id: orderId,
       client_id: clientId,
       service_type: parsed.data.serviceType,
-      service_details: { positionName: parsed.data.positionName, organizationName: parsed.data.organizationName, linkedInUrl: parsed.data.linkedInUrl, linkedInEmail: parsed.data.linkedInEmail, ...(scope ? { applicationScope: scope } : {}) },
+      service_details: { positionName: parsed.data.positionName, organizationName: parsed.data.organizationName, linkedInUrl: parsed.data.linkedInUrl, linkedInEmail: parsed.data.linkedInEmail, applicantDetails: applicantDetailsSchema.parse(parsed.data), ...(scope ? { applicationScope: scope } : {}) },
       public_access_token_hash: createHash("sha256").update(accessToken).digest("hex"),
       status: "awaiting_payment",
       payment_status: "unpaid",
