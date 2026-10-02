@@ -44,6 +44,7 @@ test("Kenya candidate does not receive geographically restricted remote jobs", (
 test("expired deadline and irrelevant qualifications are screened before AI review", () => {
   const profile = { target_job_titles: ["Accountant"], structured_profile: { skills: ["Bookkeeping"] } };
   assert.equal(expiredDeadline("Application deadline: 2025-01-10", new Date("2026-09-30")), true);
+  assert.equal(expiredDeadline("Kindly make your application by 11th August 2026", new Date("2026-10-02")), true);
   assert.equal(scoreVacancy({ title: "Accountant", description: "Application deadline: 2025-01-10", location: "Nairobi", workplace_type: "onsite" }, profile).score, 0);
   assert.equal(scoreVacancy({ title: "Aircraft Engineer", description: "Maintain aircraft", location: "Nairobi", workplace_type: "onsite" }, profile).score, 0);
 });

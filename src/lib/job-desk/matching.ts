@@ -24,9 +24,9 @@ export function documentedSkillMatches(skill: string, advert: string) {
 }
 
 export function expiredDeadline(advert: string, now = new Date()) {
-  const match = advert.match(/\b(?:application\s+deadline|closing\s+date|apply\s+by)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\s+[a-z]+\s+\d{4})\b/i);
+  const match = advert.match(/\b(?:application\s+deadline|closing\s+date|apply\s+by|make\s+your\s+application\s+by|applications?\s+(?:must\s+be\s+received\s+)?by|deadline)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}(?:st|nd|rd|th)?\s+[a-z]+\s+\d{4})\b/i);
   if (!match) return false;
-  const parsed = new Date(match[1]);
+  const parsed = new Date(match[1].replace(/(\d)(st|nd|rd|th)\b/gi, "$1"));
   return !Number.isNaN(parsed.getTime()) && parsed.getTime() + 86400000 < now.getTime();
 }
 
