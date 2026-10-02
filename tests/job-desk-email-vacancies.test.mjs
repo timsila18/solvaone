@@ -29,4 +29,5 @@ test("missing deadline, footer email and missing location do not authorize sendi
   assert.equal(parseEmailAdvert(page("soon"), url, now), null);
   assert.equal(parseEmailAdvert(page().replace("jobs@corporatestaffing.co.ke", "info@corporatestaffing.co.ke") + "<footer>jobs@corporatestaffing.co.ke</footer>", url, now), null);
   assert.equal(parseEmailAdvert(page().replace("Location: Nairobi Country: Kenya", ""), url, now), null);
+  assert.equal(parseEmailAdvert(page().replace("Country: Kenya", "Country: Uganda"), url, now), null);
 });

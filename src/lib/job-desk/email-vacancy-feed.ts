@@ -38,7 +38,7 @@ export function parseEmailAdvert(html: string, url: string, now = new Date()) {
   const conflict = new Set(dates).size > 1;
   const expired = deadline + 86400000 - 3 * 3600000 <= now.getTime();
   const location = description.match(/Location:\s*(.*?)(?=Country:|Deadline:|$)/i)?.[1]?.trim();
-  if (!location) return null;
+  if (!location || !/Country:\s*Kenya\b/i.test(description)) return null;
   return {
     external_id: `official-email:${createHash("sha256").update(url).digest("hex")}`,
     provider: "manual", source_id: null, company_name: "Corporate Staffing Services (recruiter)", title,
