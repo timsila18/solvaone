@@ -1,10 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { scoreVacancy } from "./matching";
+import { scoreVacancy, submissionHoldReason } from "./matching";
 import { applicationScopeHold, readApplicationScope } from "./application-scope";
 import { reviewCandidateMatches } from "./relevance";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { compareSubmissionCandidates, submissionRouteRank } from "./submission-priority";
+import { screenAutomaticCandidates } from "./automatic-screen";
+import { submissionPreflight } from "./submission-preflight";
+import { readApplicantDetails } from "./applicant-details";
 import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
 
 export type Vacancy = { id: string; provider?: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
@@ -97,7 +100,22 @@ export async function matchOrder(orderId: string) {
     if ((data ?? []).length < 1000) break;
   }
   const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
-  const candidates = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates).slice(0, 64);
+  const pool = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates);
+  const { data: client, error: clientError } = await db.from("job_desk_clients").select("full_name,email,whatsapp_phone").eq("id", order.client_id).single();
+  if (clientError || !client) throw new Error(clientError?.message ?? "Candidate contact details are missing.");
+  const { data: sourceRows, error: sourcesError } = await db.from("job_desk_sources").select("id,provider,site_token,active").eq("active", true);
+  if (sourcesError) throw new Error(sourcesError.message);
+  const sourcesById = new Map((sourceRows ?? []).map(source => [source.id, source]));
+  const details = readApplicantDetails(order.service_details);
+  const names = client.full_name.trim().split(/\s+/);
+  const screened = await screenAutomaticCandidates(pool.filter(item => submissionRouteRank(item.vacancy) > 0).slice(0, 64), async item => {
+    const vacancy = item.vacancy as Vacancy & { source_id?: string };
+    const hold = submissionHoldReason(vacancy.application_method === "email" ? vacancy.description : "", client.email, plainText(approved.html ?? "").length);
+    if (hold) return { ready: false, blockers: [hold] };
+    const source = sourcesById.get(vacancy.source_id ?? "");
+    return submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.provider, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: { first_name: names[0], last_name: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedin_profile: details?.applicantLinkedinUrl ?? "", website: details?.portfolioUrl ?? "" } });
+  });
+  const candidates = screened.ready;
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
   const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
   let refreshedSources = 0;
@@ -115,6 +133,9 @@ export async function matchOrder(orderId: string) {
   }
   const selected = new Set(matches.map((item) => item.vacancy.id));
   const deferred = new Set(candidates.filter(item => reviewed.get(item.vacancy.id)?.reason.startsWith("Review temporarily unavailable;")).map(item => item.vacancy.id));
+  // Preserve historical/manual work; skipped forms never enter automatic preparation.
+  for (const item of screened.skipped) deferred.add(item.candidate.vacancy.id);
+  for (const item of pool.filter(item => submissionRouteRank(item.vacancy) === 0)) deferred.add(item.vacancy.id);
   const { data: oldMatches, error: oldError } = await db.from("job_desk_matches").select("id,vacancy_id").eq("order_id", orderId).in("status", ["suggested", "preparing", "ready"]).limit(500);
   if (oldError) throw new Error(oldError.message);
   const obsoleteIds = (oldMatches ?? []).filter((item) => !selected.has(item.vacancy_id) && !deferred.has(item.vacancy_id)).map((item) => item.id);
@@ -137,7 +158,7 @@ export async function matchOrder(orderId: string) {
   for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
-  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: 10, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.filter(item => item.score >= 25 && (item.vacancy.application_method === "email" && item.vacancy.email_verified && item.vacancy.application_email || item.vacancy.provider === "greenhouse")).length, refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
+  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: 10, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.length, automaticScreened: screened.ready.length + screened.skipped.length, automaticSkipped: screened.skipped.length, unsupportedRoutes: pool.filter(item => submissionRouteRank(item.vacancy) === 0).length, skippedExamples: screened.skipped.slice(0, 10).map(item => ({ title: item.candidate.vacancy.title, company: item.candidate.vacancy.company_name, reason: item.reason })), refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
 }
 
 export function createAuthorizationToken() {
