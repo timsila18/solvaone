@@ -102,10 +102,11 @@ export async function POST(request: Request) {
       result = { queued: count };
       queued = true;
     } else if (input.action === "refresh_all") {
+      await enqueueTask("discover_email", `email-refresh:${Date.now()}`, null);
       const { data: sources, error } = await db.from("job_desk_sources").select("id").eq("active", true).limit(100);
       if (error) throw new Error(error.message);
       for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:${Date.now()}`, null, { sourceId: source.id });
-      result = { queued: sources?.length ?? 0 };
+      result = { queued: (sources?.length ?? 0) + 1 };
       queued = true;
     } else if (input.action === "review_vacancy") {
       const { data: vacancy } = await db.from("job_desk_vacancies").select("id,status,duplicate_of,apply_url").eq("id", input.vacancyId).single();

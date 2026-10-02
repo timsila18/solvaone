@@ -3,7 +3,7 @@ import { createOpenAIClient } from "@/lib/openai";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { logSystemEvent } from "@/lib/security";
-import { discoverVacancies, enqueueTask, matchOrder, plainText, verifyVacancyStillOpen } from "./automation";
+import { discoverEmailVacancies, discoverVacancies, enqueueTask, matchOrder, plainText, verifyVacancyStillOpen } from "./automation";
 import { scoreVacancy, submissionHoldReason } from "./matching";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { createJobDeskCvDocx } from "./cv-docx";
@@ -276,6 +276,7 @@ async function processTask(task: Task) {
   const db = createSupabaseAdminClient();
   if (task.task_type === "process_cv" && task.order_id) return processJobDeskOrder({ orderId: task.order_id });
   if (task.task_type === "discover") return { count: await discoverVacancies(task.payload.sourceId) };
+  if (task.task_type === "discover_email") return discoverEmailVacancies();
   if (task.task_type === "match" && task.order_id) return matchOrder(task.order_id);
   if (task.task_type === "prepare" && task.payload.matchId) { await prepareMatch(task.payload.matchId); return { ok: true }; }
   if (task.task_type === "submit" && task.payload.matchId) {
@@ -287,6 +288,7 @@ async function processTask(task: Task) {
   if (task.task_type === "notify_client" && task.order_id && task.payload.event && task.payload.reference) return sendClientUpdate(task.order_id, task.payload.event as ClientUpdate, task.payload.reference);
   if (task.task_type === "schedule") {
     const day = new Date().toISOString().slice(0, 10);
+    await enqueueTask("discover_email", `email-discovery:${day}`, null);
     const { data: sources } = await db.from("job_desk_sources").select("id").eq("active", true);
     for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:${day}`, null, { sourceId: source.id });
     return { count: sources?.length ?? 0 };

@@ -8,6 +8,7 @@ import { compareSubmissionCandidates, submissionRouteRank } from "./submission-p
 import { screenAutomaticCandidates } from "./automatic-screen";
 import { submissionPreflight } from "./submission-preflight";
 import { readApplicantDetails } from "./applicant-details";
+import { fetchEmailAdverts, fetchEmailPage, parseEmailAdvert } from "./email-vacancy-feed";
 import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
 
 export type Vacancy = { id: string; provider?: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
@@ -70,7 +71,29 @@ export async function discoverVacancies(sourceId: string) {
   }
 }
 
-export async function verifyVacancyStillOpen(vacancy: { id: string; source_id: string | null; external_id: string }) {
+export async function discoverEmailVacancies() {
+  const db = createSupabaseAdminClient();
+  const { results, checked, failures } = await fetchEmailAdverts();
+  for (const row of results) {
+    const { data: duplicate, error: duplicateError } = await db.from("job_desk_vacancies").select("id").eq("apply_url", row.apply_url).neq("external_id", row.external_id).eq("status", "open").limit(1).maybeSingle();
+    if (duplicateError) throw new Error(duplicateError.message);
+    const { data: old, error: readError } = await db.from("job_desk_vacancies").select("review_status").eq("provider", "manual").eq("external_id", row.external_id).maybeSingle();
+    if (readError) throw new Error(readError.message);
+    const { error } = await db.from("job_desk_vacancies").upsert({ ...row, duplicate_of: duplicate?.id ?? null, review_status: old?.review_status === "rejected" ? "rejected" : duplicate ? "needs_review" : row.review_status }, { onConflict: "provider,external_id" });
+    if (error) throw new Error(error.message);
+  }
+  const { data: orders, error } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").eq("service_type", "job_search_full").in("status", ["approved", "active"]).limit(500);
+  if (error) throw new Error(error.message);
+  for (const order of orders ?? []) if (hasVerifiedJobDeskPayment(order)) await enqueueTask("match", `email-match:${order.id}:${Math.floor(Date.now() / 7200000)}`, order.id);
+  return { checked, imported: results.length, open: results.filter(row => row.status === "open" && row.review_status === "approved").length, failures };
+}
+
+export async function verifyVacancyStillOpen(vacancy: { id: string; source_id: string | null; external_id: string; apply_url?: string; description?: string }) {
+  if (vacancy.external_id.startsWith("official-email:")) {
+    const fresh = parseEmailAdvert(await fetchEmailPage(vacancy.apply_url ?? ""), vacancy.apply_url ?? "");
+    // Changed requirements need another candidate review, not a stale approval.
+    return Boolean(fresh && fresh.status === "open" && fresh.review_status === "approved" && fresh.description === vacancy.description);
+  }
   if (!vacancy.source_id) return true; // A manually added listing needs administrator verification.
   const db = createSupabaseAdminClient();
   const { data: source, error } = await db.from("job_desk_sources").select("provider,site_token,company_name,active").eq("id", vacancy.source_id).single();
@@ -120,6 +143,7 @@ export async function matchOrder(orderId: string) {
   const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
   let refreshedSources = 0;
   if (matches.length < 10) {
+    if (await enqueueTask("discover_email", `email-coverage:${Math.floor(Date.now() / 7200000)}`, null)) refreshedSources++;
     const { data: sources, error: sourceError } = await db.from("job_desk_sources").select("id,last_synced_at").eq("active", true).limit(100);
     if (sourceError) throw new Error(sourceError.message);
     const cutoff = Date.now() - 2 * 3600000;
