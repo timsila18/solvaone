@@ -21,6 +21,7 @@ const { buildApplicantKnown } = load("src/lib/job-desk/applicant-known.ts");
 const cvFacts = buildApplicantKnown({ full_name: "Test Candidate", email: "test@example.com" }, { currentCity: "Nairobi", currentCountry: "Kenya", noticePeriod: "Immediately" }, "<h2>Professional Summary</h2><p>Payroll professional.</p><h2>Education</h2><p>Bachelor in progress.</p><h2>Referees</h2><p>Private referee.</p>");
 assert.equal(cvFacts.education_history, "Bachelor in progress.");
 assert.equal(cvFacts.professional_summary, "Payroll professional.");
+assert.equal(buildApplicantKnown({ full_name: "Test" }, null, "<h2>Education</h2><ul><li>Diploma completed.</li><li>Bachelor in progress.</li></ul>").education_history, "Diploma completed. Bachelor in progress.");
 const common = label => ({ label, required: true, fields: [{ name: "custom", type: "input_text" }] });
 assert.deepEqual(missingPortalRequirements([common("Where are you currently based?"), common("What is your notice period?"), common("Educational background")], "", cvFacts), []);
 assert.deepEqual(missingPortalRequirements([common("When can you start?")], "Notice period = Two weeks", cvFacts), []);

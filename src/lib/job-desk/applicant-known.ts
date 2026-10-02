@@ -3,6 +3,7 @@ import { load } from "cheerio";
 export function buildApplicantKnown(client: { full_name: string; email?: string | null; whatsapp_phone?: string | null }, details: { currentCity?: string; currentCountry?: string; noticePeriod?: string; applicantLinkedinUrl?: string; portfolioUrl?: string } | null, approvedHtml: string) {
   const names = client.full_name.trim().split(/\s+/);
   const $ = load(approvedHtml);
+  $("li, br").append(" ");
   const section = (heading: RegExp) => {
     const header = $("h2").filter((_, node) => heading.test($(node).text())).first();
     return header.nextUntil("h2").map((_, node) => $(node).text()).get().join(" ").replace(/\s+/g, " ").trim().slice(0, 4000);
