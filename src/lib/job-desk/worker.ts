@@ -18,6 +18,7 @@ import { answersForMatch } from "./assisted-answers";
 import { draftableQuestions, prohibitsAnswerDrafting } from "./answer-drafts";
 import { processAnswerDrafts } from "./answer-draft-service";
 import { claimPrioritizedTask } from "./task-priority";
+import { discoveryWindow, renewTaskLease } from "./worker-lifecycle";
 import { ApplicationEmailError, sendApplicationEmail } from "./email-transport";
 import { claimApplication } from "./submission-lock";
 import { LETTER_PROMPT_VERSION, LETTER_WRITER_PROMPT, LETTER_REVIEW_PROMPT, letterDate, formatApplicationLetter, validateLetterBody, parseLetterReview } from "./letter-quality";
@@ -327,10 +328,11 @@ async function processTask(task: Task) {
   }
   if (task.task_type === "notify_client" && task.order_id && task.payload.event && task.payload.reference) return sendClientUpdate(task.order_id, task.payload.event as ClientUpdate, task.payload.reference);
   if (task.task_type === "schedule") {
-    const day = new Date().toISOString().slice(0, 10);
-    await enqueueTask("discover_email", `email-discovery:${day}`, null);
-    const { data: sources } = await db.from("job_desk_sources").select("id").eq("active", true);
-    for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:${day}`, null, { sourceId: source.id });
+    const window = discoveryWindow();
+    await enqueueTask("discover_email", `email-discovery:${window}`, null);
+    const { data: sources, error: sourcesError } = await db.from("job_desk_sources").select("id").eq("active", true);
+    if (sourcesError) throw new Error(sourcesError.message);
+    for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:${window}`, null, { sourceId: source.id });
     return { count: sources?.length ?? 0 };
   }
   throw new Error(`Unknown Job Desk task: ${task.task_type}`);
@@ -345,11 +347,9 @@ export async function runJobDeskWorker({ maxTasks = 10, maxRunMs = 45000 }: { ma
     const task = await claimPrioritizedTask(db, workerId, index % 6 === 5) as Task | null;
     if (!task) break;
     const heartbeat = setInterval(() => {
-      void db.from("job_desk_tasks")
-        .update({ lease_until: new Date(Date.now() + 4 * 60 * 1000).toISOString() })
-        .eq("id", task.id)
-        .eq("locked_by", workerId)
-        .eq("status", "running");
+      void renewTaskLease(db, task.id, workerId).catch(() => {
+        console.error("Job Desk task lease renewal failed", { taskId: task.id });
+      });
     }, 60_000);
     try {
       const result = await processTask(task);
