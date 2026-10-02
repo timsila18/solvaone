@@ -3,7 +3,7 @@ import { createOpenAIClient } from "@/lib/openai";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { logSystemEvent } from "@/lib/security";
-import { discoverEmailVacancies, discoverVacancies, enqueueTask, matchOrder, plainText, verifyVacancyStillOpen } from "./automation";
+import { discoverEmailVacancies, discoverVacancies, enqueueTask, matchOrder, plainText, verifyVacancyStillOpen, reviewDeferredMatches } from "./automation";
 import { scoreVacancy, submissionHoldReason } from "./matching";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { createJobDeskCvDocx } from "./cv-docx";
@@ -15,6 +15,9 @@ import { buildApplicantKnown } from "./applicant-known";
 import { canAutomatePortal, runPortalApplication } from "./portal-browser";
 import { submissionPreflight, canRetrySubmission } from "./submission-preflight";
 import { answersForMatch } from "./assisted-answers";
+import { draftableQuestions, prohibitsAnswerDrafting } from "./answer-drafts";
+import { processAnswerDrafts } from "./answer-draft-service";
+import { claimPrioritizedTask } from "./task-priority";
 import { ApplicationEmailError, sendApplicationEmail } from "./email-transport";
 import { claimApplication } from "./submission-lock";
 import { LETTER_PROMPT_VERSION, LETTER_WRITER_PROMPT, LETTER_REVIEW_PROMPT, letterDate, formatApplicationLetter, validateLetterBody, parseLetterReview } from "./letter-quality";
@@ -31,13 +34,17 @@ async function checkSubmissionRequirements(matchId: string, order: any, client: 
   if (approvedCv?.status !== "approved") return null;
   const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.active ? source.provider : undefined, siteToken: source?.site_token, url: vacancy.apply_url, answers: answersForMatch(order.service_details, matchId, details?.portalAnswers ?? "", approvedCv.id), known: buildApplicantKnown(client, details, approvedCv.html ?? "") });
   if (!preflight.ready) {
-    const { data: existing, error: readError } = await db.from("job_desk_applications").select("status").eq("match_id", matchId).maybeSingle();
+    const { data: existing, error: readError } = await db.from("job_desk_applications").select("status,provider_response").eq("match_id", matchId).maybeSingle();
     if (readError) throw new Error(readError.message);
     if (["sending", "submitted"].includes(existing?.status ?? "")) return null;
+    if (existing?.status === "needs_human" && !canRetrySubmission(existing)) return null;
     const { error: saveError } = await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", error_message: `Preflight: ${preflight.blockers.join("; ")}`.slice(0, 4000), provider_response: { clicked: false, preflight } }, { onConflict: "match_id" });
     if (saveError) throw new Error(saveError.message);
     const { error: matchError } = await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId).in("status", ["suggested", "preparing", "authorized"]);
     if (matchError) throw new Error(matchError.message);
+    if (draftableQuestions(preflight.blockers).length && !prohibitsAnswerDrafting(preflight.blockers.join(" "))) {
+      await enqueueTask("draft_answers", `answer-drafts:${matchId}:${approvedCv.id}`, order.id, { matchId });
+    }
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
   }
   return preflight.ready ? preflight : null;
@@ -278,6 +285,12 @@ async function submitMatch(matchId: string) {
 
 async function processTask(task: Task) {
   const db = createSupabaseAdminClient();
+  if (task.task_type === "draft_answers" && task.order_id && task.payload.matchId) return processAnswerDrafts(task.order_id, task.payload.matchId);
+  if (task.task_type === "review_matches" && task.order_id && task.payload.vacancyIds) {
+    const ids = JSON.parse(task.payload.vacancyIds);
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== "string")) throw new Error("Invalid review vacancy IDs.");
+    return reviewDeferredMatches(task.order_id, ids);
+  }
   if (task.task_type === "resume_assisted" && task.order_id && task.payload.matchId) {
     const { data: match, error } = await db.from("job_desk_matches").select("id,status,authorized_at,cover_letter,vacancy:job_desk_vacancies(*)").eq("id", task.payload.matchId).eq("order_id", task.order_id).maybeSingle();
     if (error) throw new Error(error.message);
@@ -329,9 +342,7 @@ export async function runJobDeskWorker({ maxTasks = 10, maxRunMs = 45000 }: { ma
   const deadline = Date.now() + maxRunMs;
   let processed = 0;
   for (let index = 0; index < maxTasks && Date.now() < deadline; index += 1) {
-    const { data, error } = await db.rpc("claim_job_desk_task", { p_worker: workerId });
-    if (error) throw new Error(error.message);
-    const task = (data?.[0] ?? null) as Task | null;
+    const task = await claimPrioritizedTask(db, workerId, index % 6 === 5) as Task | null;
     if (!task) break;
     const heartbeat = setInterval(() => {
       void db.from("job_desk_tasks")

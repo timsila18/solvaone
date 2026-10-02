@@ -6,6 +6,8 @@ import { reviewCandidateMatches } from "./relevance";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { compareSubmissionCandidates, submissionRouteRank } from "./submission-priority";
 import { screenAutomaticCandidates } from "./automatic-screen";
+import { draftableQuestions, prohibitsAnswerDrafting } from "./question-policy";
+import { answersForMatch } from "./assisted-answers";
 import { submissionPreflight } from "./submission-preflight";
 import { readApplicantDetails } from "./applicant-details";
 import { buildApplicantKnown } from "./applicant-known";
@@ -131,12 +133,15 @@ export async function matchOrder(orderId: string) {
   if (sourcesError) throw new Error(sourcesError.message);
   const sourcesById = new Map((sourceRows ?? []).map(source => [source.id, source]));
   const details = readApplicantDetails(order.service_details);
+  const blockedQuestions = new Map<string, string[]>();
   const screened = await screenAutomaticCandidates(pool.filter(item => submissionRouteRank(item.vacancy) > 0).slice(0, 64), async item => {
     const vacancy = item.vacancy as Vacancy & { source_id?: string };
     const hold = submissionHoldReason(vacancy.application_method === "email" ? vacancy.description : "", client.email, plainText(approved.html ?? "").length);
     if (hold) return { ready: false, blockers: [hold] };
     const source = sourcesById.get(vacancy.source_id ?? "");
-    return submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.provider, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: buildApplicantKnown(client, details, approved.html ?? "") });
+    const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.provider, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: buildApplicantKnown(client, details, approved.html ?? "") });
+    if (!preflight.ready) blockedQuestions.set(vacancy.id, preflight.blockers);
+    return preflight;
   });
   const candidates = screened.ready;
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
@@ -180,9 +185,53 @@ export async function matchOrder(orderId: string) {
   // Full-advert evidence review, not title-word percentage, qualifies these selected matches.
   // Each task preflights independently; blocked forms must not consume a ten-job batch.
   for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
+  // Ready work is queued first. A small separately reviewed pool may need factual drafts.
+  const reviewPool = screened.skipped.map(item => item.candidate).filter(item => {
+    const blockers = blockedQuestions.get(item.vacancy.id) ?? [];
+    return blockers.length && !prohibitsAnswerDrafting(blockers.join(" ")) && draftableQuestions(blockers).length;
+  }).slice(0, 5);
+  if (scope && reviewPool.length) await enqueueTask("review_matches", `review-matches:${orderId}:${approved.id}:${Math.floor(Date.now() / 7200000)}`, orderId, { vacancyIds: JSON.stringify(reviewPool.map(item => item.vacancy.id)) });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
   return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: 10, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.length, automaticScreened: screened.ready.length + screened.skipped.length, automaticSkipped: screened.skipped.length, unsupportedRoutes: pool.filter(item => submissionRouteRank(item.vacancy) === 0).length, skippedExamples: screened.skipped.slice(0, 10).map(item => ({ title: item.candidate.vacancy.title, company: item.candidate.vacancy.company_name, reason: item.reason })), refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
+}
+
+export async function reviewDeferredMatches(orderId: string, vacancyIds: string[]) {
+  const db = createSupabaseAdminClient();
+  const { data: order, error } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", orderId).single();
+  if (error) throw new Error(error.message);
+  const scope = order?.application_authorized ? readApplicationScope(order.service_details) : null;
+  const client = Array.isArray(order?.client) ? order.client[0] : order?.client;
+  if (!scope || !hasVerifiedJobDeskPayment(order) || !client?.consent_to_process || !["approved", "active"].includes(order.status)) return { held: true };
+  const { data: cv } = await db.from("job_desk_documents").select("id,status,html").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+  if (cv?.status !== "approved") return { held: true };
+  const { data: profile, error: profileError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).single();
+  if (profileError) throw new Error(profileError.message);
+  const { data: rows, error: rowsError } = await db.from("job_desk_vacancies").select("*").in("id", vacancyIds.slice(0, 5)).eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).gte("last_seen_at", new Date(Date.now() - 72 * 3600000).toISOString());
+  if (rowsError) throw new Error(rowsError.message);
+  const candidates = (rows ?? []).filter(vacancy => !applicationScopeHold(scope, vacancy) && scoreVacancy(vacancy, profile, scope).score >= 25 && submissionRouteRank(vacancy) > 0);
+  const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(cv.html ?? ""), applicationScope: scope }, candidates);
+  let count = 0;
+  for (const vacancy of candidates) {
+    if (!reviewed.get(vacancy.id)?.suitable || !(await verifyVacancyStillOpen(vacancy))) continue;
+    const { data: prior, error: priorError } = await db.from("job_desk_matches").select("id").eq("order_id", orderId).eq("vacancy_id", vacancy.id).maybeSingle();
+    if (priorError) throw new Error(priorError.message);
+    // Never overwrite ongoing, submitted or uncertain historical applications.
+    if (prior) continue;
+    const details = readApplicantDetails(order.service_details);
+    const { data: source } = await db.from("job_desk_sources").select("provider,site_token,active").eq("id", vacancy.source_id).maybeSingle();
+    const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.active ? source.provider : undefined, siteToken: source?.site_token, url: vacancy.apply_url, answers: answersForMatch(order.service_details, "", details?.portalAnswers ?? "", cv.id), known: buildApplicantKnown(client, details, cv.html ?? "") });
+    if (preflight.ready || !draftableQuestions(preflight.blockers).length || prohibitsAnswerDrafting(preflight.blockers.join(" "))) continue;
+    const scored = scoreVacancy(vacancy, profile, scope);
+    const { data: match, error: insertError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: vacancy.id, score: scored.score, reasons: [...scored.reasons, `Suitability review: ${reviewed.get(vacancy.id)?.reason}`], gaps: scored.gaps, status: "needs_human" }, { onConflict: "order_id,vacancy_id", ignoreDuplicates: true }).select("id").maybeSingle();
+    if (insertError) throw new Error(insertError.message);
+    if (!match) continue;
+    const { error: applicationError } = await db.from("job_desk_applications").insert({ match_id: match.id, order_id: orderId, method: vacancy.application_method, status: "needs_human", provider_response: { clicked: false, preflight }, error_message: `Preflight: ${preflight.blockers.join("; ")}`.slice(0, 4000) });
+    if (applicationError) throw new Error(applicationError.message);
+    await enqueueTask("draft_answers", `answer-drafts:${match.id}:${cv.id}`, orderId, { matchId: match.id });
+    count++;
+  }
+  return { reviewApplications: count };
 }
 
 export function createAuthorizationToken() {

@@ -1,4 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
+import { officialStep } from "./question-policy";
+export { officialStep } from "./question-policy";
 
 export type AssistedQuestion = { id: string; matchId: string; label: string; title: string; company: string; url: string; officialStep: boolean };
 export type AnswerRequest = { batchId: string; cvId: string; questions: AssistedQuestion[]; expiresAt: string; savedAt?: string };
@@ -10,9 +12,6 @@ export function hashAnswerToken(token: string) {
 export function createAnswerToken() {
   const token = randomBytes(32).toString("base64url");
   return { token, hash: hashAnswerToken(token) };
-}
-export function officialStep(label: string) {
-  return /captcha|assessment|aptitude|identity|passport copy|national id|privacy|consent|terms|ai use statement|not be ai.generated|configure|unsupported portal|cannot verify/i.test(label);
 }
 export function makeAssistedQuestion(matchId: string, label: string, vacancy: { title: string; company_name: string; apply_url: string }): AssistedQuestion {
   return { id: createHash("sha256").update(`${matchId}:${label}`).digest("hex"), matchId, label, title: vacancy.title, company: vacancy.company_name, url: vacancy.apply_url, officialStep: officialStep(label) };
