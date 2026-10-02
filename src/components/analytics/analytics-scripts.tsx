@@ -1,6 +1,11 @@
+"use client";
+
 import Script from "next/script";
+import { usePathname } from "next/navigation";
 
 export function AnalyticsScripts() {
+  const pathname = usePathname();
+  if (pathname?.startsWith("/job-desk/answers/") || pathname?.startsWith("/job-desk/authorize")) return null;
   const gaId = process.env.NEXT_PUBLIC_GA_ID;
   const clarityId = process.env.NEXT_PUBLIC_CLARITY_ID;
   const metaPixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;

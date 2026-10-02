@@ -21,6 +21,7 @@ import { formatKes } from "@/lib/utils";
 import { FileDown } from "lucide-react";
 import { MatchCoverage } from "@/components/job-desk/match-coverage";
 import { ApplicationLanes } from "@/components/job-desk/application-lanes";
+import { AnswerLinkControl } from "@/components/job-desk/answer-link-control";
 
 type Question = { id: string; category: string; question: string; reason: string; required?: boolean };
 
@@ -106,6 +107,10 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
         </aside>
 
         <main id="applications" className="min-w-0 space-y-7">
+          {isJobSearch ? <AnswerLinkControl orderId={orderId} count={matches.filter(match => {
+            const application = Array.isArray(match.application) ? match.application[0] : match.application;
+            return match.status === "needs_human" && canRetrySubmission(application);
+          }).length} /> : null}
           {isJobSearch ? <ApplicationLanes items={matches.map(match => {
             const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
             const application = Array.isArray(match.application) ? match.application[0] : match.application;

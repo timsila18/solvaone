@@ -13,7 +13,8 @@ import { applicationScopeHold, readApplicationScope } from "./application-scope"
 import { readApplicantDetails } from "./applicant-details";
 import { buildApplicantKnown } from "./applicant-known";
 import { canAutomatePortal, runPortalApplication } from "./portal-browser";
-import { submissionPreflight } from "./submission-preflight";
+import { submissionPreflight, canRetrySubmission } from "./submission-preflight";
+import { answersForMatch } from "./assisted-answers";
 import { ApplicationEmailError, sendApplicationEmail } from "./email-transport";
 import { claimApplication } from "./submission-lock";
 import { LETTER_PROMPT_VERSION, LETTER_WRITER_PROMPT, LETTER_REVIEW_PROMPT, letterDate, formatApplicationLetter, validateLetterBody, parseLetterReview } from "./letter-quality";
@@ -25,10 +26,10 @@ async function checkSubmissionRequirements(matchId: string, order: any, client: 
   const { data: source, error } = vacancy.source_id ? await db.from("job_desk_sources").select("provider,site_token,active").eq("id", vacancy.source_id).maybeSingle() : { data: null, error: null };
   if (error) throw new Error(error.message);
   const details = readApplicantDetails(order.service_details);
-  const { data: approvedCv, error: cvError } = await db.from("job_desk_documents").select("html,status").eq("order_id", order.id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+  const { data: approvedCv, error: cvError } = await db.from("job_desk_documents").select("id,html,status").eq("order_id", order.id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
   if (cvError) throw new Error(cvError.message);
   if (approvedCv?.status !== "approved") return null;
-  const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.active ? source.provider : undefined, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: buildApplicantKnown(client, details, approvedCv.html ?? "") });
+  const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.active ? source.provider : undefined, siteToken: source?.site_token, url: vacancy.apply_url, answers: answersForMatch(order.service_details, matchId, details?.portalAnswers ?? "", approvedCv.id), known: buildApplicantKnown(client, details, approvedCv.html ?? "") });
   if (!preflight.ready) {
     const { data: existing, error: readError } = await db.from("job_desk_applications").select("status").eq("match_id", matchId).maybeSingle();
     if (readError) throw new Error(readError.message);
@@ -207,7 +208,7 @@ async function submitMatch(matchId: string) {
     if (!(await claimApplication(matchId, order.id, "portal", vacancy.apply_url))) return;
     let portalConfirmation: { confirmation: string; finalUrl?: string } | undefined;
     try {
-      const result = await runPortalApplication({ url: vacancy.apply_url, siteToken: source.site_token, firstName: names[0] ?? "", lastName: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedinUrl: details?.applicantLinkedinUrl, portfolioUrl: details?.portfolioUrl, portalAnswers: details?.portalAnswers, fieldAnswers: submissionCheck.fieldAnswers, fieldSelections: submissionCheck.fieldSelections, city: details?.currentCity, country: details?.currentCountry, coverLetter: match.cover_letter }, cvFile);
+      const result = await runPortalApplication({ url: vacancy.apply_url, siteToken: source.site_token, firstName: names[0] ?? "", lastName: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedinUrl: details?.applicantLinkedinUrl, portfolioUrl: details?.portfolioUrl, portalAnswers: answersForMatch(order.service_details, matchId, details?.portalAnswers ?? "", latestCv.id), fieldAnswers: submissionCheck.fieldAnswers, fieldSelections: submissionCheck.fieldSelections, city: details?.currentCity, country: details?.currentCountry, coverLetter: match.cover_letter }, cvFile);
       if (result.status === "submitted" && result.confirmation) {
         portalConfirmation = { confirmation: result.confirmation, finalUrl: result.finalUrl };
         const { error: confirmationError } = await db.from("job_desk_applications").update({ status: "submitted", provider_response: { confirmation: result.confirmation, finalUrl: result.finalUrl, clicked: true, verification_type: "portal_confirmation" }, submitted_at: new Date().toISOString(), error_message: null }).eq("match_id", matchId);
@@ -277,6 +278,29 @@ async function submitMatch(matchId: string) {
 
 async function processTask(task: Task) {
   const db = createSupabaseAdminClient();
+  if (task.task_type === "resume_assisted" && task.order_id && task.payload.matchId) {
+    const { data: match, error } = await db.from("job_desk_matches").select("id,status,authorized_at,cover_letter,vacancy:job_desk_vacancies(*)").eq("id", task.payload.matchId).eq("order_id", task.order_id).maybeSingle();
+    if (error) throw new Error(error.message);
+    const { data: application, error: applicationError } = await db.from("job_desk_applications").select("status,provider_response").eq("match_id", task.payload.matchId).eq("order_id", task.order_id).maybeSingle();
+    if (applicationError) throw new Error(applicationError.message);
+    if (!match || !["needs_human", "authorized", "suggested"].includes(match.status) || !canRetrySubmission(application)) return { outcome: "held", reason: "Submission evidence must be reviewed before retrying." };
+    const { data: order, error: orderError } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", task.order_id).single();
+    if (orderError) throw new Error(orderError.message);
+    const client = Array.isArray(order.client) ? order.client[0] : order.client;
+    const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
+    const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
+    if (!hasVerifiedJobDeskPayment(order) || !["approved", "active"].includes(order.status) || !client?.consent_to_process || !scope || !vacancy || applicationScopeHold(scope, vacancy)) return { outcome: "held", reason: "Payment or authorization needs review." };
+    if (!(await checkSubmissionRequirements(match.id, order, client, vacancy))) return { outcome: "needs_human", reason: "The employer still requires an official step or more information." };
+    const nextStatus = match.cover_letter && match.authorized_at ? "authorized" : "suggested";
+    if (match.status === "needs_human") {
+      const { data: claimed, error: claimError } = await db.from("job_desk_matches").update({ status: nextStatus }).eq("id", match.id).eq("status", "needs_human").select("id").maybeSingle();
+      if (claimError) throw new Error(claimError.message);
+      if (!claimed) return { outcome: "held", reason: "Another worker is already processing this application." };
+    }
+    if (nextStatus === "authorized") await submitMatch(match.id);
+    else await prepareMatch(match.id);
+    return { outcome: "rechecked", reason: "Check the application evidence for the final outcome." };
+  }
   if (task.task_type === "process_cv" && task.order_id) return processJobDeskOrder({ orderId: task.order_id });
   if (task.task_type === "discover") return { count: await discoverVacancies(task.payload.sourceId) };
   if (task.task_type === "discover_email") return discoverEmailVacancies();

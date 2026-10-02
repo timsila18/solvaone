@@ -19,6 +19,12 @@ export async function middleware(request: NextRequest) {
       "Content-Security-Policy",
       "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.clarity.ms https://connect.facebook.net https://analytics.tiktok.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.openai.com https://sandbox.safaricom.co.ke https://api.safaricom.co.ke https://www.google-analytics.com https://www.clarity.ms https://analytics.tiktok.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     );
+    if (request.nextUrl.pathname.startsWith("/job-desk/answers/") || request.nextUrl.pathname.startsWith("/job-desk/authorize") || request.nextUrl.pathname === "/api/job-desk/answers") {
+      nextResponse.headers.set("Referrer-Policy", "no-referrer");
+      nextResponse.headers.set("Cache-Control", "private, no-store");
+      nextResponse.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+      nextResponse.headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    }
     if (request.nextUrl.protocol === "https:") {
       nextResponse.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
     }
