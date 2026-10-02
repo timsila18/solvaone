@@ -8,6 +8,7 @@ import { compareSubmissionCandidates, submissionRouteRank } from "./submission-p
 import { screenAutomaticCandidates } from "./automatic-screen";
 import { submissionPreflight } from "./submission-preflight";
 import { readApplicantDetails } from "./applicant-details";
+import { buildApplicantKnown } from "./applicant-known";
 import { fetchEmailAdverts, fetchEmailPage, parseEmailAdvert } from "./email-vacancy-feed";
 import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
 
@@ -130,13 +131,12 @@ export async function matchOrder(orderId: string) {
   if (sourcesError) throw new Error(sourcesError.message);
   const sourcesById = new Map((sourceRows ?? []).map(source => [source.id, source]));
   const details = readApplicantDetails(order.service_details);
-  const names = client.full_name.trim().split(/\s+/);
   const screened = await screenAutomaticCandidates(pool.filter(item => submissionRouteRank(item.vacancy) > 0).slice(0, 64), async item => {
     const vacancy = item.vacancy as Vacancy & { source_id?: string };
     const hold = submissionHoldReason(vacancy.application_method === "email" ? vacancy.description : "", client.email, plainText(approved.html ?? "").length);
     if (hold) return { ready: false, blockers: [hold] };
     const source = sourcesById.get(vacancy.source_id ?? "");
-    return submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.provider, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: { first_name: names[0], last_name: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedin_profile: details?.applicantLinkedinUrl ?? "", website: details?.portfolioUrl ?? "" } });
+    return submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.provider, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: buildApplicantKnown(client, details, approved.html ?? "") });
   });
   const candidates = screened.ready;
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));

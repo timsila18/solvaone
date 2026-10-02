@@ -16,14 +16,43 @@ export function verifiedAnswers(text: string) {
   return answers;
 }
 
+export function reusableQuestionKey(label: string): string | null {
+  const text = normalizeQuestion(label).replace(/[?.:]/g, "");
+  // A narrow alias list prevents answers about one employer/country leaking into another.
+  if (/^(?:what is your )?(?:notice period|availability to start|when can you start)$/.test(text)) return "notice_period";
+  if (/^(?:your )?linkedin(?: profile)?(?: url| link)?$/.test(text)) return "linkedin_profile";
+  if (/^(?:your )?(?:portfolio|personal website)(?: url| link)?$/.test(text)) return "website";
+  if (/^(?:your )?(?:current location|where are you currently based|where do you currently live)$/.test(text)) return "current_location";
+  if (/^(?:your )?(?:current city|city of residence)$/.test(text)) return "city";
+  if (/^(?:your )?(?:current country|country of residence)$/.test(text)) return "country_of_residence";
+  if (/^(?:your )?(?:professional summary|professional profile)$/.test(text)) return "professional_summary";
+  if (/^(?:your )?(?:education history|educational background)$/.test(text)) return "education_history";
+  if (/^(?:your )?(?:employment history|professional experience|work experience)$/.test(text)) return "employment_history";
+  if (/^(?:your )?(?:skills|core competencies|technical skills)$/.test(text)) return "skills";
+  return null;
+}
+
+function questionAnswer(question: PortalQuestion, answers: Map<string, string>, known: Record<string, string>) {
+  const exact = answers.get(normalizeQuestion(question.label));
+  if (exact) return exact;
+  const key = reusableQuestionKey(question.label);
+  if (key) {
+    const reusable = [...answers].filter(([label]) => reusableQuestionKey(label) === key).map(([, value]) => value);
+    if (new Set(reusable.map(normalizeQuestion)).size > 1) return undefined;
+    const saved = reusable[0];
+    if (saved) return saved;
+    if (known[key]?.trim()) return known[key];
+  }
+  return (question.fields ?? []).map(field => known[field.name]).find(value => value?.trim());
+}
+
 export function missingPortalRequirements(questions: PortalQuestion[], answersText: string, known: Record<string, string>) {
   const answers = verifiedAnswers(answersText);
   return questions.filter(question => question.required).filter(question => {
     const fields = question.fields ?? [];
     if (fields.some(field => /^(resume|resume_text|cover_letter|cover_letter_text)$/.test(field.name))) return false;
-    if (fields.some(field => known[field.name]?.trim())) return false;
     if (fields.some(field => field.type === "input_file")) return true;
-    const answer = answers.get(normalizeQuestion(question.label));
+    const answer = questionAnswer(question, answers, known);
     if (!answer) return true;
     const options = fields.flatMap(field => field.values ?? []);
     return options.length > 0 && !options.some(option => normalizeQuestion(option.label) === normalizeQuestion(answer));
@@ -68,7 +97,9 @@ export async function submissionPreflight(input: { method: string; emailVerified
   const fieldAnswers: Record<string, string> = {};
   const fieldSelections: Record<string, string> = {};
   for (const question of [...job.questions, ...(job.location_questions ?? []), ...(job.compliance ?? [])]) {
-    const answer = answers.get(normalizeQuestion(question.label));
+    const answer = questionAnswer(question, answers, input.known);
+    const options = (question.fields ?? []).flatMap(field => field.values ?? []);
+    if (answer && options.length && !options.some(option => normalizeQuestion(option.label) === normalizeQuestion(answer))) continue;
     if (answer && !blockers.includes(question.label)) for (const field of question.fields ?? []) {
       if (field.type !== "input_file") {
         fieldAnswers[field.name] = answer;

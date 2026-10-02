@@ -17,6 +17,15 @@ function load(file) {
   return mod.exports;
 }
 const { missingPortalRequirements, canRetrySubmission, applicationOutcome, submissionPreflight } = load("src/lib/job-desk/submission-preflight.ts");
+const { buildApplicantKnown } = load("src/lib/job-desk/applicant-known.ts");
+const cvFacts = buildApplicantKnown({ full_name: "Test Candidate", email: "test@example.com" }, { currentCity: "Nairobi", currentCountry: "Kenya", noticePeriod: "Immediately" }, "<h2>Professional Summary</h2><p>Payroll professional.</p><h2>Education</h2><p>Bachelor in progress.</p><h2>Referees</h2><p>Private referee.</p>");
+assert.equal(cvFacts.education_history, "Bachelor in progress.");
+assert.equal(cvFacts.professional_summary, "Payroll professional.");
+const common = label => ({ label, required: true, fields: [{ name: "custom", type: "input_text" }] });
+assert.deepEqual(missingPortalRequirements([common("Where are you currently based?"), common("What is your notice period?"), common("Educational background")], "", cvFacts), []);
+assert.deepEqual(missingPortalRequirements([common("When can you start?")], "Notice period = Two weeks", cvFacts), []);
+assert.deepEqual(missingPortalRequirements([common("When can you start?")], "Notice period = Two weeks\nAvailability to start = Immediately", {}), ["When can you start?"]);
+for (const label of ["Passport country", "Gender", "Highest completed qualification", "Why do you want to join us?", "Describe a situation", "Are you a former employee?"]) assert.deepEqual(missingPortalRequirements([common(label)], "", cvFacts), [label]);
 const questions = [
   { label: "First Name", required: true, fields: [{ name: "first_name", type: "input_text" }] },
   { label: "Resume", required: true, fields: [{ name: "resume", type: "input_file" }] },
@@ -37,6 +46,11 @@ async function run() {
     const result = await submissionPreflight({ method: "portal", provider: "greenhouse", siteToken: "example", url: "https://job-boards.greenhouse.io/example/jobs/123", answers: "Former employee? = No", known: { first_name: "Test" } });
     assert.equal(result.ready, false);
     assert.deepEqual(result.blockers, ["Certificates"]);
+    global.fetch = async () => ({ ok: true, json: async () => ({ questions: [common("What is your notice period?"), { ...common("Professional summary"), fields: [{ name: "summary", type: "input_text" }] }] }) });
+    const automatic = await submissionPreflight({ method: "portal", provider: "greenhouse", siteToken: "example", url: "https://job-boards.greenhouse.io/example/jobs/123", answers: "Notice period = Two weeks", known: cvFacts });
+    assert.equal(automatic.ready, true);
+    assert.equal(automatic.fieldAnswers.custom, "Two weeks");
+    assert.equal(automatic.fieldAnswers.summary, "Payroll professional.");
     const unsupported = await submissionPreflight({ method: "portal", provider: "lever", url: "https://example.com", answers: "", known: {} });
     assert.equal(unsupported.ready, false);
     global.fetch = async () => ({ ok: false, status: 404 });

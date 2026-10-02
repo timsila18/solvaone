@@ -11,6 +11,7 @@ import { processJobDeskOrder } from "./service";
 import { queueClientUpdate, sendClientUpdate, type ClientUpdate } from "./client-updates";
 import { applicationScopeHold, readApplicationScope } from "./application-scope";
 import { readApplicantDetails } from "./applicant-details";
+import { buildApplicantKnown } from "./applicant-known";
 import { canAutomatePortal, runPortalApplication } from "./portal-browser";
 import { submissionPreflight } from "./submission-preflight";
 import { ApplicationEmailError, sendApplicationEmail } from "./email-transport";
@@ -24,8 +25,10 @@ async function checkSubmissionRequirements(matchId: string, order: any, client: 
   const { data: source, error } = vacancy.source_id ? await db.from("job_desk_sources").select("provider,site_token,active").eq("id", vacancy.source_id).maybeSingle() : { data: null, error: null };
   if (error) throw new Error(error.message);
   const details = readApplicantDetails(order.service_details);
-  const names = String(client.full_name).trim().split(/\s+/);
-  const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.active ? source.provider : undefined, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: { first_name: names[0], last_name: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedin_profile: details?.applicantLinkedinUrl ?? "", website: details?.portfolioUrl ?? "" } });
+  const { data: approvedCv, error: cvError } = await db.from("job_desk_documents").select("html,status").eq("order_id", order.id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+  if (cvError) throw new Error(cvError.message);
+  if (approvedCv?.status !== "approved") return null;
+  const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.active ? source.provider : undefined, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: buildApplicantKnown(client, details, approvedCv.html ?? "") });
   if (!preflight.ready) {
     const { data: existing, error: readError } = await db.from("job_desk_applications").select("status").eq("match_id", matchId).maybeSingle();
     if (readError) throw new Error(readError.message);
