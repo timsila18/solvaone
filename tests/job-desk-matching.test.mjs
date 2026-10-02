@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { expiredDeadline, scoreVacancy, submissionHoldReason } from "../src/lib/job-desk/matching.ts";
+import { documentedSkillMatches, expiredDeadline, scoreVacancy, submissionHoldReason } from "../src/lib/job-desk/matching.ts";
+import { applicationScopeHold, createApplicationScope } from "../src/lib/job-desk/application-scope.ts";
+
+test("equivalent role names pass both scope and ranking without authorizing other careers", () => {
+  const scope = createApplicationScope({ targetRoles: "HR Officer, Admin Officer", preferredLocations: "Kenya", remotePreference: "flexible", channel: "admin_recorded", evidence: "Client instructions", excludedEmployers: "", excludedRoles: "", excludedKeywords: "" });
+  const vacancy = { title: "Human Resources Officer", company_name: "Employer", description: "Payroll administration and recruitment", location: "Nairobi, Kenya", workplace_type: "onsite" };
+  assert.equal(applicationScopeHold(scope, vacancy), null);
+  assert.ok(scoreVacancy(vacancy, { structured_profile: { skills: ["Payroll processing"] } }, scope).score >= 25);
+  assert.equal(applicationScopeHold(scope, { ...vacancy, title: "Administrative Officer" }), null);
+  assert.match(applicationScopeHold(scope, { ...vacancy, title: "Aircraft Engineer" }), /outside/);
+  assert.match(applicationScopeHold(scope, { ...vacancy, location: "Lagos, Nigeria" }), /Location/);
+});
+
+test("equivalent documented skills widen matching without inventing specialist skills", () => {
+  assert.equal(documentedSkillMatches("Payroll processing", "Responsible for payroll administration"), true);
+  assert.equal(documentedSkillMatches("Recruitment", "Support talent acquisition"), true);
+  assert.equal(documentedSkillMatches("Microsoft Excel", "Reporting using MS Excel"), true);
+  assert.equal(documentedSkillMatches("Office administration", "Requires NetSuite administration"), false);
+  assert.equal(documentedSkillMatches("Payroll", "Requires Python engineering"), false);
+});
 
 test("updated authorization replaces stale intake roles and locations for ranking", () => {
   const profile = { target_job_titles: ["Marketing Officer"], preferred_locations: ["Nairobi"], structured_profile: { skills: ["Payroll"] } };

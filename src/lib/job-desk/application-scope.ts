@@ -1,3 +1,5 @@
+import { normalizeRoleLanguage } from "./role-language";
+
 export type ApplicationScope = {
   version: 1;
   targetRoles: string[];
@@ -32,7 +34,7 @@ type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evide
 const entries = (value: string) => value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
 const locationEntries = (value: string[]) => value.filter((item, index) => !(item.toLowerCase() === "kenya" && index > 0 && /^(nairobi|mombasa|kisumu|nakuru|eldoret)$/i.test(value[index - 1])));
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-const terms = (value: string) => normalize(value).split(" ").filter((term) => term.length >= 3 && !["and", "the", "for", "with", "senior", "junior", "national", "regional", "manager", "officer", "assistant", "associate", "executive", "specialist"].includes(term));
+const terms = (value: string) => normalize(normalizeRoleLanguage(value)).split(" ").filter((term) => term.length >= 3 && !["and", "the", "for", "with", "senior", "junior", "national", "regional", "manager", "officer", "assistant", "associate", "executive", "specialist"].includes(term));
 
 export function createApplicationScope(input: ScopeInput): ApplicationScope {
   const targetRoles = entries(input.targetRoles);

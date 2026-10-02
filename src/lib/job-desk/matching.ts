@@ -1,7 +1,9 @@
+import { normalizeRoleLanguage } from "./role-language";
+
 export type MatchableVacancy = { title: string; description: string; location: string; workplace_type: string };
 
 const generic = new Set(["and", "the", "for", "with", "senior", "junior", "lead", "head", "officer", "specialist", "associate", "manager", "assistant", "executive", "remote", "global"]);
-const words = (value: string) => new Set((value.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((word) => !generic.has(word)));
+const words = (value: string) => new Set((normalizeRoleLanguage(value).match(/[a-z]{3,}/g) ?? []).filter((word) => !generic.has(word)));
 const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
 
 const skillText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -18,7 +20,15 @@ export function documentedSkillMatches(skill: string, advert: string) {
     ["team leadership", "team management", "leading sales teams"],
     ["distributor management", "distribution management", "managing distributors"],
     ["route to market", "route to market strategy"],
-    ["business development", "new business development"]
+    ["business development", "new business development"],
+    ["payroll", "payroll processing", "payroll administration", "payroll management"],
+    ["recruitment", "staff recruitment", "talent acquisition", "recruiting"],
+    ["onboarding", "employee onboarding", "staff onboarding"],
+    ["employee relations", "staff relations", "industrial relations"],
+    ["records management", "record keeping", "records administration"],
+    ["customer service", "customer support", "client support"],
+    ["microsoft excel", "excel", "ms excel"],
+    ["office administration", "administrative support"]
   ];
   return equivalents.some(group => group.includes(phrase) && group.some(item => text.includes(` ${item} `)));
 }
