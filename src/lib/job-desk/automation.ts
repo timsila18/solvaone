@@ -4,6 +4,7 @@ import { scoreVacancy } from "./matching";
 import { applicationScopeHold, readApplicationScope } from "./application-scope";
 import { reviewCandidateMatches } from "./relevance";
 import { hasVerifiedJobDeskPayment } from "./payment";
+import { compareSubmissionCandidates, submissionRouteRank } from "./submission-priority";
 import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
 
 export type Vacancy = { id: string; provider?: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
@@ -96,7 +97,7 @@ export async function matchOrder(orderId: string) {
     if ((data ?? []).length < 1000) break;
   }
   const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
-  const candidates = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort((a, b) => b.score - a.score).slice(0, 64);
+  const candidates = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates).slice(0, 64);
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
   const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
   let refreshedSources = 0;
@@ -129,10 +130,11 @@ export async function matchOrder(orderId: string) {
   if (topError) throw new Error(topError.message);
   const routeRank = (item: NonNullable<typeof top>[number]) => {
     const vacancy = Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy;
-    return vacancy?.application_method === "email" && vacancy.email_verified && vacancy.application_email ? 2 : vacancy?.provider === "greenhouse" ? 1 : 0;
+    return vacancy ? submissionRouteRank(vacancy) : 0;
   };
   // Full-advert evidence review, not title-word percentage, qualifies these selected matches.
-  for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score).slice(0, 10)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
+  // Each task preflights independently; blocked forms must not consume a ten-job batch.
+  for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
   return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: 10, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.filter(item => item.score >= 25 && (item.vacancy.application_method === "email" && item.vacancy.email_verified && item.vacancy.application_email || item.vacancy.provider === "greenhouse")).length, refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
