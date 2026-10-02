@@ -20,6 +20,7 @@ import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/serve
 import { formatKes } from "@/lib/utils";
 import { FileDown } from "lucide-react";
 import { MatchCoverage } from "@/components/job-desk/match-coverage";
+import { ApplicationLanes } from "@/components/job-desk/application-lanes";
 
 type Question = { id: string; category: string; question: string; reason: string; required?: boolean };
 
@@ -105,6 +106,11 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
         </aside>
 
         <main id="applications" className="min-w-0 space-y-7">
+          {isJobSearch ? <ApplicationLanes items={matches.map(match => {
+            const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
+            const application = Array.isArray(match.application) ? match.application[0] : match.application;
+            return { id: match.id, title: vacancy.title, company: vacancy.company_name, status: match.status, application, outcome: application ? applicationOutcome(application) : match.status.replaceAll("_", " "), reason: application?.error_message };
+          })} /> : null}
           {isJobSearch ? <section className="border-b border-black/10 pb-5 dark:border-white/10"><h2 className="text-xl font-black">Admin exception list</h2><div className="mt-3 divide-y divide-black/10 dark:divide-white/10">{matches.filter(match => match.status === "needs_human").map(match => { const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy; const application = Array.isArray(match.application) ? match.application[0] : match.application; return <div key={match.id} className="py-3"><b>{vacancy?.title}</b><p className="my-2 whitespace-pre-wrap text-sm">{application?.error_message || "Review required before submission."}</p>{canRetrySubmission(application) ? <AutomationControls action="retry_application" id={match.id} label="Recheck and retry with saved answers" /> : <p className="text-xs">Check the previous outcome before retrying to avoid duplicate applications.</p>}</div>; })}</div>{!matches.some(match => match.status === "needs_human") ? <p className="mt-2 text-sm">No application exceptions recorded.</p> : null}</section> : null}
           <MatchCoverage result={tasks?.find(task => task.task_type === "match" && task.status === "succeeded")?.result} />
           {copyableJobs.length ? <CopyMatches jobs={copyableJobs} /> : null}
