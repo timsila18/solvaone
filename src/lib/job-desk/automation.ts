@@ -174,6 +174,10 @@ export async function matchOrder(orderId: string) {
     return preflight;
   });
   const candidates = screened.ready;
+  // Preserve deferred schema/connection errors as well as explicit missing answers.
+  for (const { candidate, reason } of screened.skipped) {
+    if (!blockedQuestions.has(candidate.vacancy.id)) blockedQuestions.set(candidate.vacancy.id, [reason]);
+  }
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
   const automaticShortlist = reviewedShortlist(candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] })));
   const assistedPool = rotatingReviewBatch([...pool.filter(item => submissionRouteRank(item.vacancy) === 0), ...screened.skipped.map(item => item.candidate)], Math.floor(Date.now() / 7200000));
