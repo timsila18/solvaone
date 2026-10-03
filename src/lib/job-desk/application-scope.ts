@@ -1,5 +1,6 @@
 import { normalizeRoleLanguage } from "./role-language";
 import { authorizedGeneralRole, generalJobFamilies } from "./general-jobs";
+import { authorizedAdjacentRole } from "./search-lanes";
 
 export type ApplicationScope = {
   version: 1;
@@ -19,6 +20,7 @@ export type ApplicationScope = {
   broaderSeniority?: "any" | "professional" | "senior";
   minimumMonthlyKes?: number;
   includeUnspecifiedKenyaLocations?: boolean;
+  includeAdjacentRoles?: boolean;
 };
 
 type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evidence"> & {
@@ -34,6 +36,8 @@ type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evide
   broaderSeniority?: "any" | "professional" | "senior";
   minimumMonthlyKes?: string;
   includeUnspecifiedKenyaLocations?: string;
+  includeAdjacentRoles?: string;
+  includeKenyaWide?: string;
 };
 
 const entries = (value: string) => value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
@@ -51,7 +55,8 @@ export function createApplicationScope(input: ScopeInput): ApplicationScope {
   return {
     version: 1,
     targetRoles,
-    preferredLocations: locationEntries(entries(input.preferredLocations)),
+    preferredLocations: input.includeKenyaWide === "true" ? ["Kenya"] : locationEntries(entries(input.preferredLocations)),
+    includeAdjacentRoles: input.includeAdjacentRoles === "true",
     includeUnspecifiedKenyaLocations: input.includeUnspecifiedKenyaLocations === "true",
     remotePreference: input.remotePreference,
     excludedEmployers: entries(input.excludedEmployers),
@@ -74,6 +79,7 @@ export function readApplicationScope(details: unknown): ApplicationScope | null 
   const scope = (details as { applicationScope?: unknown }).applicationScope;
   if (!scope || typeof scope !== "object") return null;
   const value = scope as Partial<ApplicationScope>;
+  if (value.includeAdjacentRoles !== undefined && typeof value.includeAdjacentRoles !== "boolean") return null;
   if (value.includeGeneralRoles !== undefined && typeof value.includeGeneralRoles !== "boolean") return null;
   if (value.includeGeneralRoles && (!Array.isArray(value.generalRoleFamilies) || !value.generalRoleFamilies.length || value.generalRoleFamilies.some(id => !generalJobFamilies.some(family => family.id === id)))) return null;
   if (value.includeUnspecifiedKenyaLocations !== undefined && typeof value.includeUnspecifiedKenyaLocations !== "boolean") return null;
@@ -102,7 +108,7 @@ export function applicationScopeHold(scope: ApplicationScope, vacancy: {
   if (scope.excludedKeywords.some((item) => advert.includes(normalize(item)))) return "Vacancy conflicts with a client exclusion.";
   const vacancyTerms = terms(vacancy.title);
   const authorizedRoles = [...scope.targetRoles, ...(scope.includeBroaderRoles ? scope.broaderRoles ?? [] : [])];
-  if (!authorizedGeneralRole(scope, vacancy.title) && !authorizedRoles.some((role) => {
+  if (!authorizedGeneralRole(scope, vacancy.title) && !authorizedAdjacentRole(scope, vacancy.title) && !authorizedRoles.some((role) => {
     const roleTerms = terms(role);
     const overlap = roleTerms.filter((term) => vacancyTerms.includes(term)).length;
     return roleTerms.length > 0 && overlap >= Math.min(2, roleTerms.length);

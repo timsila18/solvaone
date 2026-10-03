@@ -9,7 +9,17 @@ const source = fs.readFileSync(path.resolve(__dirname, "../src/lib/job-desk/appl
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const moduleInstance = new Module("job-desk-application-scope", module);
 const requireOriginal = moduleInstance.require.bind(moduleInstance);
+const helpers = new Map();
+function localHelper(id) {
+  if (helpers.has(id)) return helpers.get(id).exports;
+  const helper = new Module(id, module);
+  helpers.set(id, helper);
+  helper.require = dependency => dependency.startsWith("./") ? localHelper(dependency) : requireOriginal(dependency);
+  helper._compile(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, `../src/lib/job-desk/${id.slice(2)}.ts`), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, `${id}.js`);
+  return helper.exports;
+}
 moduleInstance.require = id => {
+  if (id === "./search-lanes") return localHelper(id);
   if (id === "./general-jobs") {
     const helper = new Module("general-jobs", module);
     helper._compile(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, "../src/lib/job-desk/general-jobs.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, "general-jobs.js");

@@ -72,8 +72,10 @@ async function runCase(changes = {}, application = null, cvStatus = "approved") 
   state.job_desk_tasks = [{ id: "task", order_id: "order", task_type: "match", status: "running" }];
   assert.equal((await recoverUnderfilledSearches()).queued, 0);
   state.job_desk_tasks = [];
-  state.job_desk_applications = Array.from({ length: 10 }, (_, i) => ({ order_id: "order", status: "submitted", provider_message_id: `provider-${i}`, provider_response: { delivery: { event: "email.delivered" } } }));
+  state.job_desk_applications = Array.from({ length: 10 }, (_, i) => ({ match_id: `match-${i}`, order_id: "order", status: "submitted", provider_message_id: `provider-${i}`, provider_response: { delivery: { event: "email.delivered" } } }));
   assert.equal((await recoverUnderfilledSearches()).queued, 0);
+  state.job_desk_applications.forEach(application => { application.match_id = "same-match"; });
+  assert.equal((await recoverUnderfilledSearches()).queued, 1);
   state.job_desk_applications = [{ order_id: "order", status: "submitted" }];
   assert.equal((await recoverUnderfilledSearches()).zeroSubmissions, 1);
   state.job_desk_clients[0].consent_to_process = false;

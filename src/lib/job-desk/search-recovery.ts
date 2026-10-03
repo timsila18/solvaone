@@ -3,7 +3,7 @@ import { enqueueTask } from "./automation";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { readApplicationScope } from "./application-scope";
 import { discoveryWindow } from "./worker-lifecycle";
-import { successfulDelivery } from "./application-progress";
+import { successfulDelivery, distinctSuccessfulDeliveries } from "./application-progress";
 
 export const hasSubmissionEvidence = successfulDelivery;
 
@@ -23,9 +23,9 @@ export async function recoverUnderfilledSearches() {
     const { data: cv, error: cvError } = await db.from("job_desk_documents").select("id,status").eq("order_id", order.id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
     if (cvError) throw new Error(cvError.message);
     if (!client?.consent_to_process || cv?.status !== "approved") { summary.held++; continue; }
-    const { data: applications, error: applicationError } = await db.from("job_desk_applications").select("status,method,provider_message_id,provider_response").eq("order_id", order.id);
+    const { data: applications, error: applicationError } = await db.from("job_desk_applications").select("match_id,status,method,provider_message_id,provider_response").eq("order_id", order.id);
     if (applicationError) throw new Error(applicationError.message);
-    const submitted = (applications ?? []).filter(hasSubmissionEvidence).length;
+    const submitted = distinctSuccessfulDeliveries(applications ?? []);
     if (!submitted) summary.zeroSubmissions++;
     if (submitted >= 10) continue;
     const { data: pending, error: taskError } = await db.from("job_desk_tasks").select("id").eq("order_id", order.id).eq("task_type", "match").in("status", ["queued", "running"]).limit(1).maybeSingle();

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { load } from "cheerio";
 import { isCareerCatalogueUrl } from "./career-discovery";
+import { balancedDiscoveryLinks } from "./search-lanes";
 
 const origin = "https://www.corporatestaffing.co.ke";
 export const emailCatalogueUrl = `${origin}/category/corporate-staffing-jobs/`;
@@ -77,19 +78,19 @@ export async function fetchEmailAdverts(careerUrls: string[] = []) {
   // This catalogue currently permits public crawling. Stop if that policy changes.
   if (/^\s*Disallow:\s*\S+/im.test(await robots.text())) throw new Error("Recruiter crawl policy changed; discovery paused for review.");
   const catalogue = await fetchEmailPage(emailCatalogueUrl);
-  const discoveredLinks: string[] = [];
+  const discoveredGroups: string[][] = [];
   let catalogueFailures = 0;
   // Read career categories first so broad listings cannot consume the entire advert budget.
   for (const category of careerUrls.filter(isCareerCatalogueUrl).slice(0, 7)) {
-    try { discoveredLinks.push(...emailAdvertLinks(await fetchEmailPage(category)).slice(0, 20)); }
+    try { discoveredGroups.push(emailAdvertLinks(await fetchEmailPage(category))); }
     catch { catalogueFailures++; }
   }
-  discoveredLinks.push(...emailAdvertLinks(catalogue));
+  discoveredGroups.push(emailAdvertLinks(catalogue));
   for (const page of emailCataloguePages(catalogue)) {
-    try { discoveredLinks.push(...emailAdvertLinks(await fetchEmailPage(page))); }
+    try { discoveredGroups.push(emailAdvertLinks(await fetchEmailPage(page))); }
     catch { catalogueFailures++; }
   }
-  const links = [...new Set(discoveredLinks)].slice(0, 100);
+  const links = balancedDiscoveryLinks(discoveredGroups, 100, Math.floor(Date.now() / 7200000));
   if (!links.length) throw new Error("Recruiter catalogue contains no recognizable adverts; retained previous listings.");
   const results: NonNullable<ReturnType<typeof parseEmailAdvert>>[] = [];
   let failures = 0;

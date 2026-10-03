@@ -2,6 +2,8 @@ import { z } from "zod";
 import { generalJobFamilies } from "./general-jobs";
 
 export const broaderPreferenceFields = {
+  includeAdjacentRoles: z.enum(["true", "false"]).optional().default("false"),
+  includeKenyaWide: z.enum(["true", "false"]).optional().default("false"),
   includeGeneralRoles: z.enum(["true", "false"]).optional().default("false"),
   generalRoleFamilies: z.string().trim().max(300).optional().default(""),
   includeBroaderRoles: z.enum(["true", "false"]).optional().default("false"),

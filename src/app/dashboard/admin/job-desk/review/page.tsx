@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
-import { zeroDeliveryReview } from "@/lib/job-desk/delivery-review";
+import { underTargetDeliveryReview } from "@/lib/job-desk/delivery-review";
 
 export default async function JobDeskReviewPage() {
   const user = await getCurrentUser();
@@ -25,17 +25,17 @@ export default async function JobDeskReviewPage() {
   const vacancyCount = vacanciesResult.count ?? 0;
   const { data: activeOrders, error: activeError } = await db.from("job_desk_orders").select("id,status,created_at,payment_status,amount,payment_reference,application_authorized,service_details,client:job_desk_clients(full_name)").eq("service_type", "job_search_full").in("payment_status", ["paid", "waived"]).not("status", "in", "(completed,cancelled,paused,awaiting_payment)").order("created_at").limit(500);
   if (activeError) throw new Error("Could not load daily delivery review.");
-  const applications: { order_id: string; status: string; method: string; provider_message_id: string | null; provider_response: unknown }[] = [];
+  const applications: { order_id: string; match_id: string; status: string; method: string; provider_message_id: string | null; provider_response: unknown }[] = [];
   if (activeOrders?.length) {
     for (let start = 0; start < 10000; start += 1000) {
-      const { data, error } = await db.from("job_desk_applications").select("id,order_id,status,method,provider_message_id,provider_response").in("order_id", activeOrders.map(order=>order.id)).order("id").range(start,start+999);
+      const { data, error } = await db.from("job_desk_applications").select("id,match_id,order_id,status,method,provider_message_id,provider_response").in("order_id", activeOrders.map(order=>order.id)).order("id").range(start,start+999);
       if (error) throw new Error("Could not verify delivery evidence for the daily review.");
       applications.push(...(data ?? []));
       if ((data ?? []).length < 1000) break;
       if (start === 9000) throw new Error("Delivery review exceeds its safe reporting limit.");
     }
   }
-  const zeroDeliveryOrders = (activeOrders ?? []).map(order => ({ order, review: zeroDeliveryReview(order, applications.filter(application=>application.order_id===order.id)) })).filter(item=>item.review);
+  const zeroDeliveryOrders = (activeOrders ?? []).map(order => ({ order, review: underTargetDeliveryReview(order, applications.filter(application=>application.order_id===order.id)) })).filter(item=>item.review).sort((a, b) => Number(a.review!.delivered > 0) - Number(b.review!.delivered > 0) || b.review!.ageHours - a.review!.ageHours);
   const nameByOrder = new Map(orders.map((order) => [order.id, order.client?.[0]?.full_name]));
 
   return <AppShell email={user.email} isAdmin><div className="mx-auto max-w-5xl py-6">
@@ -43,9 +43,9 @@ export default async function JobDeskReviewPage() {
     <h1 className="mt-2 text-3xl font-black">Needs your attention</h1>
     <p className="mt-2 text-sm text-black/60 dark:text-white/60">Work from top to bottom. Automated processing continues for the rest of the queue.</p>
     <div className="mt-7 space-y-8">
-      <ReviewSection title="Daily review: no delivered applications" count={zeroDeliveryOrders.length} empty="No unpaid-delivery issues in the reviewed paid orders.">
-        <p className="py-3 text-sm">Oldest first. Orders waiting 24 hours or more are flagged overdue. Email-provider acceptance is not confirmed delivery. Up to 500 active paid orders are reviewed.</p>
-        {zeroDeliveryOrders.map(({order,review}) => { const client = Array.isArray(order.client) ? order.client[0] : order.client; return <ReviewRow key={order.id} title={`${client?.full_name ?? "Client"} · ${review!.ageHours} hours${review!.overdue ? " · Overdue" : ""}`} description={review!.nextAction} href={`/dashboard/admin/job-desk/${order.id}`} action="Resolve next step" />; })}
+      <ReviewSection title="Delivery target: orders below ten" count={zeroDeliveryOrders.length} empty="No under-target issues in the reviewed paid orders.">
+        <p className="py-3 text-sm">Zero-delivery clients first, then oldest orders. Orders waiting 24 hours or more are flagged overdue. Provider acceptance is not confirmed delivery. Up to 500 active paid orders are reviewed.</p>
+        {zeroDeliveryOrders.map(({order,review}) => { const client = Array.isArray(order.client) ? order.client[0] : order.client; return <ReviewRow key={order.id} title={`${client?.full_name ?? "Client"} · ${review!.delivered}/10 verified · ${review!.ageHours} hours${review!.overdue ? " · Overdue" : ""}`} description={review!.nextAction} href={`/dashboard/admin/job-desk/${order.id}`} action="Resolve next step" />; })}
       </ReviewSection>
       <ReviewSection title="Failed processing" count={tasksResult.count ?? 0} empty="No failed tasks.">
         {tasks.map((task) => <ReviewRow key={task.id} title={`${task.task_type.replaceAll("_", " ")} failed`} description={task.last_error || "Check the order and retry after correcting the cause."} href={task.order_id ? `/dashboard/admin/job-desk/${task.order_id}` : "/dashboard/admin/job-desk/vacancies"} action="Review failure" />)}

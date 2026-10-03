@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { BroaderRoleFields } from "./broader-role-fields";
 import type { ApplicationScope } from "@/lib/job-desk/application-scope";
+import { searchLanePlan } from "@/lib/job-desk/search-lanes";
 
 type Props = {
   orderId: string;
@@ -49,6 +50,7 @@ export function ScopeAuthorizationForm(props: Props) {
   }
 
   return props.authorized && !editing ? <div className="space-y-2">
+    {props.scope && <ul className="space-y-2 text-xs">{searchLanePlan(props.scope).map(lane => <li key={lane.id}><strong>{lane.label}:</strong> {lane.titles.join(", ")}</li>)}</ul>}
     <p className="text-xs leading-5">Jobs inside this recorded scope can advance automatically after CV approval. Portal steps still pause for a person.</p>
     <button type="button" onClick={revoke} disabled={busy} className="text-xs font-bold text-brand-blue disabled:opacity-50">Stop automatic applications</button>
     <button type="button" onClick={() => setEditing(true)} className="block text-xs font-bold text-brand-blue">Update accepted roles and general-job choices</button>

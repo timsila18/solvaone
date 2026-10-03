@@ -9,10 +9,12 @@ const db = postgres({ host: url.hostname, port: Number(url.port), database: "pos
 try {
   await db.unsafe("create extension if not exists pg_cron");
   await db.unsafe("create extension if not exists pg_net with schema extensions");
-  const command = `select net.http_get(url := 'https://solvaone.co.ke/api/job-desk/worker', headers := jsonb_build_object('Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'job_desk_cron_secret')))`;
+  const command = `select net.http_get(url := 'https://solvaone.co.ke/api/job-desk/worker', timeout_milliseconds := 300000, headers := jsonb_build_object('Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'job_desk_cron_secret')))`;
   const [{ job_id: jobId }] = await db`select cron.schedule(${"solvaone-job-desk-worker"}, ${"*/5 * * * *"}, ${command}) as job_id`;
-  const [request] = await db.unsafe(command);
-  console.log(`Job Desk cron job ${jobId}; initial HTTP request ${request.http_get}`);
+  if (!process.argv.includes("--schedule-only")) {
+    const [request] = await db.unsafe(command);
+    console.log(`Job Desk cron job ${jobId}; initial HTTP request ${request.http_get}`);
+  } else console.log(`Job Desk cron job ${jobId}; configured five-minute HTTP timeout without triggering an extra run.`);
 } finally {
   await db.end();
 }

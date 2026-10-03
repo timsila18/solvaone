@@ -5,6 +5,7 @@ export function MatchCoverage({ result }: { result: unknown }) {
   const coverage = (result as { coverage?: Record<string, unknown> } | null)?.coverage;
   if (!coverage || typeof coverage.suitable !== "number") return null;
   const suitable = coverage.suitable;
+  const lanes = Array.isArray(coverage.lanes) ? coverage.lanes as Array<{ id: string; label: string; ranked: number; suitable: number }> : [];
   const supported = Number(coverage.supported ?? 0);
   const filters = Array.isArray(coverage.filterReasons) ? coverage.filterReasons as Array<{ reason: string; count: number }> : [];
   const scope = coverage.searchScope as { roles?: string[]; locations?: string[]; arrangement?: string } | undefined;
@@ -13,6 +14,7 @@ export function MatchCoverage({ result }: { result: unknown }) {
   const skipped = Array.isArray(coverage.skippedExamples) ? coverage.skippedExamples as Array<{ title: string; company: string; reason: string }> : [];
   return <section className="border-b border-black/10 py-5 dark:border-white/10" aria-label="Matching coverage">
     <h2 className="text-lg font-bold">Latest matching check</h2>
+    {lanes.length > 0 && <dl className="mt-3 grid gap-2 sm:grid-cols-2">{lanes.map(lane => <div key={lane.id} className="text-sm"><dt className="font-bold">{lane.label}</dt><dd>{lane.ranked} candidates · {lane.suitable} reviewed suitable</dd></div>)}</dl>}
     {scope && <p className="mt-2 text-sm font-bold">Searching: {scope.roles?.join(", ")} · {scope.locations?.join(", ")} · {scope.arrangement}</p>}
     <p className="mt-2 text-sm">{Number(coverage.recentApproved ?? 0)} recent approved listings · {Number(coverage.scopeEligible ?? 0)} within authorization · {suitable} suitable · {supported} supported submission candidates</p>
     <p className="mt-2 text-sm">Target: {Number(coverage.shortlistTarget ?? 20)} reviewed shortlist matches, then {Number(coverage.target ?? 10)} applications. {Number(coverage.evidenceCandidates ?? 0)} candidates reviewed against the CV and full advert requirements.</p>

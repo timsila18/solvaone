@@ -1,4 +1,5 @@
 export type DeliveryApplication = {
+  match_id?: string;
   status?: string; method?: string; provider_message_id?: string | null;
   provider_response?: unknown; error_message?: string | null;
 };
@@ -21,6 +22,10 @@ export function deliveryStage(application?: DeliveryApplication | null) {
 
 export function successfulDelivery(application?: DeliveryApplication | null) {
   return ["delivered", "confirmed"].includes(deliveryStage(application));
+}
+
+export function distinctSuccessfulDeliveries(applications: DeliveryApplication[]) {
+  return new Set(applications.filter(successfulDelivery).filter(application => application.match_id).map(application => application.match_id)).size;
 }
 
 export function applicationProgress(matches: ProgressMatch[], shortlist: { id: string }[] = []) {

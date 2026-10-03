@@ -11,6 +11,8 @@ export function BroaderRoleFields({ initial }: { initial?: ApplicationScope | nu
   const field = "w-full rounded border border-black/20 bg-white p-3 text-sm text-black dark:border-white/20";
   return <fieldset className="mt-5 space-y-4 border-t border-black/10 pt-4 dark:border-white/10">
     <legend className="text-sm font-bold">Broader opportunities</legend>
+    <label className="flex items-start gap-3 text-sm"><input type="checkbox" name="includeAdjacentRoles" value="true" defaultChecked={initial?.includeAdjacentRoles} className="mt-1 h-4 w-4 accent-brand-blue" /><span>Include adjacent careers supported by my actual skills and experience</span></label>
+    <label className="flex items-start gap-3 text-sm"><input type="checkbox" name="includeKenyaWide" value="true" defaultChecked={initial?.preferredLocations.some(location => location.toLowerCase() === "kenya")} className="mt-1 h-4 w-4 accent-brand-blue" /><span>Accept all Kenyan locations instead of only the cities above</span></label>
     <label className="flex items-start gap-3 text-sm"><input type="checkbox" name="includeBroaderRoles" value="true" checked={enabled} onChange={event => setEnabled(event.target.checked)} className="mt-1 h-4 w-4 accent-brand-blue" /><span>Include broader roles that match my transferable skills</span></label>
     {enabled ? <div className="grid gap-4 sm:grid-cols-2">
       <label className="grid gap-2 text-sm font-bold sm:col-span-2">Accepted broader job titles<input name="broaderRoles" defaultValue={initial?.broaderRoles?.join(", ")} required maxLength={1000} placeholder="Customer support, sales support, operations coordinator" className={field} /></label>

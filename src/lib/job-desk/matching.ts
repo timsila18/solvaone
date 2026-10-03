@@ -1,5 +1,6 @@
 import { normalizeRoleLanguage } from "./role-language";
 import { authorizedGeneralRole, candidateHasSecondaryEducation, entryLevelAdvert } from "./general-jobs";
+import { authorizedAdjacentRole } from "./search-lanes";
 
 export type MatchableVacancy = { title: string; description: string; location: string; workplace_type: string };
 
@@ -91,7 +92,7 @@ export function vacancyEligibility(vacancy: MatchableVacancy, profile: Record<st
   return null;
 }
 
-export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, unknown>, scope?: { targetRoles?: string[]; preferredLocations?: string[]; remotePreference?: string; includeBroaderRoles?: boolean; broaderRoles?: string[]; broaderSeniority?: string; minimumMonthlyKes?: number; includeUnspecifiedKenyaLocations?: boolean; includeGeneralRoles?: boolean; generalRoleFamilies?: string[] } | null) {
+export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, unknown>, scope?: { targetRoles?: string[]; preferredLocations?: string[]; remotePreference?: string; includeAdjacentRoles?: boolean; includeBroaderRoles?: boolean; broaderRoles?: string[]; broaderSeniority?: string; minimumMonthlyKes?: number; includeUnspecifiedKenyaLocations?: boolean; includeGeneralRoles?: boolean; generalRoleFamilies?: string[] } | null) {
   const general = scope ? authorizedGeneralRole(scope, vacancy.title) : false;
   const scopedProfile = {
     ...profile,
@@ -112,7 +113,7 @@ export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, 
   const titleWords = words(vacancy.title);
   const description = vacancy.description.toLowerCase();
   const overlap = Math.max(0, ...supportedTitles.map((title) => [...words(title)].filter((word) => titleWords.has(word)).length));
-  const broaderOverlap = scope?.includeBroaderRoles && (scope.broaderRoles ?? []).some(title => {
+  const broaderOverlap = (scope && authorizedAdjacentRole({ ...scope, targetRoles: scope.targetRoles ?? list(profile.target_job_titles) }, vacancy.title)) || scope?.includeBroaderRoles && (scope.broaderRoles ?? []).some(title => {
     const terms = [...words(title)];
     return terms.length > 0 && terms.every(term => titleWords.has(term));
   });
