@@ -123,7 +123,7 @@ export function JobDeskIntakeForm() {
           <div><h2 className="text-lg font-black">CV intake</h2><p className="text-sm text-black/55 dark:text-white/55">PDF, DOCX, DOC, or TXT up to 10MB.</p></div>
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <Field label="Original CV"><Input name="cvFile" type="file" required accept=".pdf,.doc,.docx,.txt" className="py-2" /></Field>
+          <Field label="Original CV"><Input name="cvFile" type="file" required accept=".pdf,.doc,.docx,.txt" className="py-2" disabled={reading || busy} onChange={(event) => { if (event.target.files?.length) void prefill(); }} /></Field>
           <Field label="Pasted CV text (recommended for scanned PDF or DOC)"><Textarea name="pastedCvText" placeholder="Paste only when the uploaded file may not contain selectable text." /></Field>
         </div>
         <button type="button" onClick={prefill} disabled={reading || busy} className="mt-4 inline-flex items-center gap-2 rounded border border-brand-blue px-4 py-2 text-sm font-bold text-brand-blue disabled:opacity-50">{reading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanText className="h-4 w-4" />}{reading ? "Reading CV..." : "Read CV and fill details"}</button>
@@ -153,7 +153,7 @@ export function JobDeskIntakeForm() {
       </section> : <><input name="excludedEmployers" type="hidden" value="" /><input name="excludedRoles" type="hidden" value="" /><input name="excludedKeywords" type="hidden" value="" /><input name="authorizationEvidence" type="hidden" value="" /></>}
 
       {error ? <p role="alert" className="rounded-lg border border-black bg-black p-3 text-sm font-semibold text-white dark:border-white dark:bg-white dark:text-black">{error}</p> : null}
-      <Button type="submit" disabled={busy} className="h-12 px-6">
+      <Button type="submit" disabled={busy || reading} className="h-12 px-6">
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <BriefcaseBusiness className="h-4 w-4" />}
         {busy ? "Creating intake..." : "Create Job Desk order"}
       </Button>
