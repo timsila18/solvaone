@@ -25,6 +25,10 @@ const evidenceGroups = [
   ["onboarding", "employee onboarding", "staff onboarding"],
   ["microsoft excel", "ms excel", "excel"],
   ["microsoft word", "ms word"],
+  ["lesson planning", "lesson preparation", "planning lessons"],
+  ["classroom management", "managing classrooms"],
+  ["student assessment", "learner assessment", "assessing students"],
+  ["curriculum development", "curriculum design"],
 ];
 
 export function workHistoryKeywordMatches(profile: Record<string, unknown>, advert: string) {
@@ -55,7 +59,8 @@ export function documentedSkillMatches(skill: string, advert: string) {
     ["records management", "record keeping", "records administration"],
     ["customer service", "customer support", "client support"],
     ["microsoft excel", "excel", "ms excel"],
-    ["office administration", "administrative support"]
+    ["office administration", "administrative support"],
+    ...evidenceGroups.slice(-4)
   ];
   return equivalents.some(group => group.includes(phrase) && group.some(item => text.includes(` ${item} `)));
 }
@@ -79,7 +84,10 @@ export function vacancyEligibility(vacancy: MatchableVacancy, profile: Record<st
   if (explicitExclusion.test(advert) || explicitExclusion.test(location)) return "Location or work-authorization restriction may exclude a candidate based in Kenya.";
   if (remote === "remote" && vacancy.workplace_type !== "remote") return "Candidate requested remote work only.";
   if (vacancy.workplace_type === "remote") {
-    if (location && !kenya.test(location) && !worldwide.test(location) && !/^remote$/i.test(location.trim())) return "Remote role is restricted to another location.";
+    // An explicit recruiting statement can override an office-location header,
+    // but not a mandatory country restriction checked above.
+    const accessibleRecruiting = /\b(?:applicants?|candidates?|applications?)\s+(?:based in |living in |located in |from )?(?:kenya|east africa|africa|anywhere in the world|worldwide)\s+(?:are\s+)?(?:welcome|eligible|accepted|encouraged to apply)\b|\b(?:open to|accepting applications from|hiring (?:in|across))\s+(?:candidates? (?:in|from)\s+)?(?:kenya|east africa|africa|anywhere in the world|worldwide)\b/i.test(advert);
+    if (location && !kenya.test(location) && !worldwide.test(location) && !/^remote$/i.test(location.trim()) && !accessibleRecruiting) return "Remote role is restricted to another location.";
   } else if (!kenya.test(location) && !(location === "" && kenya.test(advert))) return "On-site or unspecified role has no clear Kenya eligibility.";
   if (locations.length && vacancy.workplace_type !== "remote" && !locations.some((item) => location.includes(item) || item.includes(location)) && !locations.includes("kenya")) return "Role is outside preferred locations.";
   const structured = (profile.structured_profile ?? {}) as Record<string, unknown>;

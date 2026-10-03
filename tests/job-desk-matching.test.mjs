@@ -1,7 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { documentedSkillMatches, expiredDeadline, scoreVacancy, submissionHoldReason, workHistoryKeywordMatches } from "../src/lib/job-desk/matching.ts";
+import { documentedSkillMatches, expiredDeadline, scoreVacancy, submissionHoldReason, workHistoryKeywordMatches, vacancyEligibility } from "../src/lib/job-desk/matching.ts";
 import { applicationScopeHold, createApplicationScope } from "../src/lib/job-desk/application-scope.ts";
+
+test("educator titles and teaching evidence reach review within the saved scope", () => {
+  const scope = createApplicationScope({ targetRoles: "English and Literature Educator", preferredLocations: "Ruaka, Kenya", remotePreference: "remote", channel: "admin_recorded", evidence: "Client instructions", excludedEmployers: "", excludedRoles: "", excludedKeywords: "" });
+  const vacancy = { title: "English Teacher", company_name: "School", description: "Lesson preparation and learner assessment", location: "Remote", workplace_type: "remote" };
+  const profile = { structured_profile: { skills: ["Lesson planning", "Student assessment"] } };
+  assert.equal(applicationScopeHold(scope, vacancy), null);
+  assert.ok(scoreVacancy(vacancy, profile, scope).score >= 60);
+  assert.equal(documentedSkillMatches("Lesson planning", vacancy.description), true);
+  assert.match(applicationScopeHold(scope, { ...vacancy, title: "Software Engineer" }), /outside/);
+  assert.match(vacancyEligibility({ ...vacancy, workplace_type: "onsite", location: "Ruaka, Kenya" }, { remote_preference: "remote" }), /remote work only/);
+});
+
+test("explicit Kenya remote recruiting overrides headquarters, not work restrictions", () => {
+  const vacancy = { title: "English Teacher", location: "London", workplace_type: "remote", description: "Candidates based in Kenya are welcome. Lesson planning required." };
+  assert.equal(vacancyEligibility(vacancy, {}), null);
+  assert.match(vacancyEligibility({ ...vacancy, description: "Global company with clients in Kenya." }, {}), /restricted/);
+  assert.match(vacancyEligibility({ ...vacancy, description: vacancy.description + " Applicants must be based in the UK." }, {}), /restriction/);
+  assert.match(vacancyEligibility({ ...vacancy, description: vacancy.description + " Application deadline: 2025-01-10" }, {}), /deadline/);
+});
 
 test("customer success wording reaches full review without bypassing country eligibility", () => {
   const scope = createApplicationScope({ targetRoles: "Customer service", preferredLocations: "International", remotePreference: "remote", channel: "admin_recorded", evidence: "Remote customer work", excludedEmployers: "", excludedRoles: "", excludedKeywords: "" });
