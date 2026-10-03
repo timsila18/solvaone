@@ -3,6 +3,12 @@ import { compareSubmissionCandidates, type SubmissionRoute } from "./submission-
 export const SHORTLIST_TARGET = 20;
 export const APPLICATION_TARGET = 10;
 
+export function rotatingReviewBatch<T>(candidates: T[], window: number, size = 10) {
+  if (candidates.length <= size) return candidates;
+  const offset = (window % Math.ceil(candidates.length / size)) * size;
+  return candidates.slice(offset, offset + size);
+}
+
 type Application = { status: string; provider_message_id?: string | null; provider_response?: unknown };
 export function occupiesApplicationSlot(match: { id: string; status: string; application?: Application | Application[] | null }, queuedPreparation: Set<string | undefined>) {
   const applications = Array.isArray(match.application) ? match.application : match.application ? [match.application] : [];

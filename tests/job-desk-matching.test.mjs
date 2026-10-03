@@ -3,6 +3,16 @@ import test from "node:test";
 import { documentedSkillMatches, expiredDeadline, scoreVacancy, submissionHoldReason, workHistoryKeywordMatches } from "../src/lib/job-desk/matching.ts";
 import { applicationScopeHold, createApplicationScope } from "../src/lib/job-desk/application-scope.ts";
 
+test("customer success wording reaches full review without bypassing country eligibility", () => {
+  const scope = createApplicationScope({ targetRoles: "Customer service", preferredLocations: "International", remotePreference: "remote", channel: "admin_recorded", evidence: "Remote customer work", excludedEmployers: "", excludedRoles: "", excludedKeywords: "" });
+  const vacancy = { title: "Customer Success Specialist", company_name: "Employer", description: "Customer training and account management", location: "Worldwide", workplace_type: "remote" };
+  const profile = { structured_profile: { skills: ["Account Management"], experience: [{ jobTitle: "Customer Experience Lead" }] } };
+  assert.equal(applicationScopeHold(scope, vacancy), null);
+  assert.ok(scoreVacancy(vacancy, profile, scope).score >= 25);
+  assert.equal(scoreVacancy({ ...vacancy, location: "Remote, United States" }, profile, scope).score, 0);
+  assert.match(applicationScopeHold(scope, { ...vacancy, title: "Software Engineer" }), /outside/);
+});
+
 test("equivalent role names pass both scope and ranking without authorizing other careers", () => {
   const scope = createApplicationScope({ targetRoles: "HR Officer, Admin Officer", preferredLocations: "Kenya", remotePreference: "flexible", channel: "admin_recorded", evidence: "Client instructions", excludedEmployers: "", excludedRoles: "", excludedKeywords: "" });
   const vacancy = { title: "Human Resources Officer", company_name: "Employer", description: "Payroll administration and recruitment", location: "Nairobi, Kenya", workplace_type: "onsite" };

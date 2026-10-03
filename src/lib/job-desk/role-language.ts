@@ -5,7 +5,7 @@ export function normalizeRoleLanguage(value: string) {
     .replace(/\bhuman resources\b/g, "human resource")
     .replace(/\badmin(?:istrative)?\b/g, "administration")
     .replace(/\brecruiting\b|\btalent acquisition\b/g, "recruitment")
-    .replace(/\bcustomer (?:care|support|experience|relations)\b|\bclient (?:care|support|service)\b/g, "customer service")
+    .replace(/\bcustomer (?:care|support|experience|relations|success)\b|\bclient (?:care|support|service|success)\b/g, "customer service")
     .replace(/\bfront[ -]?desk\b|\breception(?:\s+officer|\s+assistant)?\b/g, "receptionist")
     .replace(/\b(?:fuel|service|filling|gas) station\b/g, "petrol station")
     .replace(/\bsales (?:representative|rep|consultant)\b/g, "sales executive")

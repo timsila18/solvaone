@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { APPLICATION_TARGET, SHORTLIST_TARGET, occupiesApplicationSlot, reviewedShortlist, screeningBatch } from "../src/lib/job-desk/match-shortlist.ts";
+import { APPLICATION_TARGET, SHORTLIST_TARGET, occupiesApplicationSlot, reviewedShortlist, screeningBatch, rotatingReviewBatch } from "../src/lib/job-desk/match-shortlist.ts";
+
+test("assisted review eventually examines every candidate rather than repeating the first five", () => {
+  const candidates = Array.from({ length: 23 }, (_, i) => i);
+  const examined = new Set([0, 1, 2].flatMap(window => rotatingReviewBatch(candidates, window)));
+  assert.equal(examined.size, 23);
+  assert.deepEqual(rotatingReviewBatch(candidates, 3), candidates.slice(0, 10));
+  assert.deepEqual(rotatingReviewBatch([], 1), []);
+});
 
 test("twenty distinct reviewed candidates are ranked for a ten-application target", () => {
   const candidates = Array.from({ length: 30 }, (_, i) => ({ score: i, vacancy: { id: String(i), application_method: "email", email_verified: true, application_email: "jobs@example.com" } }));

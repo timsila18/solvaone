@@ -6,7 +6,7 @@ import { reviewCandidateMatches } from "./relevance";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { compareSubmissionCandidates, submissionRouteRank } from "./submission-priority";
 import { screenAutomaticCandidates } from "./automatic-screen";
-import { APPLICATION_TARGET, SHORTLIST_TARGET, occupiesApplicationSlot, reviewedShortlist, screeningBatch } from "./match-shortlist";
+import { APPLICATION_TARGET, SHORTLIST_TARGET, occupiesApplicationSlot, reviewedShortlist, screeningBatch, rotatingReviewBatch } from "./match-shortlist";
 import { draftableQuestions, prohibitsAnswerDrafting } from "./question-policy";
 import { answersForMatch } from "./assisted-answers";
 import { submissionPreflight } from "./submission-preflight";
@@ -148,7 +148,14 @@ export async function matchOrder(orderId: string) {
   const committedSlots = committedMatches.length;
   for (const item of committedMatches) handledIds.add(item.vacancy_id);
   const remainingSlots = Math.max(0, APPLICATION_TARGET - committedSlots);
-  const pool = vacancies.filter(vacancy => !handledIds.has(vacancy.id) && (!scope || !applicationScopeHold(scope, vacancy))).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, { ...profile, approvedCvText: plainText(approved.html ?? "") }, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates);
+  const scopedVacancies = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy));
+  const ranked = scopedVacancies.filter(vacancy => !handledIds.has(vacancy.id)).map(vacancy => ({ vacancy, ...scoreVacancy(vacancy, { ...profile, approvedCvText: plainText(approved.html ?? "") }, scope) }));
+  const pool = ranked.filter(item => item.score >= 25).sort(compareSubmissionCandidates);
+  const filterReasons = new Map<string, number>();
+  for (const item of ranked.filter(item => item.score < 25)) {
+    const reason = item.gaps[0] ?? "Insufficient documented role or skill overlap.";
+    filterReasons.set(reason, (filterReasons.get(reason) ?? 0) + 1);
+  }
   const { data: client, error: clientError } = await db.from("job_desk_clients").select("full_name,email,whatsapp_phone").eq("id", order.client_id).single();
   if (clientError || !client) throw new Error(clientError?.message ?? "Candidate contact details are missing.");
   const { data: sourceRows, error: sourcesError } = await db.from("job_desk_sources").select("id,provider,site_token,active").eq("active", true);
@@ -168,7 +175,7 @@ export async function matchOrder(orderId: string) {
   const candidates = screened.ready;
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
   const automaticShortlist = reviewedShortlist(candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] })));
-  const assistedPool = [...pool.filter(item => submissionRouteRank(item.vacancy) === 0).slice(0, 5), ...screened.skipped.map(item => item.candidate).slice(0, 5)];
+  const assistedPool = rotatingReviewBatch([...pool.filter(item => submissionRouteRank(item.vacancy) === 0), ...screened.skipped.map(item => item.candidate)], Math.floor(Date.now() / 7200000));
   const assistedReview = scope && automaticShortlist.length < SHORTLIST_TARGET
     ? await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope }, assistedPool.map(item => item.vacancy))
     : new Map<string, { suitable: boolean; reason: string }>();
@@ -229,7 +236,7 @@ export async function matchOrder(orderId: string) {
   if (scope && reviewPool.length) await enqueueTask("review_matches", `review-matches:${orderId}:${approved.id}:${Math.floor(Date.now() / 7200000)}`, orderId, { vacancyIds: JSON.stringify(reviewPool.map(item => item.vacancy.id)) });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length || assisted.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
-  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: APPLICATION_TARGET, shortlistTarget: SHORTLIST_TARGET, selectedForPreparation: matches.length, assistedPackets: assisted.length, committedSlots, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length + assistedPool.length, suitable: shortlist.length, supported: automaticShortlist.length, shortlist: shortlist.map(item => ({ id: item.vacancy.id, title: item.vacancy.title, company: item.vacancy.company_name, url: item.vacancy.apply_url, score: item.score, selected: selected.has(item.vacancy.id), reasons: item.reasons })), automaticScreened: screened.ready.length + screened.skipped.length, automaticSkipped: screened.skipped.length, unsupportedRoutes: pool.filter(item => submissionRouteRank(item.vacancy) === 0).length, skippedExamples: screened.skipped.slice(0, 10).map(item => ({ title: item.candidate.vacancy.title, company: item.candidate.vacancy.company_name, reason: item.reason })), refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
+  return { count: matches.length, coverage: { rankingEligible: pool.length, alreadyHandled: scopedVacancies.length - ranked.length, filterReasons: [...filterReasons].sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ reason, count })), searchScope: { roles: scope?.targetRoles ?? profile.target_job_titles, locations: scope?.preferredLocations ?? profile.preferred_locations, arrangement: scope?.remotePreference ?? profile.remote_preference }, checkedAt: new Date().toISOString(), target: APPLICATION_TARGET, shortlistTarget: SHORTLIST_TARGET, selectedForPreparation: matches.length, assistedPackets: assisted.length, committedSlots, recentApproved: vacancies.length, scopeEligible: scopedVacancies.length, evidenceCandidates: candidates.length + assistedPool.length, suitable: shortlist.length, supported: automaticShortlist.length, shortlist: shortlist.map(item => ({ id: item.vacancy.id, title: item.vacancy.title, company: item.vacancy.company_name, url: item.vacancy.apply_url, score: item.score, selected: selected.has(item.vacancy.id), reasons: item.reasons })), automaticScreened: screened.ready.length + screened.skipped.length, automaticSkipped: screened.skipped.length, unsupportedRoutes: pool.filter(item => submissionRouteRank(item.vacancy) === 0).length, skippedExamples: screened.skipped.slice(0, 10).map(item => ({ title: item.candidate.vacancy.title, company: item.candidate.vacancy.company_name, reason: item.reason })), refreshedSources, rejectedExamples: [...candidates, ...assistedPool].filter(item => (reviewed.get(item.vacancy.id) ?? assistedReview.get(item.vacancy.id))?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: (reviewed.get(item.vacancy.id) ?? assistedReview.get(item.vacancy.id))?.reason })) } };
 }
 
 export async function reviewDeferredMatches(orderId: string, vacancyIds: string[]) {
