@@ -5,10 +5,26 @@ import { hasVerifiedJobDeskPayment } from "./payment";
 import { applicationScopeHold, readApplicationScope } from "./application-scope";
 import { batchVacancyIsCurrent } from "./batch-authorization";
 import { canRetrySubmission } from "./submission-preflight";
-import { plainText } from "./automation";
-import { answersForMatch } from "./assisted-answers";
+import { enqueueTask, plainText } from "./automation";
+import { answersForMatch, type SavedAssistedAnswers } from "./assisted-answers";
 import { readApplicantDetails } from "./applicant-details";
-import { ANSWER_DRAFT_OPERATION, ANSWER_DRAFT_PURPOSE, ANSWER_DRAFT_PROMPT, draftableQuestions, draftFingerprint, parseAnswerDrafts, prohibitsAnswerDrafting, type AnswerDraftPacket } from "./answer-drafts";
+import { ANSWER_DRAFT_OPERATION, ANSWER_DRAFT_PURPOSE, ANSWER_DRAFT_PROMPT, automaticFactualAnswers, draftableQuestions, draftFingerprint, parseAnswerDrafts, prohibitsAnswerDrafting, type AnswerDraftPacket } from "./answer-drafts";
+
+async function advanceFactualAnswers(orderId: string, matchId: string, packet: AnswerDraftPacket) {
+  const context = await loadDraftContext(orderId, matchId);
+  if (context.cv.id !== packet.cvId || context.fingerprint !== packet.fingerprint) return;
+  const safe = automaticFactualAnswers(packet.answers, context.facts);
+  if (!safe.length) return;
+  const details = context.order.service_details ?? {};
+  const existing = (details.assistedAnswers ?? {}) as Record<string, SavedAssistedAnswers>;
+  const previous = existing[matchId]?.cvId === packet.cvId ? existing[matchId].answers : [];
+  const added = safe.filter(item => !previous.some(saved => saved.question === item.question));
+  if (!added.length) return;
+  const answers = [...previous, ...added.map(({ question, answer }) => ({ question: question.replace(/\s+/g, " ").trim(), answer }))];
+  const { data, error } = await context.db.from("job_desk_orders").update({ service_details: { ...details, assistedAnswers: { ...existing, [matchId]: { cvId: packet.cvId, savedAt: new Date().toISOString(), batchId: packet.fingerprint, answers } } } }).eq("id", orderId).eq("updated_at", context.order.updated_at).select("id").maybeSingle();
+  if (error || !data) throw new Error("Order changed while saving factual answers; retry with current facts.");
+  await enqueueTask("resume_assisted", `automatic-facts:${matchId}:${packet.fingerprint}`, orderId, { matchId });
+}
 
 export async function loadDraftContext(orderId: string, matchId: string) {
   const db = createSupabaseAdminClient();
@@ -37,7 +53,10 @@ export async function processAnswerDrafts(orderId: string, matchId: string) {
   const { db, cv, fingerprint, questions, facts, advert } = context;
   const { data: previous, error: previousError } = await db.from("job_desk_ai_runs").select("id,status,started_at,token_input,token_output,output_payload").eq("order_id", orderId).eq("operation", ANSWER_DRAFT_OPERATION).eq("input_payload->>purpose", ANSWER_DRAFT_PURPOSE).eq("input_fingerprint", fingerprint).maybeSingle();
   if (previousError) throw new Error(previousError.message);
-  if (previous?.status === "succeeded") return { cached: true, matchId };
+  if (previous?.status === "succeeded") {
+    await advanceFactualAnswers(orderId, matchId, previous.output_payload as AnswerDraftPacket);
+    return { cached: true, matchId };
+  }
   if (previous?.status === "running" && Date.now() - Date.parse(previous.started_at) < 6 * 60000) return { alreadyRunning: true, matchId };
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
   const values = { order_id: orderId, operation: ANSWER_DRAFT_OPERATION, input_fingerprint: fingerprint, model_used: model, status: "running", input_payload: { purpose: ANSWER_DRAFT_PURPOSE, matchId, cvId: cv.id }, started_at: new Date().toISOString() };
@@ -56,6 +75,7 @@ export async function processAnswerDrafts(orderId: string, matchId: string) {
         const packet: AnswerDraftPacket = { cvId: cv.id, matchId, fingerprint, answers };
         const { error: saveError } = await db.from("job_desk_ai_runs").update({ status: "succeeded", output_payload: packet, token_input: inputTokens, token_output: outputTokens, total_tokens: inputTokens + outputTokens, estimated_cost: estimateCost(model, inputTokens, outputTokens), completed_at: new Date().toISOString(), error_message: null }).eq("id", run.id);
         if (saveError) throw new Error(saveError.message);
+        await advanceFactualAnswers(orderId, matchId, packet);
         return { drafted: answers.filter(answer => answer.answer).length, missing: answers.filter(answer => !answer.answer).length, matchId };
       } catch (cause) { issue = cause instanceof Error ? cause.message : "Draft validation failed"; }
     }

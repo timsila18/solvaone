@@ -10,6 +10,15 @@ export const ANSWER_DRAFT_PROMPT = `You are a careful application writer, not th
 export type AnswerDraft = { question: string; answer: string; evidence: string[]; missing: string };
 export type AnswerDraftPacket = { cvId: string; matchId: string; fingerprint: string; answers: AnswerDraft[] };
 
+export function automaticFactualAnswers(answers: AnswerDraft[], facts: string) {
+  // A model-provided citation alone cannot establish that its paraphrase is true.
+  return answers.filter(item => /(?:describe|list|what).*?(?:duties|responsibilities|skills|tools|software)/i.test(item.question)
+    && !/example|situation|case|school|grade|gender|citizen|sponsor|salary|consent/i.test(item.question)
+    && !officialStep(item.question) && !item.missing.trim()
+    && item.answer.trim().length >= 8 && item.evidence.includes(item.answer.trim())
+    && facts.includes(item.answer.trim()));
+}
+
 export function draftFingerprint(cvId: string, matchId: string, facts: string, questions: string[], advert: string) {
   return createHash("sha256").update(JSON.stringify({ version: ANSWER_DRAFT_VERSION, cvId, matchId, facts, questions, advert })).digest("hex");
 }
