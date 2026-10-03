@@ -1,5 +1,6 @@
 import { AlignmentType, BorderStyle, Document, Footer, HeadingLevel, LineRuleType, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { solvaOutputSchema } from "@/lib/solva-intelligence/types";
+import { tailorApprovedCv } from "./cv-tailoring";
 
 type CvBlock = { kind: "paragraph" | "bullet" | "subheading"; text: string };
 
@@ -31,8 +32,8 @@ function blockParagraph(block: CvBlock) {
   });
 }
 
-export async function createJobDeskCvDocx({ name, role, contact, content }: { name: string; role: string; contact: string; content: unknown }) {
-  const cv = solvaOutputSchema.parse(content);
+export async function createJobDeskCvDocx({ name, role, contact, content, vacancy }: { name: string; role: string; contact: string; content: unknown; vacancy?: { title: string; description: string } }) {
+  const cv = tailorApprovedCv(solvaOutputSchema.parse(content), vacancy);
   const sections = cv.sections
     .filter((section) => !/missing information|improvement notes|details to collect|quality notes/i.test(section.title))
     .map((section) => ({ title: section.title, blocks: blocksFromHtml(section.html) }))

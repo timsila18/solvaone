@@ -235,7 +235,7 @@ async function submitMatch(matchId: string) {
     }
     const details = readApplicantDetails(order.service_details);
     const names = client.full_name.trim().split(/\s+/);
-    const cvFile = await createJobDeskCvDocx({ name: client.full_name, role: String((profile.structured_profile as { targetHeadline?: string } | null)?.targetHeadline ?? ""), contact: [client.email, client.whatsapp_phone].filter(Boolean).join("  |  "), content: cv.structured_content });
+    const cvFile = await createJobDeskCvDocx({ name: client.full_name, role: String((profile.structured_profile as { targetHeadline?: string } | null)?.targetHeadline ?? ""), contact: [client.email, client.whatsapp_phone].filter(Boolean).join("  |  "), content: cv.structured_content, vacancy });
     if (!(await claimApplication(matchId, order.id, "portal", vacancy.apply_url))) return;
     let portalConfirmation: { confirmation: string; finalUrl?: string } | undefined;
     try {
@@ -277,7 +277,8 @@ async function submitMatch(matchId: string) {
     name: client.full_name,
     role: candidate.targetHeadline?.trim() ?? "",
     contact: [client.email, client.whatsapp_phone, candidate.location].filter(Boolean).join("  |  "),
-    content: cv.structured_content
+    content: cv.structured_content,
+    vacancy
   });
   if (!(await claimApplication(matchId, order.id, "email", vacancy.application_email))) return;
   const content = `${match.cover_letter}\n\nApplication submitted with the candidate's express authorization. Candidate contact: ${client.email ?? "Not provided"}; ${client.whatsapp_phone}.`;

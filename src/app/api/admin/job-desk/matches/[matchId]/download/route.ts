@@ -17,7 +17,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (kind !== "cv" && kind !== "letter") return NextResponse.json({ error: "Invalid document type" }, { status: 400 });
   const { matchId } = await params;
   const db = createSupabaseAdminClient();
-  const { data: match } = await db.from("job_desk_matches").select("id,order_id,authorized_at,status,cover_letter,order:job_desk_orders(payment_status,amount,payment_reference,client_id,client:job_desk_clients(full_name,email,whatsapp_phone))").eq("id", matchId).single();
+  const { data: match } = await db.from("job_desk_matches").select("id,order_id,authorized_at,status,cover_letter,vacancy:job_desk_vacancies(title,description),order:job_desk_orders(payment_status,amount,payment_reference,client_id,client:job_desk_clients(full_name,email,whatsapp_phone))").eq("id", matchId).single();
   const order = Array.isArray(match?.order) ? match.order[0] : match?.order;
   const client = Array.isArray(order?.client) ? order.client[0] : order?.client;
   if (!match || !match.authorized_at || !["authorized", "needs_human", "submitted"].includes(match.status) || !hasVerifiedJobDeskPayment(order)) return NextResponse.json({ error: "Authorized paid application required" }, { status: 403 });
@@ -28,7 +28,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!cv) return NextResponse.json({ error: "Approved CV not found" }, { status: 404 });
     const { data: profile } = await db.from("job_desk_candidate_profiles").select("structured_profile").eq("client_id", order!.client_id).maybeSingle();
     const candidate = (profile?.structured_profile ?? {}) as { targetHeadline?: string; location?: string };
-    const file = await createJobDeskCvDocx({ name, role: candidate.targetHeadline?.trim() ?? "", contact: [client?.email, client?.whatsapp_phone, candidate.location].filter(Boolean).join("  |  "), content: cv.structured_content });
+    const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
+    const file = await createJobDeskCvDocx({ name, role: candidate.targetHeadline?.trim() ?? "", contact: [client?.email, client?.whatsapp_phone, candidate.location].filter(Boolean).join("  |  "), content: cv.structured_content, vacancy });
     return new NextResponse(new Uint8Array(file), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename(name)}-cv.docx"`, "Cache-Control": "private, no-store" } });
   } else {
     if (!match.cover_letter) return NextResponse.json({ error: "Cover letter not ready" }, { status: 404 });
