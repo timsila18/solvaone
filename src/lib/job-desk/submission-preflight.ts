@@ -5,6 +5,7 @@ export type PortalQuestion = { label: string; required?: boolean; fields?: { nam
 export type SubmissionPreflight = { ready: boolean; blockers: string[]; checkedAt: string; fieldAnswers?: Record<string, string>; fieldSelections?: Record<string, string> };
 
 export function normalizeQuestion(text: string) {
+  if (typeof text !== "string") throw new Error("Employer question label is missing or invalid; official requirements need review.");
   return text.replace(/[✱*]/g, "").replace(/\s+Select\.\.\.$/i, "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
