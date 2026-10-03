@@ -24,6 +24,7 @@ import { reconcileEmailDeliveries } from "./email-delivery";
 import { recommendedSources } from "./vacancy-feeds";
 import { claimApplication } from "./submission-lock";
 import { recoverableSubmission } from "./recovery-route";
+import { loadSourceDelivery } from "./source-delivery";
 import { LETTER_PROMPT_VERSION, LETTER_WRITER_PROMPT, LETTER_REVIEW_PROMPT, letterDate, formatApplicationLetter, validateLetterBody, parseLetterReview } from "./letter-quality";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
@@ -46,6 +47,7 @@ async function checkSubmissionRequirements(matchId: string, order: any, client: 
     if (saveError) throw new Error(saveError.message);
     const { error: matchError } = await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId).in("status", ["suggested", "preparing", "authorized"]);
     if (matchError) throw new Error(matchError.message);
+    await enqueueTask("match", `replace-blocked:${order.id}:${Math.floor(Date.now() / 300000)}`, order.id);
     if (draftableQuestions(preflight.blockers).length && !prohibitsAnswerDrafting(preflight.blockers.join(" "))) {
       await enqueueTask("draft_answers", `answer-drafts:${matchId}:${approvedCv.id}`, order.id, { matchId });
     }
@@ -147,6 +149,7 @@ async function prepareMatch(matchId: string, assistedRequested = false) {
     const { data: held, error: holdError } = await db.from("job_desk_matches").update({ status: "needs_human", authorized_at: new Date().toISOString(), authorized_ip_hash: null }).eq("id", matchId).eq("status", "ready").select("id").maybeSingle();
     if (holdError) throw new Error(holdError.message);
     if (held) {
+      await enqueueTask("match", `replace-blocked:${order.id}:${Math.floor(Date.now() / 300000)}`, order.id);
       if (!prohibitsAnswerDrafting(reason) && draftableQuestions([reason]).length) await enqueueTask("draft_answers", `answer-drafts:${matchId}:${latestCv.id}`, order.id, { matchId });
     }
     return;
@@ -250,6 +253,7 @@ async function submitMatch(matchId: string) {
         return;
       }
       await db.from("job_desk_applications").update({ status: "needs_human", provider_response: { clicked: result.clicked ?? true, finalUrl: result.finalUrl }, error_message: result.reason ?? "Portal submission needs review." }).eq("match_id", matchId);
+      if (result.clicked === false) await enqueueTask("match", `replace-blocked:${order.id}:${Math.floor(Date.now() / 300000)}`, order.id);
     } catch (cause) {
       if (portalConfirmation) {
         const { error: recoveryError } = await db.from("job_desk_applications").update({ status: "submitted", provider_response: { ...portalConfirmation, clicked: true, verification_type: "portal_confirmation" }, submitted_at: new Date().toISOString(), error_message: "Portal confirmed; local confirmation required recovery." }).eq("match_id", matchId);
@@ -371,7 +375,11 @@ async function processTask(task: Task) {
     await enqueueTask("discover_email", `email-discovery:${window}`, null);
     const { data: sources, error: sourcesError } = await db.from("job_desk_sources").select("id").eq("active", true);
     if (sourcesError) throw new Error(sourcesError.message);
-    for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:${window}`, null, { sourceId: source.id });
+    const deliveryScores = await loadSourceDelivery(db);
+    for (const source of [...(sources ?? [])].sort((a, b) => (deliveryScores.get(b.id)?.priority ?? 0) - (deliveryScores.get(a.id)?.priority ?? 0))) await enqueueTask("discover", `discover:${source.id}:${window}`, null, { sourceId: source.id });
+    const { data: activeOrders, error: activeError } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").eq("service_type", "job_search_full").eq("application_authorized", true).in("status", ["approved", "active"]).limit(500);
+    if (activeError) throw new Error(activeError.message);
+    for (const order of activeOrders ?? []) if (hasVerifiedJobDeskPayment(order)) await enqueueTask("match", `delivery-search:${order.id}:${window}`, order.id);
     return { count: sources?.length ?? 0, recoveryCount, emailDelivery: await reconcileEmailDeliveries() };
   }
   throw new Error(`Unknown Job Desk task: ${task.task_type}`);

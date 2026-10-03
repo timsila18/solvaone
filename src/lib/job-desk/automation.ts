@@ -16,8 +16,9 @@ import { fetchEmailAdverts, fetchEmailPage, parseEmailAdvert } from "./email-vac
 import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
 import { careerCatalogueUrls } from "./career-discovery";
 import { adjacentRoleTitles, searchLane, searchLanePlan } from "./search-lanes";
+import { poolRank, refreshReadyPool, type Readiness } from "./ready-pool";
 
-export type Vacancy = { id: string; provider?: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
+export type Vacancy = { id: string; source_id?: string; application_readiness?: Readiness; provider?: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
 
 export function plainText(html: string) {
   return cleanText(html);
@@ -49,7 +50,7 @@ export async function discoverVacancies(sourceId: string) {
     if (items.length > 0 && parsed.length === 0) throw new Error("No official application links were found; existing vacancies were retained.");
     const { data: existing, error: existingError } = await db.from("job_desk_vacancies").select("id,source_id,company_name,title,location").eq("status", "open").or(`source_id.is.null,source_id.neq.${sourceId}`).limit(5000);
     if (existingError) throw new Error(existingError.message);
-    const { data: previous, error: previousError } = await db.from("job_desk_vacancies").select("external_id,review_status,description,source_updated_at").eq("source_id", sourceId).limit(1500);
+    const { data: previous, error: previousError } = await db.from("job_desk_vacancies").select("external_id,review_status,description,source_updated_at,application_readiness").eq("source_id", sourceId).limit(1500);
     if (previousError) throw new Error(previousError.message);
     const previousById = new Map((previous ?? []).map((item) => [item.external_id, item]));
     const existingByFingerprint = new Map((existing ?? []).map((item) => [vacancyFingerprint(item), item.id]));
@@ -60,7 +61,7 @@ export async function discoverVacancies(sourceId: string) {
       const old = previousById.get(job.external_id);
       const unchanged = old && old.description === job.description && old.source_updated_at === job.source_updated_at;
       const reviewStatus = old?.review_status === "rejected" ? "rejected" : reasons.includes("expired_deadline") ? "needs_review" : unchanged && old.review_status === "approved" && !duplicateOf ? "approved" : reasons.length ? "needs_review" : "approved";
-      return { ...job, source_id: sourceId, provider: source.provider, application_method: "portal", last_seen_at: now, status: "open", review_status: reviewStatus, review_reasons: reasons, duplicate_of: duplicateOf };
+      return { ...job, application_readiness: unchanged ? old.application_readiness : null, source_id: sourceId, provider: source.provider, application_method: "portal", last_seen_at: now, status: "open", review_status: reviewStatus, review_reasons: reasons, duplicate_of: duplicateOf };
     });
     for (let index = 0; index < rows.length; index += 100) {
       const { error: upsertError } = await db.from("job_desk_vacancies").upsert(rows.slice(index, index + 100), { onConflict: "provider,external_id" });
@@ -68,6 +69,9 @@ export async function discoverVacancies(sourceId: string) {
     }
     await db.from("job_desk_vacancies").update({ status: "closed" }).eq("source_id", sourceId).lt("last_seen_at", now);
     await db.from("job_desk_sources").update({ last_synced_at: now, last_error: null }).eq("id", sourceId);
+    const { data: poolRows, error: poolError } = await db.from("job_desk_vacancies").select("*").eq("source_id", sourceId).eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).order("id").limit(1500);
+    if (poolError) throw new Error(poolError.message);
+    await refreshReadyPool(db, rotatingReviewBatch(poolRows ?? [], Math.floor(Date.now() / 300000), 16), new Map([[sourceId, source]]), 4);
     const { data: orders } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").eq("service_type", "job_search_full").in("payment_status", ["paid", "waived"]).in("status", ["approved", "active"]).limit(500);
     for (const order of orders ?? []) if (hasVerifiedJobDeskPayment(order)) await enqueueTask("match", `match:${order.id}:${sourceId}:${now.slice(0, 13)}`, order.id);
     return rows.length;
@@ -97,6 +101,9 @@ export async function discoverEmailVacancies() {
     const { error } = await db.from("job_desk_vacancies").upsert({ ...row, duplicate_of: duplicate?.id ?? null, review_status: old?.review_status === "rejected" ? "rejected" : duplicate ? "needs_review" : row.review_status }, { onConflict: "provider,external_id" });
     if (error) throw new Error(error.message);
   }
+  const { data: emailPool, error: poolError } = await db.from("job_desk_vacancies").select("*").eq("application_method", "email").eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).order("last_seen_at", { ascending: false }).limit(100);
+  if (poolError) throw new Error(poolError.message);
+  await refreshReadyPool(db, emailPool ?? [], new Map(), 0);
   const { data: orders, error } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").eq("service_type", "job_search_full").in("status", ["approved", "active"]).limit(500);
   if (error) throw new Error(error.message);
   for (const order of orders ?? []) if (hasVerifiedJobDeskPayment(order)) await enqueueTask("match", `email-match:${order.id}:${Math.floor(Date.now() / 7200000)}`, order.id);
@@ -162,6 +169,8 @@ export async function matchOrder(orderId: string) {
   const { data: sourceRows, error: sourcesError } = await db.from("job_desk_sources").select("id,provider,site_token,active").eq("active", true);
   if (sourcesError) throw new Error(sourcesError.message);
   const sourcesById = new Map((sourceRows ?? []).map(source => [source.id, source]));
+  await refreshReadyPool(db, screeningBatch(pool.map(item => item.vacancy), Math.floor(Date.now() / 300000)), sourcesById, 8);
+  pool.sort((a, b) => poolRank(b.vacancy.application_readiness) - poolRank(a.vacancy.application_readiness) || compareSubmissionCandidates(a, b));
   const details = readApplicantDetails(order.service_details);
   const blockedQuestions = new Map<string, string[]>();
   const screened = await screenAutomaticCandidates(screeningBatch(pool.filter(item => submissionRouteRank(item.vacancy) > 0), Math.floor(Date.now() / 300000)), async item => {
@@ -169,6 +178,8 @@ export async function matchOrder(orderId: string) {
     const hold = submissionHoldReason(vacancy.application_method === "email" ? vacancy.description : "", client.email, plainText(approved.html ?? "").length);
     if (hold) return { ready: false, blockers: [hold] };
     const source = sourcesById.get(vacancy.source_id ?? "");
+    const requirementPool = vacancy.application_readiness;
+    if (requirementPool && poolRank(requirementPool) === 0 && prohibitsAnswerDrafting(requirementPool.blockers.join(" "))) return { ready: false, blockers: requirementPool.blockers };
     const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.provider, siteToken: source?.site_token, url: vacancy.apply_url, answers: details?.portalAnswers ?? "", known: buildApplicantKnown(client, details, approved.html ?? "") });
     if (!preflight.ready) blockedQuestions.set(vacancy.id, preflight.blockers);
     return preflight;

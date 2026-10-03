@@ -7,6 +7,8 @@ import { AutomationControls } from "@/components/job-desk/automation-controls";
 import { VacancyReviewControls } from "@/components/job-desk/vacancy-review-controls";
 import { recommendedSources } from "@/lib/job-desk/vacancy-feeds";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
+import { poolRank, readReadiness } from "@/lib/job-desk/ready-pool";
+import { loadSourceDelivery } from "@/lib/job-desk/source-delivery";
 
 const reviewLabels: Record<string, string> = {
   thin_description: "Details need checking",
@@ -25,6 +27,7 @@ function VacancyRow({ vacancy, status }: { vacancy: any; status: "needs_review" 
       <a href={vacancy.apply_url} target="_blank" rel="noopener noreferrer" className="font-bold text-brand-blue hover:underline">{vacancy.title}</a>
       <p className="mt-1 text-black/60 dark:text-white/60">{vacancy.company_name} · {vacancy.location || "Location not supplied"} · {vacancy.provider}</p>
       <p className="mt-1 text-xs text-black/50 dark:text-white/50">Last seen {new Date(vacancy.last_seen_at).toLocaleString()}</p>
+      {readReadiness(vacancy.application_readiness) ? <p className="mt-1 text-xs font-semibold">{poolRank(vacancy.application_readiness) === 3 ? "Simple application requirements" : readReadiness(vacancy.application_readiness)?.state === "assisted" ? "Assisted application" : "Requirements check pending"}</p> : null}
       {pending ? <p className="mt-2 text-xs font-semibold">{reasons.length ? reasons.map((reason) => reviewLabels[reason] ?? reason).join(" · ") : "Awaiting first review"}</p> : null}
     </div>
     {pending ? <VacancyReviewControls vacancyId={vacancy.id} duplicate={Boolean(vacancy.duplicate_of)} rejected={status === "rejected"} /> : <span className="text-xs font-bold text-brand-blue">Approved</span>}
@@ -37,14 +40,16 @@ export default async function VacanciesPage() {
   const db = await createSupabaseServerClient();
   const { data: account } = await db.from("users").select("role").eq("id", user.id).single();
   if (!account || !["admin", "super_admin"].includes(account.role)) redirect("/dashboard");
-  const [{ data: sources }, { data: pending }, { data: approved }, { data: rejected }, { count: openCount }, { count: reviewCount }] = await Promise.all([
+  const [{ data: sources }, { data: pending }, { data: approved }, { data: rejected }, { count: openCount }, { count: reviewCount }, { data: ready }] = await Promise.all([
     db.from("job_desk_sources").select("*").order("company_name"),
     db.from("job_desk_vacancies").select("id,title,company_name,location,provider,apply_url,last_seen_at,review_reasons,duplicate_of").eq("status", "open").eq("review_status", "needs_review").order("last_seen_at", { ascending: false }).limit(100),
-    db.from("job_desk_vacancies").select("id,title,company_name,location,provider,apply_url,last_seen_at,review_reasons,duplicate_of").eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).order("last_seen_at", { ascending: false }).limit(100),
+    db.from("job_desk_vacancies").select("id,title,company_name,location,provider,apply_url,last_seen_at,review_reasons,duplicate_of,application_readiness").eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).order("last_seen_at", { ascending: false }).limit(100),
     db.from("job_desk_vacancies").select("id,title,company_name,location,provider,apply_url,last_seen_at,review_reasons,duplicate_of").eq("status", "open").eq("review_status", "rejected").order("last_seen_at", { ascending: false }).limit(50),
     db.from("job_desk_vacancies").select("id", { count: "exact", head: true }).eq("status", "open"),
-    db.from("job_desk_vacancies").select("id", { count: "exact", head: true }).eq("status", "open").eq("review_status", "needs_review")
+    db.from("job_desk_vacancies").select("id", { count: "exact", head: true }).eq("status", "open").eq("review_status", "needs_review"),
+    db.from("job_desk_vacancies").select("id,title,company_name,location,provider,apply_url,last_seen_at,application_readiness").eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).eq("application_readiness->>state", "ready").gte("last_seen_at", new Date(Date.now() - 72 * 3600000).toISOString()).order("last_seen_at", { ascending: false }).limit(100)
   ]);
+  const sourceDelivery = await loadSourceDelivery(db);
   const configured = new Set((sources ?? []).map((source) => `${source.provider}:${source.site_token.toLowerCase()}`));
   return <AppShell email={user.email} isAdmin>
     <div className="border-b border-black/10 pb-6 dark:border-white/10">
@@ -52,6 +57,8 @@ export default async function VacanciesPage() {
       <h1 className="mt-2 text-3xl font-black">Vacancies and sources</h1>
       <p className="mt-2 text-sm text-black/60 dark:text-white/60">{openCount ?? 0} open listings · {reviewCount ?? 0} need review. Only approved, recently checked listings enter client matches.</p>
     </div>
+    <section className="border-b border-black/10 py-7 dark:border-white/10"><h2 className="text-lg font-bold">Ready to Apply pool</h2><div className="mt-3 divide-y divide-black/10 dark:divide-white/10">{ready?.filter(vacancy => poolRank(vacancy.application_readiness) === 3).length ? ready.filter(vacancy => poolRank(vacancy.application_readiness) === 3).map(vacancy => <VacancyRow key={vacancy.id} vacancy={vacancy} status="approved" />) : <p className="text-sm">No fresh simple-route checks yet.</p>}</div></section>
+    <section className="border-b border-black/10 py-7 dark:border-white/10"><h2 className="text-lg font-bold">Source delivery evidence</h2><p className="mt-2 text-xs">Latest 1,000 application attempts. Email acceptance is not delivery.</p><div className="mt-3 divide-y divide-black/10 dark:divide-white/10">{[...(sources ?? []).map(source => ({ id: source.id, name: source.company_name })), { id: "manual", name: "Verified recruiter-email adverts" }].map(source => { const result = sourceDelivery.get(source.id); return <p key={source.id} className="py-2 text-sm">{source.name} · {result?.delivered ?? 0} delivered emails · {result?.confirmed ?? 0} confirmed portals · {result?.accepted ?? 0} accepted emails · {result?.blocked ?? 0} blocked</p>; })}</div></section>
     <section className="py-7">
       <h2 className="text-lg font-bold">Source catalogue</h2>
       <div className="mt-3"><AutomationControls action="connect_catalogue" label="Connect missing catalogue sources" /></div>
