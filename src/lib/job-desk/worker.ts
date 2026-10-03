@@ -20,6 +20,7 @@ import { processAnswerDrafts } from "./answer-draft-service";
 import { claimPrioritizedTask } from "./task-priority";
 import { discoveryWindow, renewTaskLease } from "./worker-lifecycle";
 import { ApplicationEmailError, sendApplicationEmail } from "./email-transport";
+import { reconcileEmailDeliveries } from "./email-delivery";
 import { claimApplication } from "./submission-lock";
 import { LETTER_PROMPT_VERSION, LETTER_WRITER_PROMPT, LETTER_REVIEW_PROMPT, letterDate, formatApplicationLetter, validateLetterBody, parseLetterReview } from "./letter-quality";
 
@@ -341,7 +342,7 @@ async function processTask(task: Task) {
     const { data: sources, error: sourcesError } = await db.from("job_desk_sources").select("id").eq("active", true);
     if (sourcesError) throw new Error(sourcesError.message);
     for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:${window}`, null, { sourceId: source.id });
-    return { count: sources?.length ?? 0 };
+    return { count: sources?.length ?? 0, emailDelivery: await reconcileEmailDeliveries() };
   }
   throw new Error(`Unknown Job Desk task: ${task.task_type}`);
 }
