@@ -18,7 +18,7 @@ const nav = [
 ];
 
 const adminNav = [
-  { href: "/dashboard/admin/job-desk", label: "Job Desk", icon: BriefcaseBusiness, primary: true },
+  { href: "/dashboard/admin/job-desk", label: "Job Hunting", icon: BriefcaseBusiness, primary: true },
   { href: "/dashboard/admin", label: "Admin Dashboard", icon: BarChart3 },
   { href: "/dashboard/admin/launch", label: "Launch Readiness", icon: CheckCircle2 }
 ];

@@ -88,7 +88,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   return (
     <AppShell email={user.email} isAdmin>
       <div className="flex flex-col justify-between gap-5 border-b border-black/10 pb-6 dark:border-white/10 lg:flex-row lg:items-end">
-        <div><a href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Desk / Orders</a><h1 className="mt-2 text-3xl font-black">{client?.full_name ?? "Client order"}</h1><p className="mt-2 text-sm text-black/55 dark:text-white/55">{order.service_type.replaceAll("_", " ")} · {client?.whatsapp_phone} · {order.status.replaceAll("_", " ")}</p></div>
+        <div><a href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Hunting / Orders</a><h1 className="mt-2 text-3xl font-black">{client?.full_name ?? "Client order"}</h1><p className="mt-2 text-sm text-black/55 dark:text-white/55">{order.service_type.replaceAll("_", " ")} · {client?.whatsapp_phone} · {order.status.replaceAll("_", " ")}</p></div>
         <JobDeskOrderActions key={order.status} orderId={orderId} canProcess={isCvService && file?.extraction_status === "succeeded" && order.status !== "cv_processing"} canApprove={isCvService && document?.status === "review"} currentStatus={order.status} paymentStatus={order.payment_status} paymentNeedsReview={paymentNeedsReview} showCvActions={isCvService} />
       </div>
       {paymentNeedsReview ? <p role="alert" className="mt-5 border-l-4 border-brand-blue bg-brand-blue/5 p-4 text-sm font-semibold">This order is marked paid without a positive amount and receipt reference. Verify the payment record before treating it as confirmed.</p> : null}

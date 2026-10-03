@@ -48,7 +48,7 @@ export default async function VacanciesPage() {
   const configured = new Set((sources ?? []).map((source) => `${source.provider}:${source.site_token.toLowerCase()}`));
   return <AppShell email={user.email} isAdmin>
     <div className="border-b border-black/10 pb-6 dark:border-white/10">
-      <Link href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Desk</Link>
+      <Link href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Hunting</Link>
       <h1 className="mt-2 text-3xl font-black">Vacancies and sources</h1>
       <p className="mt-2 text-sm text-black/60 dark:text-white/60">{openCount ?? 0} open listings · {reviewCount ?? 0} need review. Only approved, recently checked listings enter client matches.</p>
     </div>

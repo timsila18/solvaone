@@ -25,7 +25,7 @@ export default async function JobDeskReviewPage() {
   const nameByOrder = new Map(orders.map((order) => [order.id, order.client?.[0]?.full_name]));
 
   return <AppShell email={user.email} isAdmin><div className="mx-auto max-w-5xl py-6">
-    <Link href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Desk</Link>
+    <Link href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Hunting</Link>
     <h1 className="mt-2 text-3xl font-black">Needs your attention</h1>
     <p className="mt-2 text-sm text-black/60 dark:text-white/60">Work from top to bottom. Automated processing continues for the rest of the queue.</p>
     <div className="mt-7 space-y-8">
