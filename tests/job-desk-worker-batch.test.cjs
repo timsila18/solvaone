@@ -30,6 +30,7 @@ const load = Module._load;
 const resolveFilename = Module._resolveFilename;
 Module._load = function (request, parent, isMain) {
   if (request === "@/lib/supabase/admin") return { createSupabaseAdminClient: () => db };
+  if (request === "./task-priority") return { claimPrioritizedTask: async () => (await db.rpc()).data[0] ?? null };
   if (request === "@/lib/openai") return { createOpenAIClient: () => ({}) };
   if (request === "@/lib/solva-intelligence/costs") return { estimateCost: () => 0, extractTokenUsage: () => ({}) };
   if (request === "./automation") return { discoverVacancies: async () => 0, enqueueTask: async () => {}, matchOrder: async () => 0, plainText: () => "" };

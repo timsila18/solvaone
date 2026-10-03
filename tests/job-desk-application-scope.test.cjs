@@ -8,6 +8,13 @@ const ts = require("typescript");
 const source = fs.readFileSync(path.resolve(__dirname, "../src/lib/job-desk/application-scope.ts"), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const moduleInstance = new Module("job-desk-application-scope", module);
+const requireOriginal = moduleInstance.require.bind(moduleInstance);
+moduleInstance.require = id => {
+  if (id !== "./role-language") return requireOriginal(id);
+  const helper = new Module("role-language", module);
+  helper._compile(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, "../src/lib/job-desk/role-language.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, "role-language.js");
+  return helper.exports;
+};
 moduleInstance._compile(compiled, "job-desk-application-scope.js");
 const { createApplicationScope, readApplicationScope, applicationScopeHold } = moduleInstance.exports;
 

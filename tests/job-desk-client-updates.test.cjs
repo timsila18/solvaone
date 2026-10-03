@@ -20,7 +20,7 @@ Module._load = function (request, parent, isMain) {
         select: () => query,
         eq: () => query,
         single: async () => ({ data: { client: { full_name: "Jane Candidate", email: "jane@example.com" } } }),
-        maybeSingle: async () => ({ data: { vacancy: { title: "Analyst", company_name: "Example Ltd" } } })
+        maybeSingle: async () => ({ data: table === "job_desk_applications" ? { status: "submitted", method: "email", provider_message_id: "accepted-test-id" } : { vacancy: { title: "Analyst", company_name: "Example Ltd" } } })
       };
       return query;
     }
@@ -46,7 +46,9 @@ test("client updates are addressed to the supplied email and use the configured 
   const body = JSON.parse(sent.body);
   assert.deepEqual(body.to, ["jane@example.com"]);
   assert.equal(body.from, "SolvaOne Job Desk <apply@solvaone.co.ke>");
-  assert.match(body.subject, /Analyst at Example Ltd/);
+  assert.match(body.subject, /Analyst/);
+  assert.match(body.text, /Analyst at Example Ltd/);
+  assert.match(body.text, /does not confirm/);
   assert.equal(sent.headers["Idempotency-Key"], "job-desk-update-application_submitted-match-1");
   assert.equal(result.providerMessageId, "email-123");
 });
