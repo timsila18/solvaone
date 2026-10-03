@@ -9,8 +9,8 @@ export const site = {
   parent: "Solva Business Group",
   url: getPublicSiteUrl(),
   supportEmail: "solvabusinessgroup@gmail.com",
-  supportPhone: "0723298465",
-  supportWhatsAppUrl: "https://wa.me/254723298465"
+  supportPhone: "0721537597",
+  supportWhatsAppUrl: "https://wa.me/254721537597"
 };
 
 export type ProductPage = {
