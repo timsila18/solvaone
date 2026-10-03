@@ -3,14 +3,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { FeedProvider } from "@/lib/job-desk/vacancy-feeds";
 
-export function AutomationControls({ action, id = "", label, provider, siteToken, companyName }: { action: "add_source" | "discover" | "match" | "prepare" | "retry_application" | "authorize_link" | "run_queue" | "refresh_all" | "connect_catalogue"; id?: string; label: string; provider?: FeedProvider; siteToken?: string; companyName?: string }) {
+export function AutomationControls({ action, id = "", label, provider, siteToken, companyName }: { action: "add_source" | "discover" | "match" | "send_report" | "prepare" | "retry_application" | "authorize_link" | "run_queue" | "refresh_all" | "connect_catalogue"; id?: string; label: string; provider?: FeedProvider; siteToken?: string; companyName?: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const router = useRouter();
   async function run() {
     setBusy(true); setMessage("");
     try {
-      const key = action === "discover" ? "sourceId" : action === "match" ? "orderId" : "matchId";
+      const key = action === "discover" ? "sourceId" : action === "match" || action === "send_report" ? "orderId" : "matchId";
       const payload = action === "add_source" ? { action, provider, siteToken, companyName } : action === "run_queue" || action === "refresh_all" || action === "connect_catalogue" ? { action } : { action, [key]: id };
       const response = await fetch("/api/admin/job-desk/automation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const body = await response.json();

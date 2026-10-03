@@ -1,7 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/supabase/server";
-import { requireAdmin, logAdminAction, logSystemEvent } from "@/lib/security";
+import { requireAdmin, logAdminAction, logSystemEvent, checkRateLimit, rateLimitResponse } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createAuthorizationToken, enqueueTask } from "@/lib/job-desk/automation";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
@@ -12,6 +12,8 @@ import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
 import { recommendedSources } from "@/lib/job-desk/vacancy-feeds";
 import { recoverUnderfilledSearches } from "@/lib/job-desk/search-recovery";
 import { reconcileJobDeskPipeline } from "@/lib/job-desk/reconcile";
+import { buildApplicationReport, loadReportMatches } from "@/lib/job-desk/application-report";
+import { createHash } from "node:crypto";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -20,6 +22,7 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("add_source"), provider: z.enum(["greenhouse", "lever", "ashby", "smartrecruiters"]), siteToken: z.string().regex(/^[a-zA-Z0-9_-]{2,80}$/), companyName: z.string().min(2).max(120) }),
   z.object({ action: z.literal("discover"), sourceId: z.string().uuid() }),
   z.object({ action: z.literal("match"), orderId: z.string().uuid() }),
+  z.object({ action: z.literal("send_report"), orderId: z.string().uuid() }),
   z.object({ action: z.literal("prepare"), matchId: z.string().uuid() }),
   z.object({ action: z.literal("retry_application"), matchId: z.string().uuid() }),
   z.object({ action: z.literal("authorize_link"), matchId: z.string().uuid() }),
@@ -41,7 +44,17 @@ export async function POST(request: Request) {
   try {
     let result: Record<string, unknown> = {};
     let queued = false;
-    if (input.action === "add_source") {
+    if (input.action === "send_report") {
+      if (request.headers.get("origin") !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+      const limit = checkRateLimit(`job-report:${user.id}`, 20, 3600000);
+      if (!limit.allowed) return rateLimitResponse(limit.resetAt);
+      const { data: order, error: orderError } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", input.orderId).single();
+      if (orderError || !hasVerifiedJobDeskPayment(order)) return NextResponse.json({ error: "A verified paid order is required." }, { status: 409 });
+      const fingerprint = createHash("sha256").update(buildApplicationReport(await loadReportMatches(db, input.orderId))).digest("hex").slice(0, 24);
+      await queueClientUpdate(input.orderId, "application_report", `${input.orderId}:${fingerprint}`);
+      result = { reportQueued: true };
+      queued = true;
+    } else if (input.action === "add_source") {
       const { data, error } = await db.from("job_desk_sources").upsert({ provider: input.provider, site_token: input.siteToken, company_name: input.companyName, active: true }, { onConflict: "provider,site_token" }).select("id").single();
       if (error) throw new Error(error.message);
       await enqueueTask("discover", `discover:${data.id}:${new Date().toISOString().slice(0, 10)}`, null, { sourceId: data.id });

@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { load } from "cheerio";
+import { isCareerCatalogueUrl } from "./career-discovery";
 
 const origin = "https://www.corporatestaffing.co.ke";
 export const emailCatalogueUrl = `${origin}/category/corporate-staffing-jobs/`;
 const recipient = "jobs@corporatestaffing.co.ke";
 
 export function isEmailCatalogueUrl(value: string) {
-  return value === emailCatalogueUrl || [2, 3].some(page => value === `${emailCatalogueUrl}page/${page}/`);
+  return value === emailCatalogueUrl || isCareerCatalogueUrl(value) || [2, 3].some(page => value === `${emailCatalogueUrl}page/${page}/`);
 }
 
 export function emailCataloguePages(html: string) {
@@ -70,19 +71,25 @@ export async function fetchEmailPage(url: string) {
   return html;
 }
 
-export async function fetchEmailAdverts() {
+export async function fetchEmailAdverts(careerUrls: string[] = []) {
   const robots = await fetch(`${origin}/robots.txt`, { redirect: "error", signal: AbortSignal.timeout(12000), cache: "no-store" });
   if (!robots.ok) throw new Error("Recruiter crawl permission could not be checked.");
   // This catalogue currently permits public crawling. Stop if that policy changes.
   if (/^\s*Disallow:\s*\S+/im.test(await robots.text())) throw new Error("Recruiter crawl policy changed; discovery paused for review.");
   const catalogue = await fetchEmailPage(emailCatalogueUrl);
-  const discoveredLinks = emailAdvertLinks(catalogue);
+  const discoveredLinks: string[] = [];
   let catalogueFailures = 0;
+  // Read career categories first so broad listings cannot consume the entire advert budget.
+  for (const category of careerUrls.filter(isCareerCatalogueUrl).slice(0, 5)) {
+    try { discoveredLinks.push(...emailAdvertLinks(await fetchEmailPage(category)).slice(0, 20)); }
+    catch { catalogueFailures++; }
+  }
+  discoveredLinks.push(...emailAdvertLinks(catalogue));
   for (const page of emailCataloguePages(catalogue)) {
     try { discoveredLinks.push(...emailAdvertLinks(await fetchEmailPage(page))); }
     catch { catalogueFailures++; }
   }
-  const links = [...new Set(discoveredLinks)].slice(0, 60);
+  const links = [...new Set(discoveredLinks)].slice(0, 100);
   if (!links.length) throw new Error("Recruiter catalogue contains no recognizable adverts; retained previous listings.");
   const results: NonNullable<ReturnType<typeof parseEmailAdvert>>[] = [];
   let failures = 0;

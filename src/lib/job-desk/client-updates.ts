@@ -1,9 +1,10 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enqueueTask } from "./automation";
 import { applicationOutcome } from "./submission-preflight";
+import { buildApplicationReport, loadReportMatches } from "./application-report";
 
-export type ClientUpdate = "cv_review" | "cv_approved" | "matches_ready" | "application_submitted" | "application_needs_action" | "application_delivered" | "application_delivery_failed";
-const clientUpdateEvents = new Set<ClientUpdate>(["cv_review", "cv_approved", "matches_ready", "application_submitted", "application_needs_action", "application_delivered", "application_delivery_failed"]);
+export type ClientUpdate = "cv_review" | "cv_approved" | "matches_ready" | "application_submitted" | "application_needs_action" | "application_delivered" | "application_delivery_failed" | "application_report";
+const clientUpdateEvents = new Set<ClientUpdate>(["cv_review", "cv_approved", "matches_ready", "application_submitted", "application_needs_action", "application_delivered", "application_delivery_failed", "application_report"]);
 
 export async function queueClientUpdate(orderId: string, event: ClientUpdate, reference: string) {
   return enqueueTask("notify_client", `client-update:${event}:${reference}`, orderId, { event, reference });
@@ -13,6 +14,7 @@ export function clientUpdateContent(event: ClientUpdate, name: string, role?: st
   const firstName = name.trim().split(/\s+/)[0] || "there";
   const position = [role, company].filter(Boolean).join(" at ");
   const updates: Record<ClientUpdate, { subject: string; body: string }> = {
+    application_report: { subject: "Your application progress report", body: "Here is the recorded progress of your job applications. Delivery and employer confirmations are reported separately." },
     cv_review: { subject: "Your CV is being reviewed", body: "Your CV has been prepared and is awaiting a final review. We will update you when it is approved for job matching." },
     cv_approved: { subject: "Your CV is approved", body: "Your CV has been approved. We are checking suitable, currently open vacancies against your experience and preferences. Applications proceed within your recorded authorization." },
     matches_ready: { subject: "Your job matches are being prepared", body: "We have identified potential vacancies and are preparing the relevant application materials. Supported applications proceed within your recorded roles, locations and exclusions; exceptions are reviewed by your administrator." },
@@ -39,7 +41,7 @@ export async function sendClientUpdate(orderId: string, event: ClientUpdate, ref
   let role: string | undefined;
   let company: string | undefined;
   let outcome: string | undefined;
-  if (event.startsWith("application_")) {
+  if (event.startsWith("application_") && event !== "application_report") {
     const { data: match } = await db.from("job_desk_matches").select("vacancy:job_desk_vacancies(title,company_name)").eq("id", reference).eq("order_id", orderId).maybeSingle();
     const vacancy = Array.isArray(match?.vacancy) ? match.vacancy[0] : match?.vacancy;
     role = vacancy?.title;
@@ -55,6 +57,10 @@ export async function sendClientUpdate(orderId: string, event: ClientUpdate, ref
   if (outcome) {
     content.subject = `SolvaOne Job Desk: ${outcome}${role ? ` - ${role}` : ""}`;
     content.text = `Hello ${client.full_name.trim().split(/\s+/)[0]},\n\n${[role, company].filter(Boolean).join(" at ")}: ${outcome}.\nAn email provider acceptance does not confirm that the employer has received or read the application. We will not report an interview or employer response without evidence.\n\nQuestions? Reply or WhatsApp 0721537597.\n\nSolvaOne Job Desk`;
+  }
+  if (event === "application_report" || event === "matches_ready" || event.startsWith("application_")) {
+    const matches = await loadReportMatches(db, orderId);
+    content.text += `\n\n${buildApplicationReport(matches)}`;
   }
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",

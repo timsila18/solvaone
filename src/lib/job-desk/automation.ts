@@ -14,6 +14,7 @@ import { readApplicantDetails } from "./applicant-details";
 import { buildApplicantKnown } from "./applicant-known";
 import { fetchEmailAdverts, fetchEmailPage, parseEmailAdvert } from "./email-vacancy-feed";
 import { cleanText, feedStillListsJob, fetchFeedJobs, normalizeFeedJob, reviewReasons, vacancyFingerprint, type FeedSource } from "./vacancy-feeds";
+import { careerCatalogueUrls } from "./career-discovery";
 
 export type Vacancy = { id: string; provider?: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
 
@@ -77,7 +78,13 @@ export async function discoverVacancies(sourceId: string) {
 
 export async function discoverEmailVacancies() {
   const db = createSupabaseAdminClient();
-  const { results, checked, failures } = await fetchEmailAdverts();
+  const { data: activeOrders, error: activeError } = await db.from("job_desk_orders").select("client_id").eq("service_type", "job_search_full").in("status", ["approved", "active"]).limit(500);
+  if (activeError) throw new Error(activeError.message);
+  const clientIds = [...new Set((activeOrders ?? []).map(order => order.client_id))];
+  const { data: profiles, error: profileError } = clientIds.length ? await db.from("job_desk_candidate_profiles").select("target_job_titles,structured_profile").in("client_id", clientIds) : { data: [], error: null };
+  if (profileError) throw new Error(profileError.message);
+  const careerUrls = careerCatalogueUrls(profiles ?? []);
+  const { results, checked, failures } = await fetchEmailAdverts(careerUrls);
   for (const row of results) {
     const { data: duplicate, error: duplicateError } = await db.from("job_desk_vacancies").select("id").eq("apply_url", row.apply_url).neq("external_id", row.external_id).eq("status", "open").limit(1).maybeSingle();
     if (duplicateError) throw new Error(duplicateError.message);
@@ -89,7 +96,7 @@ export async function discoverEmailVacancies() {
   const { data: orders, error } = await db.from("job_desk_orders").select("id,payment_status,amount,payment_reference").eq("service_type", "job_search_full").in("status", ["approved", "active"]).limit(500);
   if (error) throw new Error(error.message);
   for (const order of orders ?? []) if (hasVerifiedJobDeskPayment(order)) await enqueueTask("match", `email-match:${order.id}:${Math.floor(Date.now() / 7200000)}`, order.id);
-  return { checked, imported: results.length, open: results.filter(row => row.status === "open" && row.review_status === "approved").length, failures };
+  return { checked, careerCatalogues: careerUrls, imported: results.length, open: results.filter(row => row.status === "open" && row.review_status === "approved").length, failures };
 }
 
 export async function verifyVacancyStillOpen(vacancy: { id: string; source_id: string | null; external_id: string; apply_url?: string; description?: string }) {
@@ -157,8 +164,14 @@ export async function matchOrder(orderId: string) {
   });
   const candidates = screened.ready;
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
-  const shortlist = reviewedShortlist(candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] })));
-  const matches = shortlist.slice(0, remainingSlots);
+  const automaticShortlist = reviewedShortlist(candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] })));
+  const assistedPool = [...pool.filter(item => submissionRouteRank(item.vacancy) === 0).slice(0, 5), ...screened.skipped.map(item => item.candidate).slice(0, 5)];
+  const assistedReview = scope && automaticShortlist.length < SHORTLIST_TARGET
+    ? await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope }, assistedPool.map(item => item.vacancy))
+    : new Map<string, { suitable: boolean; reason: string }>();
+  const assisted = reviewedShortlist(assistedPool.filter(item => assistedReview.get(item.vacancy.id)?.suitable).map(item => ({ ...item, reasons: [...item.reasons, `Suitability review: ${assistedReview.get(item.vacancy.id)?.reason}`, `Assisted route: ${(blockedQuestions.get(item.vacancy.id) ?? ["Unsupported portal: use the prepared admin application packet."]).join("; ")}`] }))).slice(0, Math.min(5, SHORTLIST_TARGET - automaticShortlist.length));
+  const shortlist = [...automaticShortlist, ...assisted];
+  const matches = automaticShortlist.slice(0, remainingSlots);
   let refreshedSources = 0;
   if (remainingSlots > 0 && shortlist.length < SHORTLIST_TARGET) {
     if (await enqueueTask("discover_email", `email-coverage:${Math.floor(Date.now() / 7200000)}`, null)) refreshedSources++;
@@ -189,11 +202,12 @@ export async function matchOrder(orderId: string) {
     const { error: staleError } = await db.from("job_desk_matches").update({ status: "rejected", authorization_token_hash: null, authorization_expires_at: null }).in("id", obsoleteIds);
     if (staleError) throw new Error(staleError.message);
   }
-  for (const match of matches) {
+  for (const match of [...matches, ...assisted]) {
     const { error: matchError } = await db.from("job_desk_matches").upsert({ order_id: orderId, vacancy_id: match.vacancy.id, score: match.score, reasons: match.reasons, gaps: match.gaps }, { onConflict: "order_id,vacancy_id", ignoreDuplicates: true });
     if (matchError) throw new Error(matchError.message);
   }
-  const { data: top, error: topError } = await db.from("job_desk_matches").select("id,score,vacancy:job_desk_vacancies(id,provider,application_method,email_verified,application_email)").eq("order_id", orderId).eq("status", "suggested").gte("score", 25).order("score", { ascending: false }).limit(50);
+  const selectedIds = [...matches, ...assisted].map(item => item.vacancy.id);
+  const { data: top, error: topError } = selectedIds.length ? await db.from("job_desk_matches").select("id,score,vacancy:job_desk_vacancies(id,provider,application_method,email_verified,application_email)").eq("order_id", orderId).in("vacancy_id", selectedIds).eq("status", "suggested").gte("score", 25).order("score", { ascending: false }).limit(50) : { data: [], error: null };
   if (topError) throw new Error(topError.message);
   const routeRank = (item: NonNullable<typeof top>[number]) => {
     const vacancy = Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy;
@@ -202,6 +216,8 @@ export async function matchOrder(orderId: string) {
   // Full-advert evidence review, not title-word percentage, qualifies these selected matches.
   // Each task preflights independently; blocked forms must not consume a ten-job batch.
   for (const item of [...(top ?? [])].filter(item => selected.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "") && routeRank(item) > 0).sort((a, b) => routeRank(b) - routeRank(a) || b.score - a.score)) await enqueueTask("prepare", `prepare:${item.id}:${approved.id}`, orderId, { matchId: item.id });
+  const assistedIds = new Set(assisted.map(item => item.vacancy.id));
+  for (const item of top ?? []) if (assistedIds.has((Array.isArray(item.vacancy) ? item.vacancy[0] : item.vacancy)?.id ?? "")) await enqueueTask("prepare", `assisted-packet:${item.id}:${approved.id}`, orderId, { matchId: item.id, assisted: "true" });
   // Ready work is queued first. A small separately reviewed pool may need factual drafts.
   const reviewPool = screened.skipped.map(item => item.candidate).filter(item => {
     const blockers = blockedQuestions.get(item.vacancy.id) ?? [];
@@ -209,8 +225,8 @@ export async function matchOrder(orderId: string) {
   }).slice(0, 5);
   if (scope && reviewPool.length) await enqueueTask("review_matches", `review-matches:${orderId}:${approved.id}:${Math.floor(Date.now() / 7200000)}`, orderId, { vacancyIds: JSON.stringify(reviewPool.map(item => item.vacancy.id)) });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
-  if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
-  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: APPLICATION_TARGET, shortlistTarget: SHORTLIST_TARGET, selectedForPreparation: matches.length, committedSlots, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: shortlist.length, supported: shortlist.length, shortlist: shortlist.map(item => ({ id: item.vacancy.id, title: item.vacancy.title, company: item.vacancy.company_name, url: item.vacancy.apply_url, score: item.score, selected: selected.has(item.vacancy.id), reasons: item.reasons })), automaticScreened: screened.ready.length + screened.skipped.length, automaticSkipped: screened.skipped.length, unsupportedRoutes: pool.filter(item => submissionRouteRank(item.vacancy) === 0).length, skippedExamples: screened.skipped.slice(0, 10).map(item => ({ title: item.candidate.vacancy.title, company: item.candidate.vacancy.company_name, reason: item.reason })), refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
+  if (matches.length || assisted.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
+  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: APPLICATION_TARGET, shortlistTarget: SHORTLIST_TARGET, selectedForPreparation: matches.length, assistedPackets: assisted.length, committedSlots, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length + assistedPool.length, suitable: shortlist.length, supported: automaticShortlist.length, shortlist: shortlist.map(item => ({ id: item.vacancy.id, title: item.vacancy.title, company: item.vacancy.company_name, url: item.vacancy.apply_url, score: item.score, selected: selected.has(item.vacancy.id), reasons: item.reasons })), automaticScreened: screened.ready.length + screened.skipped.length, automaticSkipped: screened.skipped.length, unsupportedRoutes: pool.filter(item => submissionRouteRank(item.vacancy) === 0).length, skippedExamples: screened.skipped.slice(0, 10).map(item => ({ title: item.candidate.vacancy.title, company: item.candidate.vacancy.company_name, reason: item.reason })), refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
 }
 
 export async function reviewDeferredMatches(orderId: string, vacancyIds: string[]) {

@@ -60,10 +60,11 @@ async function queueUpdateWithoutChangingSubmission(orderId: string, event: Clie
   }
 }
 
-async function prepareMatch(matchId: string) {
+async function prepareMatch(matchId: string, assistedRequested = false) {
   const db = createSupabaseAdminClient();
   const { data: match } = await db.from("job_desk_matches").select("*,vacancy:job_desk_vacancies(*)").eq("id", matchId).single();
   if (!match) return;
+  const assisted = assistedRequested || (match.reasons as string[] ?? []).some(reason => reason.startsWith("Assisted route:"));
   if (match.status === "authorized" && match.authorized_at && !match.authorized_ip_hash) {
     await enqueueTask("submit", `submit:${matchId}:${createHash("sha256").update(match.cover_letter ?? "").digest("hex").slice(0, 16)}`, match.order_id, { matchId });
     return;
@@ -90,7 +91,7 @@ async function prepareMatch(matchId: string) {
   if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) throw new Error("Vacancy is closed, unreviewed, duplicated or stale.");
   if (scoreVacancy(vacancy, profile, order.application_authorized ? readApplicationScope(order.service_details) : null).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) throw new Error("Vacancy needs a fresh CV-based suitability review before preparation.");
   if (!(await verifyVacancyStillOpen(vacancy))) throw new Error("Vacancy is no longer listed by its official source.");
-  if (!(await checkSubmissionRequirements(matchId, order, client, vacancy))) return;
+  if (!assisted && !(await checkSubmissionRequirements(matchId, order, client, vacancy))) return;
   const prompt = JSON.stringify({ version: LETTER_PROMPT_VERSION, cvId: latestCv.id, date: letterDate(), cv: plainText(cv.html).slice(0, 24000), clientName: client.full_name, role: vacancy.title, company: vacancy.company_name, description: vacancy.description.slice(0, 10000) });
   const fingerprint = createHash("sha256").update(prompt).digest("hex");
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
@@ -137,6 +138,18 @@ async function prepareMatch(matchId: string) {
   if (!ready || !order.application_authorized || !["approved", "active"].includes(order.status)) return;
   const scope = readApplicationScope(order.service_details);
   if (!scope || applicationScopeHold(scope, vacancy) || scoreVacancy(vacancy, profile, scope).score < 25 || !Array.isArray(match.reasons) || !match.reasons.some((reason: string) => reason.startsWith("Suitability review:"))) return;
+  if (assisted) {
+    const reason = (match.reasons as string[]).find(item => item.startsWith("Assisted route:"))?.slice("Assisted route:".length).trim() ?? "Unsupported portal: use the prepared admin application packet.";
+    // Keep the match retryable until its application packet is durably saved.
+    const { error: packetError } = await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", error_message: reason.slice(0, 4000), provider_response: { clicked: false, assistedPacket: true, cvId: latestCv.id, preflight: { ready: false, blockers: [reason], checkedAt: new Date().toISOString() } } }, { onConflict: "match_id", ignoreDuplicates: true });
+    if (packetError) throw new Error(packetError.message);
+    const { data: held, error: holdError } = await db.from("job_desk_matches").update({ status: "needs_human", authorized_at: new Date().toISOString(), authorized_ip_hash: null }).eq("id", matchId).eq("status", "ready").select("id").maybeSingle();
+    if (holdError) throw new Error(holdError.message);
+    if (held) {
+      if (!prohibitsAnswerDrafting(reason) && draftableQuestions([reason]).length) await enqueueTask("draft_answers", `answer-drafts:${matchId}:${latestCv.id}`, order.id, { matchId });
+    }
+    return;
+  }
   const { data: authorized, error: authorizationError } = await db.from("job_desk_matches")
     .update({ status: "authorized", authorized_at: new Date().toISOString(), authorized_ip_hash: null })
     .eq("id", matchId).eq("status", "ready").select("id").maybeSingle();
@@ -329,7 +342,7 @@ async function processTask(task: Task) {
   if (task.task_type === "discover") return { count: await discoverVacancies(task.payload.sourceId) };
   if (task.task_type === "discover_email") return discoverEmailVacancies();
   if (task.task_type === "match" && task.order_id) return matchOrder(task.order_id);
-  if (task.task_type === "prepare" && task.payload.matchId) { await prepareMatch(task.payload.matchId); return { ok: true }; }
+  if (task.task_type === "prepare" && task.payload.matchId) { await prepareMatch(task.payload.matchId, task.payload.assisted === "true"); return { ok: true }; }
   if (task.task_type === "submit" && task.payload.matchId) {
     await submitMatch(task.payload.matchId);
     const { data: application, error } = await db.from("job_desk_applications").select("status,method,provider_response,error_message").eq("match_id", task.payload.matchId).maybeSingle();

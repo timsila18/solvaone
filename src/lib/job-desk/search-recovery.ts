@@ -3,13 +3,9 @@ import { enqueueTask } from "./automation";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { readApplicationScope } from "./application-scope";
 import { discoveryWindow } from "./worker-lifecycle";
+import { successfulDelivery } from "./application-progress";
 
-export function hasSubmissionEvidence(application: { status: string; provider_message_id?: string | null; provider_response?: unknown }) {
-  if (application.status !== "submitted") return false;
-  const response = application.provider_response as { confirmation?: string; delivery?: { event?: string } } | null;
-  if (["email.bounced", "email.failed", "email.complained"].includes(response?.delivery?.event ?? "")) return false;
-  return Boolean(application.provider_message_id || response?.confirmation);
-}
+export const hasSubmissionEvidence = successfulDelivery;
 
 export async function recoverUnderfilledSearches() {
   const db = createSupabaseAdminClient();
@@ -27,7 +23,7 @@ export async function recoverUnderfilledSearches() {
     const { data: cv, error: cvError } = await db.from("job_desk_documents").select("id,status").eq("order_id", order.id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
     if (cvError) throw new Error(cvError.message);
     if (!client?.consent_to_process || cv?.status !== "approved") { summary.held++; continue; }
-    const { data: applications, error: applicationError } = await db.from("job_desk_applications").select("status,provider_message_id,provider_response").eq("order_id", order.id);
+    const { data: applications, error: applicationError } = await db.from("job_desk_applications").select("status,method,provider_message_id,provider_response").eq("order_id", order.id);
     if (applicationError) throw new Error(applicationError.message);
     const submitted = (applications ?? []).filter(hasSubmissionEvidence).length;
     if (!submitted) summary.zeroSubmissions++;

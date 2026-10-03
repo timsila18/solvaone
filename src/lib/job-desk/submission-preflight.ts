@@ -70,7 +70,8 @@ export function applicationOutcome(application: { status?: string; method?: stri
   if (evidence?.delivery?.event === "email.delivered") return "Delivered to employer mail server; employer review not confirmed";
   if (["email.bounced", "email.failed", "email.complained"].includes(evidence?.delivery?.event ?? "")) return "Email delivery problem: administrator review required";
   if (evidence?.delivery?.event === "email.delivery_delayed") return "Email delivery delayed";
-  if (application?.status === "submitted" && evidence?.confirmation) return "Confirmed submitted";
+  if (application?.status === "submitted" && evidence?.confirmation && application.method !== "email" && !application.provider_message_id) return "Confirmed submitted";
+  if (application?.status === "submitted" && evidence?.confirmation && application.method === "email") return "Email send recorded by administrator; delivery not confirmed";
   if (application?.status === "submitted" && application?.provider_message_id) return "Email accepted by provider; employer receipt not confirmed";
   if (application?.status === "submitted") return "Awaiting submission evidence";
   if (application?.status === "sending") return "Awaiting employer confirmation";

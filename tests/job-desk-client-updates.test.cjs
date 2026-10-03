@@ -19,6 +19,9 @@ Module._load = function (request, parent, isMain) {
       const query = {
         select: () => query,
         eq: () => query,
+        order: () => query,
+        limit: () => query,
+        then: (resolve) => Promise.resolve({ data: [] }).then(resolve),
         single: async () => ({ data: { client: { full_name: "Jane Candidate", email: "jane@example.com" } } }),
         maybeSingle: async () => ({ data: table === "job_desk_applications" ? { status: "submitted", method: "email", provider_message_id: "accepted-test-id" } : { vacancy: { title: "Analyst", company_name: "Example Ltd" } } })
       };

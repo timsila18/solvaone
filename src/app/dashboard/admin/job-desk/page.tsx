@@ -9,6 +9,7 @@ import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/serve
 import { formatKes } from "@/lib/utils";
 import { hasSubmissionEvidence } from "@/lib/job-desk/search-recovery";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
+import { applicationProgress, type ProgressMatch } from "@/lib/job-desk/application-progress";
 
 export default async function JobDeskPage() {
   const user = await getCurrentUser();
@@ -30,11 +31,18 @@ export default async function JobDeskPage() {
   const activeOrders = (orders ?? []).filter(order => order.service_type === "job_search_full" && ["approved", "active"].includes(order.status) && hasVerifiedJobDeskPayment(order));
   const submissionCounts = new Map<string, number>();
   if (activeOrders.length) {
-    const { data: applications, error } = await db.from("job_desk_applications").select("order_id,status,provider_message_id,provider_response").in("order_id", activeOrders.map(order => order.id));
+    const { data: applications, error } = await db.from("job_desk_applications").select("order_id,status,method,provider_message_id,provider_response").in("order_id", activeOrders.map(order => order.id));
     if (error) throw new Error("Application outcomes could not be loaded. Please refresh.");
     for (const application of applications ?? []) if (hasSubmissionEvidence(application)) submissionCounts.set(application.order_id, (submissionCounts.get(application.order_id) ?? 0) + 1);
   }
   const zeroOrders = activeOrders.filter(order => !submissionCounts.get(order.id));
+  const progressByOrder = new Map<string, ReturnType<typeof applicationProgress>>();
+  if (orders?.length) {
+    const { data: matches, error: progressError } = await db.from("job_desk_matches").select("id,order_id,vacancy_id,reasons,status,cover_letter,application:job_desk_applications(status,method,provider_message_id,provider_response)").in("order_id", orders.map(order => order.id)).neq("status", "rejected").limit(1000);
+    if (progressError) throw new Error("Client progress could not be loaded. Please refresh.");
+    for (const order of orders) progressByOrder.set(order.id, applicationProgress((matches ?? []).filter(match => match.order_id === order.id && (match.reasons as string[]).some(reason => reason.startsWith("Suitability review:"))) as ProgressMatch[]));
+  }
+  const priorityOrders = [...(orders ?? [])].sort((a, b) => Number(zeroOrders.some(order => order.id === b.id)) - Number(zeroOrders.some(order => order.id === a.id)));
 
   return (
     <AppShell email={user.email} isAdmin>
@@ -68,9 +76,9 @@ export default async function JobDeskPage() {
         <section className="min-w-0"><h2 className="text-xl font-black">Order queue</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">Paid website requests and manual intakes appear here. Unpaid checkouts stay out of the service queue.</p>
           <div className="mt-5 overflow-x-auto border-y border-black/10 dark:border-white/10">
             <table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-black/[0.03] text-xs uppercase text-black/45 dark:bg-white/[0.05] dark:text-white/45"><tr><th className="px-3 py-3">Client</th><th className="px-3 py-3">Service</th><th className="px-3 py-3">Payment</th><th className="px-3 py-3">Workflow</th><th className="px-3 py-3">Created</th></tr></thead>
-              <tbody>{orders?.length ? orders.map((order) => {
+              <tbody>{orders?.length ? priorityOrders.map((order) => {
                 const client = Array.isArray(order.client) ? order.client[0] : order.client;
-                return <tr key={order.id} className="border-t border-black/10 dark:border-white/10"><td className="px-3 py-4"><Link className="font-bold hover:text-brand-blue" href={`/dashboard/admin/job-desk/${order.id}`}>{client?.full_name ?? "Unnamed client"}</Link><div className="text-xs text-black/45 dark:text-white/45">{client?.whatsapp_phone} · {order.source_channel}</div></td><td className="px-3 py-4">{order.service_type.replaceAll("_", " ")}</td><td className="px-3 py-4"><span className="font-semibold">{order.payment_status}</span><div className="text-xs text-black/45 dark:text-white/45">{formatKes(order.amount)}</div></td><td className="px-3 py-4"><Status value={order.status} /></td><td className="px-3 py-4 text-black/50 dark:text-white/50">{new Date(order.created_at).toLocaleDateString()}</td></tr>;
+                return <tr key={order.id} className="border-t border-black/10 dark:border-white/10"><td className="px-3 py-4"><Link className="font-bold hover:text-brand-blue" href={`/dashboard/admin/job-desk/${order.id}`}>{client?.full_name ?? "Unnamed client"}</Link><div className="text-xs text-black/45 dark:text-white/45">{client?.whatsapp_phone} · {order.source_channel}</div></td><td className="px-3 py-4">{order.service_type.replaceAll("_", " ")}</td><td className="px-3 py-4"><span className="font-semibold">{order.payment_status}</span><div className="text-xs text-black/45 dark:text-white/45">{formatKes(order.amount)}</div></td><td className="px-3 py-4"><Status value={order.status} />{order.service_type === "job_search_full" ? <OrderProgress value={progressByOrder.get(order.id)} /> : null}</td><td className="px-3 py-4 text-black/50 dark:text-white/50">{new Date(order.created_at).toLocaleDateString()}</td></tr>;
               }) : <tr><td colSpan={5} className="px-3 py-10 text-center text-black/50 dark:text-white/50">No Job Hunting orders yet.</td></tr>}</tbody>
             </table>
           </div>
@@ -84,3 +92,8 @@ export default async function JobDeskPage() {
 
 function Metric({ label, value }: { label: string; value: number }) { return <div className="border-black/10 px-4 py-5 first:pl-0 dark:border-white/10 sm:border-r"><div className="text-2xl font-black">{value}</div><div className="mt-1 text-xs font-bold uppercase text-black/45 dark:text-white/45">{label}</div></div>; }
 function Status({ value }: { value: string }) { return <span className="inline-flex rounded-full border border-brand-blue/25 bg-brand-blue/5 px-2 py-1 text-xs font-bold text-brand-blue">{value.replaceAll("_", " ")}</span>; }
+
+function OrderProgress({ value }: { value?: ReturnType<typeof applicationProgress> }) {
+  if (!value) return null;
+  return <div className="mt-2 max-w-xs text-xs leading-5"><p>{value.suitable} suitable → {value.ready} ready → {value.delivered} delivered emails → {value.confirmed} confirmed portals → {value.blocked} blocked</p><p className="text-black/60 dark:text-white/60">{value.accepted} accepted, delivery unconfirmed</p>{!value.delivered && !value.confirmed ? <b className="text-brand-blue">First delivery priority</b> : null}</div>;
+}
