@@ -5,6 +5,17 @@ const origin = "https://www.corporatestaffing.co.ke";
 export const emailCatalogueUrl = `${origin}/category/corporate-staffing-jobs/`;
 const recipient = "jobs@corporatestaffing.co.ke";
 
+export function isEmailCatalogueUrl(value: string) {
+  return value === emailCatalogueUrl || [2, 3].some(page => value === `${emailCatalogueUrl}page/${page}/`);
+}
+
+export function emailCataloguePages(html: string) {
+  const $ = load(html);
+  return [...new Set($("a[href]").map((_, node) => {
+    try { return new URL($(node).attr("href") ?? "", origin).href; } catch { return ""; }
+  }).get().filter(url => url !== emailCatalogueUrl && isEmailCatalogueUrl(url)))];
+}
+
 export function isEmailAdvertUrl(value: string) {
   try { const url = new URL(value); return url.origin === origin && /^\/job\/[a-z0-9-]+\/$/.test(url.pathname) && !url.search; }
   catch { return false; }
@@ -51,7 +62,7 @@ export function parseEmailAdvert(html: string, url: string, now = new Date()) {
 }
 
 export async function fetchEmailPage(url: string) {
-  if (url !== emailCatalogueUrl && !isEmailAdvertUrl(url)) throw new Error("Unapproved discovery URL.");
+  if (!isEmailCatalogueUrl(url) && !isEmailAdvertUrl(url)) throw new Error("Unapproved discovery URL.");
   const response = await fetch(url, { redirect: "error", cache: "no-store", signal: AbortSignal.timeout(12000), headers: { "User-Agent": "SolvaOneJobDesk/1.0", Accept: "text/html" } });
   if (!response.ok) throw new Error(`Official recruiter returned HTTP ${response.status}.`);
   const html = await response.text();
@@ -64,7 +75,14 @@ export async function fetchEmailAdverts() {
   if (!robots.ok) throw new Error("Recruiter crawl permission could not be checked.");
   // This catalogue currently permits public crawling. Stop if that policy changes.
   if (/^\s*Disallow:\s*\S+/im.test(await robots.text())) throw new Error("Recruiter crawl policy changed; discovery paused for review.");
-  const links = emailAdvertLinks(await fetchEmailPage(emailCatalogueUrl));
+  const catalogue = await fetchEmailPage(emailCatalogueUrl);
+  const discoveredLinks = emailAdvertLinks(catalogue);
+  let catalogueFailures = 0;
+  for (const page of emailCataloguePages(catalogue)) {
+    try { discoveredLinks.push(...emailAdvertLinks(await fetchEmailPage(page))); }
+    catch { catalogueFailures++; }
+  }
+  const links = [...new Set(discoveredLinks)].slice(0, 60);
   if (!links.length) throw new Error("Recruiter catalogue contains no recognizable adverts; retained previous listings.");
   const results: NonNullable<ReturnType<typeof parseEmailAdvert>>[] = [];
   let failures = 0;
@@ -76,5 +94,5 @@ export async function fetchEmailAdverts() {
     }
   }
   if (failures === links.length) throw new Error("Recruiter adverts unavailable; retained previous listings.");
-  return { results, checked: links.length, failures };
+  return { results, checked: links.length, failures, catalogueFailures };
 }

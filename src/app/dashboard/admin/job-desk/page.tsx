@@ -7,6 +7,8 @@ import { ShareIntakeLink } from "@/components/job-desk/share-intake-link";
 import { EmailSenderTest } from "@/components/job-desk/email-sender-test";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { formatKes } from "@/lib/utils";
+import { hasSubmissionEvidence } from "@/lib/job-desk/search-recovery";
+import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 
 export default async function JobDeskPage() {
   const user = await getCurrentUser();
@@ -16,7 +18,7 @@ export default async function JobDeskPage() {
   if (profile?.role !== "admin" && profile?.role !== "super_admin") redirect("/dashboard");
 
   const [{ data: orders }, { count: websiteCount }, { count: activeCount }, { count: reviewCount }, { count: awaitingCount }, { count: queuedCount }, { count: failedCount }, { count: humanCount }] = await Promise.all([
-    db.from("job_desk_orders").select("id,status,payment_status,amount,service_type,source_channel,created_at,client:job_desk_clients(full_name,whatsapp_phone)").neq("status", "awaiting_payment").order("created_at", { ascending: false }).limit(30),
+    db.from("job_desk_orders").select("id,status,payment_status,amount,payment_reference,service_type,source_channel,created_at,client:job_desk_clients(full_name,whatsapp_phone)").neq("status", "awaiting_payment").order("created_at", { ascending: false }).limit(30),
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).eq("source_channel", "website").eq("status", "intake"),
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).in("status", ["active", "approved", "cv_processing"]),
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).eq("status", "cv_review"),
@@ -25,6 +27,14 @@ export default async function JobDeskPage() {
     db.from("job_desk_tasks").select("id", { count: "exact", head: true }).eq("status", "failed"),
     db.from("job_desk_matches").select("id", { count: "exact", head: true }).eq("status", "needs_human")
   ]);
+  const activeOrders = (orders ?? []).filter(order => order.service_type === "job_search_full" && ["approved", "active"].includes(order.status) && hasVerifiedJobDeskPayment(order));
+  const submissionCounts = new Map<string, number>();
+  if (activeOrders.length) {
+    const { data: applications, error } = await db.from("job_desk_applications").select("order_id,status,provider_message_id,provider_response").in("order_id", activeOrders.map(order => order.id));
+    if (error) throw new Error("Application outcomes could not be loaded. Please refresh.");
+    for (const application of applications ?? []) if (hasSubmissionEvidence(application)) submissionCounts.set(application.order_id, (submissionCounts.get(application.order_id) ?? 0) + 1);
+  }
+  const zeroOrders = activeOrders.filter(order => !submissionCounts.get(order.id));
 
   return (
     <AppShell email={user.email} isAdmin>
@@ -39,6 +49,11 @@ export default async function JobDeskPage() {
       </div>
 
       <EmailSenderTest />
+      {zeroOrders.length > 0 && <section className="border-b border-black/10 py-5 dark:border-white/10" aria-label="Orders without submissions">
+        <h2 className="font-black">No confirmed submissions yet · {zeroOrders.length}</h2>
+        <p className="mt-1 text-sm text-black/55 dark:text-white/55">Paid, active orders in the latest 30. Approved and authorized orders are rechecked every two hours. No eligible vacancy is not a completed application.</p>
+        <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm font-bold text-brand-blue">{zeroOrders.map(order => { const client = Array.isArray(order.client) ? order.client[0] : order.client; return <li key={order.id}><Link href={`/dashboard/admin/job-desk/${order.id}`}>{client?.full_name ?? "Review order"}</Link></li>; })}</ul>
+      </section>}
       <div className="grid border-b border-black/10 dark:border-white/10 sm:grid-cols-2 xl:grid-cols-7">
         <Metric label="New website requests" value={websiteCount ?? 0} />
         <Metric label="Active orders" value={activeCount ?? 0} />

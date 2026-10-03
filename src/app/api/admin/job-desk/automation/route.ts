@@ -10,6 +10,8 @@ import { expiredDeadline } from "@/lib/job-desk/matching";
 import { queueClientUpdate } from "@/lib/job-desk/client-updates";
 import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
 import { recommendedSources } from "@/lib/job-desk/vacancy-feeds";
+import { recoverUnderfilledSearches } from "@/lib/job-desk/search-recovery";
+import { reconcileJobDeskPipeline } from "@/lib/job-desk/reconcile";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -86,7 +88,9 @@ export async function POST(request: Request) {
       }
       queued = true;
     } else if (input.action === "run_queue") {
-      result = { processed: await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }) };
+      await reconcileJobDeskPipeline();
+      const searchRecovery = await recoverUnderfilledSearches();
+      result = { searchRecovery, processed: await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }) };
     } else if (input.action === "connect_catalogue") {
       let count = 0;
       for (const source of recommendedSources) {

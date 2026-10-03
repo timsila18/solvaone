@@ -126,7 +126,11 @@ export async function matchOrder(orderId: string) {
     if ((data ?? []).length < 1000) break;
   }
   const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
-  const pool = vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates);
+  const { data: handled, error: handledError } = await db.from("job_desk_matches").select("vacancy_id,application:job_desk_applications(id)").eq("order_id", orderId);
+  if (handledError) throw new Error(handledError.message);
+  // Existing outcomes belong to the guarded retry workflow, not a new application search.
+  const handledIds = new Set((handled ?? []).filter(item => Array.isArray(item.application) ? item.application.length > 0 : Boolean(item.application)).map(item => item.vacancy_id));
+  const pool = vacancies.filter(vacancy => !handledIds.has(vacancy.id) && (!scope || !applicationScopeHold(scope, vacancy))).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates);
   const { data: client, error: clientError } = await db.from("job_desk_clients").select("full_name,email,whatsapp_phone").eq("id", order.client_id).single();
   if (clientError || !client) throw new Error(clientError?.message ?? "Candidate contact details are missing.");
   const { data: sourceRows, error: sourcesError } = await db.from("job_desk_sources").select("id,provider,site_token,active").eq("active", true);
@@ -165,6 +169,9 @@ export async function matchOrder(orderId: string) {
   // Preserve historical/manual work; skipped forms never enter automatic preparation.
   for (const item of screened.skipped) deferred.add(item.candidate.vacancy.id);
   for (const item of pool.filter(item => submissionRouteRank(item.vacancy) === 0)) deferred.add(item.vacancy.id);
+  const examined = new Set([...screened.ready.map(item => item.vacancy.id), ...screened.skipped.map(item => item.candidate.vacancy.id)]);
+  for (const item of pool) if (!examined.has(item.vacancy.id)) deferred.add(item.vacancy.id);
+  for (const id of handledIds) deferred.add(id);
   const { data: oldMatches, error: oldError } = await db.from("job_desk_matches").select("id,vacancy_id").eq("order_id", orderId).in("status", ["suggested", "preparing", "ready"]).limit(500);
   if (oldError) throw new Error(oldError.message);
   const obsoleteIds = (oldMatches ?? []).filter((item) => !selected.has(item.vacancy_id) && !deferred.has(item.vacancy_id)).map((item) => item.id);
