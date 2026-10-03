@@ -31,7 +31,7 @@ export function reviewedShortlist<T extends { score: number; vacancy: Submission
 
 export function screeningBatch<T>(candidates: T[], window: number) {
   if (candidates.length <= 64) return candidates;
-  // Keep the strongest 48; rotate the rest so repeatedly blocked forms cannot starve them.
-  const offset = 48 + (window % Math.ceil((candidates.length - 48) / 16)) * 16;
-  return [...candidates.slice(0, 48), ...candidates.slice(offset, offset + 16)];
+  // Reserve most checks for fresh alternatives rather than repeatedly blocked top forms.
+  const offset = 16 + (window % Math.ceil((candidates.length - 16) / 48)) * 48;
+  return [...candidates.slice(0, 16), ...candidates.slice(offset, offset + 48)];
 }

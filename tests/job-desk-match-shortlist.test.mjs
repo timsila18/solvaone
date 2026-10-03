@@ -46,8 +46,15 @@ test("bounded preflight rotates lower-ranked candidates while retaining the stro
   const second = screeningBatch(candidates, 1);
   assert.equal(first.length, 64);
   assert.equal(new Set(first).size, 64);
-  assert.deepEqual(first.slice(0, 48), second.slice(0, 48));
-  assert.notDeepEqual(first.slice(48), second.slice(48));
+  assert.deepEqual(first.slice(0, 16), second.slice(0, 16));
+  assert.notDeepEqual(first.slice(16), second.slice(16));
   const seen = new Set(Array.from({ length: 5 }, (_, window) => screeningBatch(candidates, window)).flat());
   assert.equal(seen.size, 120);
+});
+
+test("blocked leaders do not prevent lower-ranked ready routes entering the next check", () => {
+  const candidates = Array.from({ length: 150 }, (_, i) => i);
+  const later = screeningBatch(candidates, 1);
+  assert.ok(later.includes(80));
+  assert.equal(later.filter(i => i >= 64).length, 48);
 });

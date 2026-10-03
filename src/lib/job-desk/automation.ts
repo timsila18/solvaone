@@ -164,7 +164,7 @@ export async function matchOrder(orderId: string) {
   const sourcesById = new Map((sourceRows ?? []).map(source => [source.id, source]));
   const details = readApplicantDetails(order.service_details);
   const blockedQuestions = new Map<string, string[]>();
-  const screened = await screenAutomaticCandidates(screeningBatch(pool.filter(item => submissionRouteRank(item.vacancy) > 0), Math.floor(Date.now() / 7200000)), async item => {
+  const screened = await screenAutomaticCandidates(screeningBatch(pool.filter(item => submissionRouteRank(item.vacancy) > 0), Math.floor(Date.now() / 300000)), async item => {
     const vacancy = item.vacancy as Vacancy & { source_id?: string };
     const hold = submissionHoldReason(vacancy.application_method === "email" ? vacancy.description : "", client.email, plainText(approved.html ?? "").length);
     if (hold) return { ready: false, blockers: [hold] };
