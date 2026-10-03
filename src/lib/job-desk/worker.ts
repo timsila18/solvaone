@@ -66,7 +66,10 @@ async function prepareMatch(matchId: string) {
     await enqueueTask("submit", `submit:${matchId}:${createHash("sha256").update(match.cover_letter ?? "").digest("hex").slice(0, 16)}`, match.order_id, { matchId });
     return;
   }
-  if (!["suggested", "preparing"].includes(match.status)) return;
+  if (!["suggested", "preparing", "ready"].includes(match.status)) return;
+  const { data: priorApplication, error: priorError } = await db.from("job_desk_applications").select("status,provider_response").eq("match_id", matchId).maybeSingle();
+  if (priorError) throw new Error(priorError.message);
+  if (priorApplication && !canRetrySubmission(priorApplication)) return;
   const { data: order, error: orderError } = await db.from("job_desk_orders").select("*,client:job_desk_clients(*)").eq("id", match.order_id).single();
   if (orderError) throw new Error(orderError.message);
   const { data: latestCv } = await db.from("job_desk_documents").select("id,status").eq("order_id", match.order_id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
@@ -77,6 +80,11 @@ async function prepareMatch(matchId: string) {
   if (profileError || !profile) throw new Error(profileError?.message ?? "Candidate profile is missing.");
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
+  if (!["approved", "active"].includes(order.status) || !client?.consent_to_process) return;
+  if (order.application_authorized) {
+    const scope = readApplicationScope(order.service_details);
+    if (!scope || !vacancy || applicationScopeHold(scope, vacancy)) return;
+  }
   if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) throw new Error("Vacancy is closed, unreviewed, duplicated or stale.");
   if (scoreVacancy(vacancy, profile, order.application_authorized ? readApplicationScope(order.service_details) : null).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) throw new Error("Vacancy needs a fresh CV-based suitability review before preparation.");
   if (!(await verifyVacancyStillOpen(vacancy))) throw new Error("Vacancy is no longer listed by its official source.");
@@ -122,7 +130,7 @@ async function prepareMatch(matchId: string) {
       throw cause;
     }
   }
-  const { data: ready, error: updateError } = await db.from("job_desk_matches").update({ cover_letter: letter, status: "ready" }).eq("id", matchId).in("status", ["suggested", "preparing"]).select("id").maybeSingle();
+  const { data: ready, error: updateError } = await db.from("job_desk_matches").update({ cover_letter: letter, status: "ready" }).eq("id", matchId).in("status", ["suggested", "preparing", "ready"]).select("id").maybeSingle();
   if (updateError) throw new Error(updateError.message);
   if (!ready || !order.application_authorized || !["approved", "active"].includes(order.status)) return;
   const scope = readApplicationScope(order.service_details);

@@ -1,6 +1,9 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enqueueTask } from "./automation";
 import { queueClientUpdate } from "./client-updates";
+import { hasVerifiedJobDeskPayment } from "./payment";
+import { readApplicationScope } from "./application-scope";
+import { discoveryWindow } from "./worker-lifecycle";
 
 export async function reconcileJobDeskPipeline() {
   const db = createSupabaseAdminClient();
@@ -23,4 +26,19 @@ export async function reconcileJobDeskPipeline() {
   const { data: matches, error: matchError } = await db.from("job_desk_matches").select("id,order_id").eq("status", "authorized").not("authorized_at", "is", null).limit(200);
   if (matchError) throw new Error(matchError.message);
   for (const match of matches ?? []) await enqueueTask("submit", `submit:${match.id}`, match.order_id, { matchId: match.id });
+  // Recover preparation interrupted before authorization; never retry an existing send outcome.
+  const { data: pending, error: pendingError } = await db.from("job_desk_matches").select("id,order_id").in("status", ["suggested", "preparing", "ready"]).order("updated_at").limit(100);
+  if (pendingError) throw new Error(pendingError.message);
+  for (const match of pending ?? []) {
+    const { data: existing, error: existingError } = await db.from("job_desk_applications").select("id").eq("match_id", match.id).maybeSingle();
+    if (existingError) throw new Error(existingError.message);
+    if (existing) continue;
+    const { data: order, error: orderError } = await db.from("job_desk_orders").select("id,status,service_type,payment_status,amount,payment_reference,application_authorized,service_details").eq("id", match.order_id).maybeSingle();
+    if (orderError) throw new Error(orderError.message);
+    if (!order || order.service_type !== "job_search_full" || !["approved", "active"].includes(order.status) || !hasVerifiedJobDeskPayment(order) || !order.application_authorized || !readApplicationScope(order.service_details)) continue;
+    const { data: cv, error: cvError } = await db.from("job_desk_documents").select("id,status").eq("order_id", order.id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+    if (cvError) throw new Error(cvError.message);
+    if (cv?.status !== "approved") continue;
+    await enqueueTask("prepare", `prepare-recovery:${match.id}:${cv.id}:${discoveryWindow()}`, order.id, { matchId: match.id });
+  }
 }
