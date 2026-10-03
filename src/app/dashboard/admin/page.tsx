@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { DashboardMetricCard } from "@/components/marketing/sections";
-import { getAiSpendSummary } from "@/lib/ai-usage";
 import { ButtonLink } from "@/components/ui/button";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { products, type ProductKey } from "@/lib/types";
 import { formatKes } from "@/lib/utils";
+import { readAllRows, revenueLedger, summarizeRevenue, type RevenueRow, type RevenueOrder, type RevenueAttempt } from "@/lib/admin/revenue";
+import { jobDeskServices } from "@/lib/job-desk/services";
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<{ range?: string; product?: string; status?: string }> }) {
   const user = await getCurrentUser();
@@ -16,49 +17,34 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   if (profile?.role !== "admin" && profile?.role !== "super_admin") redirect("/dashboard");
 
   const params = await searchParams;
-  const [usersCount, recentUsers, allPayments, failedPayments, pendingPayments, documentsCount, activity, generations, failedGenerations, paymentEvents, aiSpend, tickets, refunds, systemLogs] = await Promise.all([
+  const [usersCount, recentUsers, allPayments, failedPayments, documentsCount, activity, generations, failedGenerations, paymentEvents, tickets, refunds, systemLogs, orders, attempts, jobAi] = await Promise.all([
     supabase.from("users").select("id", { count: "exact", head: true }),
     supabase.from("users").select("email,created_at").order("created_at", { ascending: false }).limit(8),
-    supabase.from("payments").select("id,product,product_id,amount,status,created_at,result_description").order("created_at", { ascending: false }).limit(2000),
+    readAllRows<RevenueRow>((from,to) => supabase.from("payments").select("id,product,product_id,amount,status,created_at,paid_at,mpesa_receipt_number").order("id").range(from,to)),
     supabase.from("payments").select("id,amount,product,created_at", { count: "exact" }).eq("status", "failed").limit(10),
-    supabase.from("payments").select("id", { count: "exact", head: true }).in("status", ["pending", "processing"]),
     supabase.from("documents").select("id", { count: "exact", head: true }),
     supabase.from("audit_logs").select("action,entity_type,created_at").order("created_at", { ascending: false }).limit(12),
-    supabase.from("ai_generations").select("product_type,total_tokens,estimated_cost,status,quality_scores").order("created_at", { ascending: false }).limit(1000),
+    readAllRows<{ product_type: string; total_tokens: number; estimated_cost: number; status: string; quality_scores: unknown }>((from,to) => supabase.from("ai_generations").select("product_type,total_tokens,estimated_cost,status,quality_scores").order("id").range(from,to)),
     supabase.from("ai_generations").select("id,error_message,product_type,created_at", { count: "exact" }).eq("status", "failed").limit(10),
     supabase.from("payment_events").select("event_type,created_at").order("created_at", { ascending: false }).limit(500),
-    getAiSpendSummary(),
     supabase.from("tickets").select("id,subject,status,priority,created_at").order("created_at", { ascending: false }).limit(8),
     supabase.from("refund_requests").select("id,reason,status,created_at").order("created_at", { ascending: false }).limit(8),
-    supabase.from("system_logs").select("category,level,message,created_at").order("created_at", { ascending: false }).limit(8)
+    supabase.from("system_logs").select("category,level,message,created_at").order("created_at", { ascending: false }).limit(8),
+    readAllRows<RevenueOrder>((from,to) => supabase.from("job_desk_orders").select("id,service_type,amount,payment_status,payment_reference,created_at,paid_at").order("id").range(from,to)),
+    readAllRows<RevenueAttempt>((from,to) => supabase.from("job_desk_payment_attempts").select("id,order_id,amount,status,created_at,updated_at,mpesa_receipt_number").order("id").range(from,to)),
+    readAllRows<{total_tokens:number; estimated_cost:number}>((from,to) => supabase.from("job_desk_ai_runs").select("total_tokens,estimated_cost").order("id").range(from,to))
   ]);
 
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const filteredPayments = (allPayments.data ?? []).filter((payment) => {
-    const productOk = !params.product || params.product === "all" || payment.product_id === params.product || payment.product === params.product;
-    const statusOk = !params.status || params.status === "all" || payment.status === params.status;
-    return productOk && statusOk;
-  });
-  const successfulPayments = filteredPayments.filter((payment) => payment.status === "successful" || payment.status === "paid");
-  const revenue = successfulPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const revenueToday = successfulPayments.filter((payment) => new Date(payment.created_at) >= today).reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const revenueMonth = successfulPayments.filter((payment) => new Date(payment.created_at) >= monthStart).reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const averageOrderValue = successfulPayments.length ? revenue / successfulPayments.length : 0;
-  const conversionRate = filteredPayments.length ? Math.round((successfulPayments.length / filteredPayments.length) * 100) : 0;
+  const ledger = revenueLedger(allPayments, orders, attempts);
+  const summary = summarizeRevenue(ledger, { ...params, range: params.range ?? "all" });
+  const { filtered: filteredPayments, successful: successfulPayments, revenue, revenueToday, revenueMonth, averageOrderValue, conversionRate, byProduct } = summary;
+  const productTitles: Record<string,string> = { ...Object.fromEntries(Object.entries(products).map(([key,value]) => [key,value.title])), ...Object.fromEntries(Object.entries(jobDeskServices).map(([key,value]) => [key,value.name])), cv_build: "CV Builder", cv_cover_bundle: "CV + Cover Letter Bundle" };
+  const metricErrors = [usersCount, documentsCount, paymentEvents].some(result => result.error);
   const callbackFailures = (paymentEvents.data ?? []).filter((event) => event.event_type?.includes("unknown") || event.event_type?.includes("unmatched")).length;
-  const byProduct = successfulPayments.reduce(
-    (acc, payment) => {
-      acc[payment.product as ProductKey] = (acc[payment.product as ProductKey] ?? 0) + Number(payment.amount);
-      return acc;
-    },
-    {} as Partial<Record<ProductKey, number>>
-  );
-  const highestSellingProduct = Object.entries(byProduct).sort((a, b) => b[1] - a[1])[0]?.[0] as ProductKey | undefined;
-  const generationRows = generations.data ?? [];
-  const totalTokens = generationRows.reduce((sum, item) => sum + Number(item.total_tokens ?? 0), 0);
-  const estimatedAiCost = generationRows.reduce((sum, item) => sum + Number(item.estimated_cost ?? 0), 0);
+  const highestSellingProduct = Object.entries(byProduct).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const generationRows = generations;
+  const totalTokens = [...generationRows,...jobAi].reduce((sum, item) => sum + Number(item.total_tokens ?? 0), 0);
+  const estimatedAiCost = [...generationRows,...jobAi].reduce((sum, item) => sum + Number(item.estimated_cost ?? 0), 0);
   const generationsByProduct = generationRows.reduce(
     (acc, item) => {
       acc[item.product_type as ProductKey] = (acc[item.product_type as ProductKey] ?? 0) + 1;
@@ -79,34 +65,36 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       <div className="mb-8">
         <h1 className="text-4xl font-black">Admin Dashboard</h1>
         <p className="mt-2 text-black/55 dark:text-white/55">Operational visibility for SolvaOne.</p>
+        <p className="mt-2 text-sm">Revenue includes document and Job Hunting services. Nairobi dates; admin-recorded payments are not M-Pesa verification. All-time admin-recorded revenue: {formatKes(summary.adminRecorded)}.</p>
+        {metricErrors && <p role="alert">Some dashboard records could not be loaded. Retry before relying on these totals.</p>}
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardMetricCard label="Total Users" value={String(usersCount.count ?? 0)} />
+        <DashboardMetricCard label="Total Users" value={usersCount.error ? "Unavailable" : String(usersCount.count ?? 0)} />
         <DashboardMetricCard label="Revenue Today" value={formatKes(revenueToday)} />
         <DashboardMetricCard label="Revenue This Month" value={formatKes(revenueMonth)} />
         <DashboardMetricCard label="Revenue All Time" value={formatKes(revenue)} />
-        <DashboardMetricCard label="Documents Generated" value={String(documentsCount.count ?? 0)} />
-        <DashboardMetricCard label="Successful Payments" value={String(successfulPayments.length)} />
-        <DashboardMetricCard label="Failed Payments" value={String(failedPayments.count ?? 0)} />
-        <DashboardMetricCard label="Pending Payments" value={String(pendingPayments.count ?? 0)} />
+        <DashboardMetricCard label="Documents Saved" value={documentsCount.error ? "Unavailable" : String(documentsCount.count ?? 0)} />
+        <DashboardMetricCard label="Paid Transactions (Selected Period)" value={String(successfulPayments.length)} />
+        <DashboardMetricCard label="Failed Payments (Selected Period)" value={String(summary.failed)} />
+        <DashboardMetricCard label="Pending Payments (Selected Period)" value={String(summary.pending)} />
         <DashboardMetricCard label="Average Order Value" value={formatKes(averageOrderValue)} />
-        <DashboardMetricCard label="Conversion Rate" value={`${conversionRate}%`} />
-        <DashboardMetricCard label="Top Product" value={highestSellingProduct ? products[highestSellingProduct].title : "None"} />
+        <DashboardMetricCard label="Paid Transaction Share" value={`${conversionRate}%`} />
+        <DashboardMetricCard label="Top Product by Revenue" value={highestSellingProduct ? productTitles[highestSellingProduct] ?? highestSellingProduct : "None"} />
         <DashboardMetricCard label="Callback Failures" value={String(callbackFailures)} />
-        <DashboardMetricCard label="AI Generations" value={String(generationRows.length)} />
+        <DashboardMetricCard label="Document / Job Hunting AI Runs" value={`${generationRows.length} / ${jobAi.length}`} />
         <DashboardMetricCard label="AI Tokens" value={totalTokens.toLocaleString()} />
         <DashboardMetricCard label="Estimated AI Cost" value={`$${estimatedAiCost.toFixed(4)}`} />
-        <DashboardMetricCard label="AI Spend Total" value={`$${aiSpend.total.toFixed(4)}`} />
+        <DashboardMetricCard label="Job Hunting CV AI Cost" value={`$${jobAi.reduce((sum,row)=>sum+Number(row.estimated_cost ?? 0),0).toFixed(4)}`} />
         <DashboardMetricCard label="Average Quality" value={averageQuality ? `${averageQuality}%` : "0%"} />
       </div>
       <div className="mt-6 flex flex-wrap gap-3">
         <ButtonLink href="/dashboard/admin/job-desk">Open Job Desk</ButtonLink>
-        <ButtonLink href="/api/admin/reports/revenue?format=csv">Export CSV</ButtonLink>
-        <ButtonLink href="/api/admin/reports/revenue?format=excel" variant="secondary">Export Excel</ButtonLink>
+        <ButtonLink href={`/api/admin/reports/revenue?format=csv&${new URLSearchParams({range:params.range ?? "all",product:params.product ?? "all",status:params.status ?? "all"})}`}>Export CSV</ButtonLink>
+        <ButtonLink href={`/api/admin/reports/revenue?format=excel&${new URLSearchParams({range:params.range ?? "all",product:params.product ?? "all",status:params.status ?? "all"})}`} variant="secondary">Export Excel</ButtonLink>
         <ButtonLink href="/dashboard/admin/launch" variant="secondary">Launch Readiness</ButtonLink>
       </div>
       <form className="mt-6 flex flex-wrap gap-3 rounded-lg border border-black/10 p-4 dark:border-white/10">
-        <select name="range" defaultValue={params.range ?? "month"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
+        <select name="range" defaultValue={params.range ?? "all"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
           <option value="today">Today</option>
           <option value="week">This week</option>
           <option value="month">This month</option>
@@ -114,8 +102,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </select>
         <select name="product" defaultValue={params.product ?? "all"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
           <option value="all">All products</option>
-          {(Object.keys(products) as ProductKey[]).map((key) => (
-            <option key={key} value={key}>{products[key].title}</option>
+          {Object.keys(productTitles).map((key) => (
+            <option key={key} value={key}>{productTitles[key]}</option>
           ))}
         </select>
         <select name="status" defaultValue={params.status ?? "all"} className="h-10 rounded-lg border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black">
@@ -132,11 +120,11 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
           <h2 className="text-xl font-black">Payment Issue Alerts</h2>
           <div className="mt-5 space-y-3">
-            {Number(failedPayments.count ?? 0) || callbackFailures ? (
+            {summary.failed || summary.pending || callbackFailures ? (
               <>
-                <AlertLine label="Failed payments" value={String(failedPayments.count ?? 0)} />
+                <AlertLine label="Failed payments" value={String(summary.failed)} />
                 <AlertLine label="M-Pesa callback failures" value={String(callbackFailures)} />
-                <AlertLine label="Pending/processing payments" value={String(pendingPayments.count ?? 0)} />
+                <AlertLine label="Pending/processing payments" value={String(summary.pending)} />
               </>
             ) : (
               <p className="text-sm text-black/55 dark:text-white/55">No payment issues currently flagged.</p>
@@ -156,16 +144,16 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <div className="rounded-lg border border-black/10 p-5 dark:border-white/10">
           <h2 className="text-xl font-black">Revenue by Product</h2>
           <div className="mt-5 space-y-3">
-            {(Object.keys(products) as ProductKey[]).map((key) => (
+            {Object.keys(productTitles).map((key) => (
               <div key={key}>
                 <div className="flex justify-between text-sm font-bold">
-                  <span>{products[key].title}</span>
+                  <span>{productTitles[key]}</span>
                   <span>{formatKes(byProduct[key] ?? 0)}</span>
                 </div>
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
                   <div
                     className="h-full rounded-full bg-brand-blue"
-                    style={{ width: revenue ? `${Math.min(100, ((byProduct[key] ?? 0) / revenue) * 100)}%` : "0%" }}
+                    style={{ width: summary.selectedRevenue ? `${Math.min(100, ((byProduct[key] ?? 0) / summary.selectedRevenue) * 100)}%` : "0%" }}
                   />
                 </div>
               </div>
@@ -229,8 +217,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <div className="mt-5 space-y-3">
             {filteredPayments.slice(0, 8).map((payment) => (
               <div key={payment.id} className="flex justify-between gap-3 rounded-lg border border-black/10 p-3 text-sm dark:border-white/10">
-                <span className="font-bold">{products[payment.product as ProductKey]?.title ?? payment.product}</span>
-                <span className="text-black/50 dark:text-white/50">{formatKes(payment.amount)} - {payment.status}</span>
+                <span className="font-bold">{productTitles[payment.product_id ?? payment.product] ?? payment.product} · {payment.source}</span>
+                <span className="text-black/50 dark:text-white/50">{formatKes(Number(payment.amount))} - {payment.status}</span>
               </div>
             ))}
           </div>
@@ -279,7 +267,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </div>
       </section>
       <section className="mt-8 rounded-lg border border-black/10 p-5 dark:border-white/10">
-        <h2 className="text-xl font-black">Failed Payments</h2>
+        <h2 className="text-xl font-black">Failed Document Payments</h2>
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="text-black/45 dark:text-white/45">
