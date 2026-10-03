@@ -106,7 +106,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
       if (!allowed.has(id)) return NextResponse.json({ error: "A questionnaire item was not recognized." }, { status: 400 });
       answers[id] = answer.trim();
     }
-    const complete = questions.every((question) => question.required === false || Boolean(answers[question.id]?.trim()));
+    const complete = questions.every((question) => question.required === false || Boolean(answers[question.id]?.trim()) && !/\b(?:not provided|to be provided|not confirmed)\b/i.test(answers[question.id]));
     const { error } = await db.from("job_desk_questionnaires").update({ responses: answers, status: complete ? "answered" : "open" }).eq("id", questionnaire.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else {

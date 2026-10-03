@@ -7,6 +7,7 @@ import { ManualSubmissionForm } from "@/components/job-desk/manual-submission-fo
 import { EmailHandoff } from "@/components/job-desk/email-handoff";
 import { ClientEmailForm } from "@/components/job-desk/client-email-form";
 import { QuestionnaireResponseForm } from "@/components/job-desk/questionnaire-response-form";
+import { questionnaireDrafts } from "@/lib/job-desk/questionnaire-drafts";
 import { CopyCandidateDetails, CopyMatches } from "@/components/job-desk/copy-matches";
 import { BatchAuthorizationControl } from "@/components/job-desk/batch-authorization-control";
 import { ApplicantDetailsForm } from "@/components/job-desk/applicant-details-form";
@@ -151,7 +152,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
           <BatchAuthorizationControl orderId={orderId} readyCount={matches.filter((match) => match.status === "ready").length} />
           </div> : null}
           {isCvService ? <section><div className="flex items-end justify-between border-b border-black/10 pb-3 dark:border-white/10"><div><h2 className="text-xl font-black">Consolidated client questions</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">Ask once, then record all missing details together.</p></div><span className="text-sm font-bold text-brand-blue">{questions.length} questions</span></div>
-            {questions.length ? <QuestionnaireResponseForm orderId={orderId} questions={questions} responses={(questionnaire?.responses ?? {}) as Record<string, string>} /> : <p className="py-8 text-sm text-black/50 dark:text-white/50">Process the CV to create one consolidated questionnaire.</p>}
+            {questions.length ? <QuestionnaireResponseForm orderId={orderId} questions={questions} responses={(questionnaire?.responses ?? {}) as Record<string, string>} drafts={questionnaireDrafts(questions,extracted)} /> : <p className="py-8 text-sm text-black/50 dark:text-white/50">Process the CV to create one consolidated questionnaire.</p>}
           </section> : null}
 
           {isCvService ? <section><div className="flex flex-wrap items-end justify-between gap-3 border-b border-black/10 pb-3 dark:border-white/10"><div><h2 className="text-xl font-black">Approval-ready CV</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">Review every fact before approving or using it for applications.</p></div>{document ? <div className="flex flex-wrap items-center gap-2"><span className="mr-2 text-sm font-bold text-brand-blue">Version {document.version} · {document.status}</span><a href={`/api/admin/job-desk/orders/${orderId}/download?format=pdf`} className="inline-flex h-9 items-center gap-2 rounded border border-black/20 px-3 text-sm font-bold dark:border-white/20"><FileDown className="h-4 w-4" />PDF</a><a href={`/api/admin/job-desk/orders/${orderId}/download?format=docx`} className="inline-flex h-9 items-center gap-2 rounded border border-black/20 px-3 text-sm font-bold dark:border-white/20"><FileDown className="h-4 w-4" />Word</a></div> : null}</div>
