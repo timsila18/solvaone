@@ -23,6 +23,7 @@ import { ApplicationEmailError, sendApplicationEmail } from "./email-transport";
 import { reconcileEmailDeliveries } from "./email-delivery";
 import { recommendedSources } from "./vacancy-feeds";
 import { claimApplication } from "./submission-lock";
+import { recoverableSubmission } from "./recovery-route";
 import { LETTER_PROMPT_VERSION, LETTER_WRITER_PROMPT, LETTER_REVIEW_PROMPT, letterDate, formatApplicationLetter, validateLetterBody, parseLetterReview } from "./letter-quality";
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
@@ -353,13 +354,25 @@ async function processTask(task: Task) {
   if (task.task_type === "notify_client" && task.order_id && task.payload.event && task.payload.reference) return sendClientUpdate(task.order_id, task.payload.event as ClientUpdate, task.payload.reference);
   if (task.task_type === "schedule") {
     const window = discoveryWindow();
+    // Retry only pre-send infrastructure holds; the existing handler revalidates scope and facts.
+    const { data: heldApplications, error: recoveryError } = await db.from("job_desk_applications").select("match_id,order_id,status,provider_response,error_message,match:job_desk_matches(vacancy:job_desk_vacancies(application_method,email_verified,application_email,source:job_desk_sources(active,provider)))").eq("status", "needs_human").order("updated_at", { ascending: true }).limit(100);
+    if (recoveryError) throw new Error(recoveryError.message);
+    let recoveryCount = 0;
+    for (const application of heldApplications ?? []) {
+      const match = Array.isArray(application.match) ? application.match[0] : application.match;
+      const vacancy = Array.isArray(match?.vacancy) ? match.vacancy[0] : match?.vacancy;
+      const source = Array.isArray(vacancy?.source) ? vacancy.source[0] : vacancy?.source;
+      if (!vacancy || !recoverableSubmission(application, vacancy, source ?? null)) continue;
+      await enqueueTask("resume_assisted", `recover-preflight:${application.match_id}:${window}`, application.order_id, { matchId: application.match_id });
+      if (++recoveryCount >= 20) break;
+    }
     const { error: catalogueError } = await db.from("job_desk_sources").upsert(recommendedSources.map(source => ({ ...source, active: true })), { onConflict: "provider,site_token", ignoreDuplicates: true });
     if (catalogueError) throw new Error(catalogueError.message);
     await enqueueTask("discover_email", `email-discovery:${window}`, null);
     const { data: sources, error: sourcesError } = await db.from("job_desk_sources").select("id").eq("active", true);
     if (sourcesError) throw new Error(sourcesError.message);
     for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:${window}`, null, { sourceId: source.id });
-    return { count: sources?.length ?? 0, emailDelivery: await reconcileEmailDeliveries() };
+    return { count: sources?.length ?? 0, recoveryCount, emailDelivery: await reconcileEmailDeliveries() };
   }
   throw new Error(`Unknown Job Desk task: ${task.task_type}`);
 }
