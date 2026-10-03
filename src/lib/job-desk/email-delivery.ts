@@ -3,8 +3,8 @@ import { queueClientUpdate } from "./client-updates";
 import { observedDelivery, terminalDeliveryEvents as terminal } from "./email-delivery-state";
 
 // Read-only reconciliation: never retries an employer submission.
-export async function reconcileEmailDeliveries() {
-  const summary = { checked: 0, updated: 0, errors: 0, configurationBlocked: false };
+export async function reconcileEmailDeliveries({ force = false }: { force?: boolean } = {}) {
+  const summary = { checked: 0, updated: 0, errors: 0, configurationBlocked: false, acceptedApplications: 0, delivered: 0, deliveryFailures: 0 };
   const key = process.env.RESEND_API_KEY;
   if (!key) return { ...summary, configurationBlocked: true };
   const db = createSupabaseAdminClient();
@@ -13,9 +13,12 @@ export async function reconcileEmailDeliveries() {
     .eq("status", "submitted").eq("method", "email").not("provider_message_id", "is", null)
     .order("created_at", { ascending: false }).limit(500);
   if (error) throw new Error(error.message);
-  const due = (data ?? []).filter((row: any) => !terminal.has(row.provider_response?.delivery?.event)
+  summary.acceptedApplications = data?.length ?? 0;
+  summary.delivered = (data ?? []).filter((row: any) => row.provider_response?.delivery?.event === "email.delivered").length;
+  summary.deliveryFailures = (data ?? []).filter((row: any) => terminal.has(row.provider_response?.delivery?.event) && row.provider_response?.delivery?.event !== "email.delivered").length;
+  const due = (data ?? []).filter((row: any) => (force || !terminal.has(row.provider_response?.delivery?.event))
     && /^[a-f0-9-]{36}$/i.test(row.provider_message_id)
-    && !(Date.now() - Date.parse(row.provider_response?.deliveryPoll?.checkedAt ?? "") < 3600000))
+    && (force || !(Date.now() - Date.parse(row.provider_response?.deliveryPoll?.checkedAt ?? "") < 3600000)))
     .sort((a: any, b: any) => (Date.parse(a.provider_response?.deliveryPoll?.checkedAt ?? "") || 0) - (Date.parse(b.provider_response?.deliveryPoll?.checkedAt ?? "") || 0));
   // Repair notification enqueue failures independently of provider polling.
   for (const row of data ?? []) {
@@ -45,6 +48,8 @@ export async function reconcileEmailDeliveries() {
       if (saveError) throw new Error(saveError.message);
       if (!saved) continue;
       summary.updated += 1;
+      if (delivery.event === "email.delivered" && previous.delivery?.event !== delivery.event) summary.delivered += 1;
+      if (terminal.has(delivery.event) && delivery.event !== "email.delivered" && !terminal.has(previous.delivery?.event)) summary.deliveryFailures += 1;
       if (terminal.has(delivery.event)) await queueClientUpdate(row.order_id, delivery.event === "email.delivered" ? "application_delivered" : "application_delivery_failed", row.match_id);
     } catch { summary.errors += 1; }
   }

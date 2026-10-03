@@ -1,10 +1,11 @@
 import { isOfficialApplyUrl } from "./vacancy-feeds";
+import { leverPreflight } from "./lever-preflight";
 
 export type PortalQuestion = { label: string; required?: boolean; fields?: { name: string; type: string; values?: { label: string; value: unknown }[] }[] };
 export type SubmissionPreflight = { ready: boolean; blockers: string[]; checkedAt: string; fieldAnswers?: Record<string, string>; fieldSelections?: Record<string, string> };
 
 export function normalizeQuestion(text: string) {
-  return text.replace(/\*/g, "").replace(/\s+Select\.\.\.$/i, "").replace(/\s+/g, " ").trim().toLowerCase();
+  return text.replace(/[✱*]/g, "").replace(/\s+Select\.\.\.$/i, "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 export function verifiedAnswers(text: string) {
@@ -83,6 +84,7 @@ export async function submissionPreflight(input: { method: string; emailVerified
     if (!process.env.RESEND_API_KEY || !(process.env.JOB_DESK_FROM_EMAIL ?? process.env.FROM_EMAIL)) blockers.push("Configure the verified application email sender.");
     return { ready: blockers.length === 0, blockers, checkedAt };
   }
+  if (input.provider === "lever" && input.siteToken && isOfficialApplyUrl("lever", input.siteToken, input.url)) return leverPreflight({ ...input, siteToken: input.siteToken });
   if (input.provider !== "greenhouse" || !input.siteToken || !isOfficialApplyUrl("greenhouse", input.siteToken, input.url)) return { ready: false, blockers: ["Unsupported portal: use the prepared admin application packet."], checkedAt };
   const jobId = new URL(input.url).pathname.match(/\/jobs\/(\d+)/)?.[1];
   if (!jobId) return { ready: false, blockers: ["Cannot verify the official portal job ID."], checkedAt };

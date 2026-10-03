@@ -14,6 +14,7 @@ export type FeedVacancy = {
 };
 
 export const recommendedSources: FeedSource[] = [
+  { provider: "greenhouse", site_token: "acumen", company_name: "Acumen" },
   { provider: "ashby", site_token: "talentsafari", company_name: "Talent Safari" },
   { provider: "ashby", site_token: "the-global-talent-co", company_name: "The Global Talent Co" },
   { provider: "smartrecruiters", site_token: "AccorHotel", company_name: "Accor Kenya" },

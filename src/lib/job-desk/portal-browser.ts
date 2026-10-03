@@ -3,6 +3,7 @@ import { Document, Packer, Paragraph } from "docx";
 import { isOfficialApplyUrl } from "./vacancy-feeds";
 
 export type PortalApplication = {
+  provider?: "greenhouse" | "lever";
   url: string;
   siteToken: string;
   firstName: string;
@@ -22,7 +23,7 @@ export type PortalApplication = {
 type PortalResult = { status: "submitted" | "needs_human"; reason?: string; confirmation?: string; finalUrl?: string; clicked?: boolean };
 
 export function canAutomatePortal(provider: string, siteToken: string, url: string) {
-  return provider === "greenhouse" && isOfficialApplyUrl("greenhouse", siteToken, url);
+  return (provider === "greenhouse" || provider === "lever") && isOfficialApplyUrl(provider, siteToken, url);
 }
 
 // The browser VM receives only this application's CV and contact details, never a database key.
@@ -39,17 +40,17 @@ function evaluate(expression) {
 }
 function hold(reason) { return { status: 'needs_human', reason, clicked }; }
 function allowed(url) {
-  try { const u = new URL(url); return u.protocol === 'https:' && ['boards.greenhouse.io', 'job-boards.greenhouse.io'].includes(u.hostname) && u.pathname.split('/')[1].toLowerCase() === data.siteToken.toLowerCase(); }
+  try { const u = new URL(url); const hosts = data.provider === 'lever' ? ['jobs.lever.co'] : ['boards.greenhouse.io', 'job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io']; return u.protocol === 'https:' && hosts.includes(u.hostname) && u.pathname.split('/')[1].toLowerCase() === data.siteToken.toLowerCase(); }
   catch { return false; }
 }
 function inspect() { return evaluate("JSON.stringify({url:location.href,body:document.body.innerText.slice(0,12000),challenge:!!document.querySelector('iframe[src*=recaptcha],iframe[src*=hcaptcha],.h-captcha,.g-recaptcha'),fields:[...document.querySelectorAll('input,select,textarea')].filter(e=>e.getClientRects().length && e.type!=='hidden').map(e=>({tag:e.tagName,type:e.type,name:e.name,id:e.id,required:e.required||e.getAttribute('aria-required')==='true',label:(e.labels?.[0]?.innerText||e.parentElement?.parentElement?.innerText||'').trim().slice(0,160)}))})"); }
 try {
-  browser('open', data.url);
+  browser('open', data.provider === 'lever' ? data.url.replace(/\/apply\/?$/, '').replace(/\/$/, '') + '/apply' : data.url);
   let page = inspect();
   if (!allowed(page.url)) throw new Error('Application redirected outside the verified employer board.');
   if (page.challenge || /security challenge|verify you are human|complete (?:an? )?assessment|identity verification required/i.test(page.body)) throw new Error('The portal requires a challenge or assessment.');
-  const values = { first_name: data.firstName, last_name: data.lastName, email: data.email, phone: data.phone, linkedin_profile: data.linkedinUrl, website: data.portfolioUrl };
-  const normalize = text => String(text || '').replace(/\*/g, '').replace(/\s+Select\.\.\.$/i, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const values = { first_name: data.firstName, last_name: data.lastName, name: data.firstName + ' ' + data.lastName, email: data.email, phone: data.phone, linkedin_profile: data.linkedinUrl, 'urls[LinkedIn]': data.linkedinUrl, 'urls[Portfolio]': data.portfolioUrl, website: data.portfolioUrl };
+  const normalize = text => String(text || '').replace(/[✱*]/g, '').replace(/\s+Select\.\.\.$/i, '').replace(/\s+/g, ' ').trim().toLowerCase();
   const confirmedAnswers = new Map(String(data.portalAnswers || '').split(/\r?\n/).map(line => { const i = line.indexOf(' = '); return i > 0 ? [normalize(line.slice(0,i)), line.slice(i+3).trim()] : null; }).filter(Boolean));
   const handled = new Set();
   for (const field of page.fields) {
@@ -94,7 +95,7 @@ try {
   page = inspect();
   if (!allowed(page.url)) throw new Error('Application moved outside the verified employer board.');
   const completedGroups = evaluate("JSON.stringify([...document.querySelectorAll('input[type=checkbox],input[type=radio]')].filter(e=>e.checked && e.name).map(e=>e.name))");
-  const unknown = page.fields.filter(f => (f.required || /\*\s*$/.test(f.label)) && !handled.has(f.name || f.id) && !completedGroups.includes(f.name) && !( !f.name && !f.id && page.fields.some(other => other.id && handled.has(other.id) && normalize(other.label) === normalize(f.label))));
+  const unknown = page.fields.filter(f => (f.required || /[✱*]\s*$/.test(f.label)) && !handled.has(f.name || f.id) && !completedGroups.includes(f.name) && !( !f.name && !f.id && page.fields.some(other => other.id && handled.has(other.id) && normalize(other.label) === normalize(f.label))));
   const questions = [...new Set(unknown.map(f => normalize(f.label) || f.name || f.id || 'unnamed field'))];
   if (questions.length) throw new Error('Admin action needed: supply verified answers or required documents for ' + questions.join('; ').slice(0, 900));
   if (page.challenge || /security challenge|verify you are human|complete (?:an? )?assessment|identity verification required/i.test(page.body)) throw new Error('The portal requires a challenge or assessment.');
@@ -120,7 +121,7 @@ async function checked(sandbox: Sandbox, cmd: string, args: string[]) {
 }
 
 export async function runPortalApplication(data: PortalApplication, cv: Buffer): Promise<PortalResult> {
-  if (!canAutomatePortal("greenhouse", data.siteToken, data.url)) throw new Error("Unsupported or unverified portal URL.");
+  if (!canAutomatePortal(data.provider ?? "greenhouse", data.siteToken, data.url)) throw new Error("Unsupported or unverified portal URL.");
   if (!data.firstName || !data.lastName || !data.email || !data.phone) return { status: "needs_human", reason: "Candidate name, email or phone is missing." };
   const sandbox = await Sandbox.create({ runtime: "node24", timeout: 180000 });
   try {

@@ -9,7 +9,7 @@ export function submissionRouteRank(vacancy: SubmissionRoute): number {
   if (vacancy.application_method === "email") {
     return vacancy.email_verified && vacancy.application_email?.trim() ? 2 : 0;
   }
-  return vacancy.application_method === "portal" && vacancy.provider === "greenhouse" ? 1 : 0;
+  return vacancy.application_method === "portal" && ["greenhouse", "lever"].includes(vacancy.provider ?? "") ? 1 : 0;
 }
 
 export function compareSubmissionCandidates(

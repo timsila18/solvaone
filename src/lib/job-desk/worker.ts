@@ -21,6 +21,7 @@ import { claimPrioritizedTask } from "./task-priority";
 import { discoveryWindow, renewTaskLease } from "./worker-lifecycle";
 import { ApplicationEmailError, sendApplicationEmail } from "./email-transport";
 import { reconcileEmailDeliveries } from "./email-delivery";
+import { recommendedSources } from "./vacancy-feeds";
 import { claimApplication } from "./submission-lock";
 import { LETTER_PROMPT_VERSION, LETTER_WRITER_PROMPT, LETTER_REVIEW_PROMPT, letterDate, formatApplicationLetter, validateLetterBody, parseLetterReview } from "./letter-quality";
 
@@ -225,7 +226,7 @@ async function submitMatch(matchId: string) {
     if (!(await claimApplication(matchId, order.id, "portal", vacancy.apply_url))) return;
     let portalConfirmation: { confirmation: string; finalUrl?: string } | undefined;
     try {
-      const result = await runPortalApplication({ url: vacancy.apply_url, siteToken: source.site_token, firstName: names[0] ?? "", lastName: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedinUrl: details?.applicantLinkedinUrl, portfolioUrl: details?.portfolioUrl, portalAnswers: answersForMatch(order.service_details, matchId, details?.portalAnswers ?? "", latestCv.id), fieldAnswers: submissionCheck.fieldAnswers, fieldSelections: submissionCheck.fieldSelections, city: details?.currentCity, country: details?.currentCountry, coverLetter: match.cover_letter }, cvFile);
+      const result = await runPortalApplication({ provider: source.provider, url: vacancy.apply_url, siteToken: source.site_token, firstName: names[0] ?? "", lastName: names.slice(1).join(" "), email: client.email ?? "", phone: client.whatsapp_phone ?? "", linkedinUrl: details?.applicantLinkedinUrl, portfolioUrl: details?.portfolioUrl, portalAnswers: answersForMatch(order.service_details, matchId, details?.portalAnswers ?? "", latestCv.id), fieldAnswers: submissionCheck.fieldAnswers, fieldSelections: submissionCheck.fieldSelections, city: details?.currentCity, country: details?.currentCountry, coverLetter: match.cover_letter }, cvFile);
       if (result.status === "submitted" && result.confirmation) {
         portalConfirmation = { confirmation: result.confirmation, finalUrl: result.finalUrl };
         const { error: confirmationError } = await db.from("job_desk_applications").update({ status: "submitted", provider_response: { confirmation: result.confirmation, finalUrl: result.finalUrl, clicked: true, verification_type: "portal_confirmation" }, submitted_at: new Date().toISOString(), error_message: null }).eq("match_id", matchId);
@@ -338,6 +339,8 @@ async function processTask(task: Task) {
   if (task.task_type === "notify_client" && task.order_id && task.payload.event && task.payload.reference) return sendClientUpdate(task.order_id, task.payload.event as ClientUpdate, task.payload.reference);
   if (task.task_type === "schedule") {
     const window = discoveryWindow();
+    const { error: catalogueError } = await db.from("job_desk_sources").upsert(recommendedSources.map(source => ({ ...source, active: true })), { onConflict: "provider,site_token", ignoreDuplicates: true });
+    if (catalogueError) throw new Error(catalogueError.message);
     await enqueueTask("discover_email", `email-discovery:${window}`, null);
     const { data: sources, error: sourcesError } = await db.from("job_desk_sources").select("id").eq("active", true);
     if (sourcesError) throw new Error(sourcesError.message);

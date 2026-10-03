@@ -4,11 +4,15 @@ import { compareSubmissionCandidates, submissionRouteRank } from "../src/lib/job
 
 test("verified email and supported portals precede unsupported high-score forms", () => {
   const candidates = [
-    { score: 99, vacancy: { application_method: "portal", provider: "lever" } },
+    { score: 99, vacancy: { application_method: "portal", provider: "ashby" } },
     { score: 80, vacancy: { application_method: "portal", provider: "greenhouse" } },
     { score: 25, vacancy: { application_method: "email", email_verified: true, application_email: "jobs@example.com" } },
   ];
   assert.deepEqual(candidates.sort(compareSubmissionCandidates).map(item => item.score), [25, 80, 99]);
+});
+
+test("Lever forms enter preflight alongside Greenhouse, below verified employer email", () => {
+  assert.equal(submissionRouteRank({ application_method: "portal", provider: "lever" }), 1);
 });
 
 test("unverified or empty email recipients never enter the automatic lane", () => {

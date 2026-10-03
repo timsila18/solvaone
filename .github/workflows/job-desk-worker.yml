@@ -4,6 +4,14 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Process tasks or check accepted email delivery without new submissions'
+        type: choice
+        default: worker
+        options:
+          - worker
+          - delivery
 
 permissions: {}
 
@@ -19,12 +27,15 @@ jobs:
       - name: Process durable production tasks
         env:
           WORKER_SECRET: ${{ secrets.SOLVAONE_JOB_DESK_WORKER_SECRET }}
+          RUN_MODE: ${{ inputs.mode }}
         run: |
           if [ -z "$WORKER_SECRET" ]; then
             echo 'Missing Job Desk worker secret.'
             exit 1
           fi
+          ENDPOINT=worker
+          if [ "$RUN_MODE" = 'delivery' ]; then ENDPOINT=delivery-check; fi
           curl --fail-with-body --silent --show-error \
             --max-time 330 \
             --header "Authorization: Bearer $WORKER_SECRET" \
-            'https://solvaone.co.ke/api/job-desk/worker'
+            "https://solvaone.co.ke/api/job-desk/$ENDPOINT"
