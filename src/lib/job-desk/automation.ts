@@ -6,6 +6,7 @@ import { reviewCandidateMatches } from "./relevance";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { compareSubmissionCandidates, submissionRouteRank } from "./submission-priority";
 import { screenAutomaticCandidates } from "./automatic-screen";
+import { APPLICATION_TARGET, SHORTLIST_TARGET, occupiesApplicationSlot, reviewedShortlist, screeningBatch } from "./match-shortlist";
 import { draftableQuestions, prohibitsAnswerDrafting } from "./question-policy";
 import { answersForMatch } from "./assisted-answers";
 import { submissionPreflight } from "./submission-preflight";
@@ -126,10 +127,17 @@ export async function matchOrder(orderId: string) {
     if ((data ?? []).length < 1000) break;
   }
   const scope = order.application_authorized ? readApplicationScope(order.service_details) : null;
-  const { data: handled, error: handledError } = await db.from("job_desk_matches").select("vacancy_id,application:job_desk_applications(id)").eq("order_id", orderId);
+  const { data: handled, error: handledError } = await db.from("job_desk_matches").select("id,vacancy_id,status,application:job_desk_applications(id,status,provider_message_id,provider_response)").eq("order_id", orderId);
   if (handledError) throw new Error(handledError.message);
   // Existing outcomes belong to the guarded retry workflow, not a new application search.
   const handledIds = new Set((handled ?? []).filter(item => Array.isArray(item.application) ? item.application.length > 0 : Boolean(item.application)).map(item => item.vacancy_id));
+  const { data: queuedPreparation, error: preparationError } = await db.from("job_desk_tasks").select("payload").eq("order_id", orderId).eq("task_type", "prepare").in("status", ["queued", "running"]);
+  if (preparationError) throw new Error(preparationError.message);
+  const preparingIds = new Set((queuedPreparation ?? []).map(item => (item.payload as { matchId?: string })?.matchId));
+  const committedMatches = (handled ?? []).filter(item => occupiesApplicationSlot(item, preparingIds));
+  const committedSlots = committedMatches.length;
+  for (const item of committedMatches) handledIds.add(item.vacancy_id);
+  const remainingSlots = Math.max(0, APPLICATION_TARGET - committedSlots);
   const pool = vacancies.filter(vacancy => !handledIds.has(vacancy.id) && (!scope || !applicationScopeHold(scope, vacancy))).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates);
   const { data: client, error: clientError } = await db.from("job_desk_clients").select("full_name,email,whatsapp_phone").eq("id", order.client_id).single();
   if (clientError || !client) throw new Error(clientError?.message ?? "Candidate contact details are missing.");
@@ -138,7 +146,7 @@ export async function matchOrder(orderId: string) {
   const sourcesById = new Map((sourceRows ?? []).map(source => [source.id, source]));
   const details = readApplicantDetails(order.service_details);
   const blockedQuestions = new Map<string, string[]>();
-  const screened = await screenAutomaticCandidates(pool.filter(item => submissionRouteRank(item.vacancy) > 0).slice(0, 64), async item => {
+  const screened = await screenAutomaticCandidates(screeningBatch(pool.filter(item => submissionRouteRank(item.vacancy) > 0), Math.floor(Date.now() / 7200000)), async item => {
     const vacancy = item.vacancy as Vacancy & { source_id?: string };
     const hold = submissionHoldReason(vacancy.application_method === "email" ? vacancy.description : "", client.email, plainText(approved.html ?? "").length);
     if (hold) return { ready: false, blockers: [hold] };
@@ -149,9 +157,10 @@ export async function matchOrder(orderId: string) {
   });
   const candidates = screened.ready;
   const reviewed = await reviewCandidateMatches(orderId, { ...profile, approvedCvText: plainText(approved.html ?? ""), applicationScope: scope, broaderPreferences: scope?.includeBroaderRoles ? scope : null }, candidates.map((item) => item.vacancy));
-  const matches = candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] }));
+  const shortlist = reviewedShortlist(candidates.filter((item) => reviewed.get(item.vacancy.id)?.suitable).map((item) => ({ ...item, reasons: [...item.reasons, `Suitability review: ${reviewed.get(item.vacancy.id)?.reason}`] })));
+  const matches = shortlist.slice(0, remainingSlots);
   let refreshedSources = 0;
-  if (matches.length < 10) {
+  if (remainingSlots > 0 && shortlist.length < SHORTLIST_TARGET) {
     if (await enqueueTask("discover_email", `email-coverage:${Math.floor(Date.now() / 7200000)}`, null)) refreshedSources++;
     const { data: sources, error: sourceError } = await db.from("job_desk_sources").select("id,last_synced_at").eq("active", true).limit(100);
     if (sourceError) throw new Error(sourceError.message);
@@ -166,6 +175,7 @@ export async function matchOrder(orderId: string) {
   }
   const selected = new Set(matches.map((item) => item.vacancy.id));
   const deferred = new Set(candidates.filter(item => reviewed.get(item.vacancy.id)?.reason.startsWith("Review temporarily unavailable;")).map(item => item.vacancy.id));
+  for (const item of candidates) if (reviewed.get(item.vacancy.id)?.suitable && !selected.has(item.vacancy.id)) deferred.add(item.vacancy.id);
   // Preserve historical/manual work; skipped forms never enter automatic preparation.
   for (const item of screened.skipped) deferred.add(item.candidate.vacancy.id);
   for (const item of pool.filter(item => submissionRouteRank(item.vacancy) === 0)) deferred.add(item.vacancy.id);
@@ -200,7 +210,7 @@ export async function matchOrder(orderId: string) {
   if (scope && reviewPool.length) await enqueueTask("review_matches", `review-matches:${orderId}:${approved.id}:${Math.floor(Date.now() / 7200000)}`, orderId, { vacancyIds: JSON.stringify(reviewPool.map(item => item.vacancy.id)) });
   await db.from("job_desk_orders").update({ status: "active" }).eq("id", orderId).in("status", ["approved", "active"]);
   if (matches.length) await enqueueTask("notify_client", `client-update:matches_ready:${orderId}:${approved.id}`, orderId, { event: "matches_ready", reference: `${orderId}:${approved.id}` });
-  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: 10, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: matches.length, supported: matches.length, automaticScreened: screened.ready.length + screened.skipped.length, automaticSkipped: screened.skipped.length, unsupportedRoutes: pool.filter(item => submissionRouteRank(item.vacancy) === 0).length, skippedExamples: screened.skipped.slice(0, 10).map(item => ({ title: item.candidate.vacancy.title, company: item.candidate.vacancy.company_name, reason: item.reason })), refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
+  return { count: matches.length, coverage: { checkedAt: new Date().toISOString(), target: APPLICATION_TARGET, shortlistTarget: SHORTLIST_TARGET, selectedForPreparation: matches.length, committedSlots, recentApproved: vacancies.length, scopeEligible: vacancies.filter(vacancy => !scope || !applicationScopeHold(scope, vacancy)).length, evidenceCandidates: candidates.length, suitable: shortlist.length, supported: shortlist.length, shortlist: shortlist.map(item => ({ id: item.vacancy.id, title: item.vacancy.title, company: item.vacancy.company_name, url: item.vacancy.apply_url, score: item.score, selected: selected.has(item.vacancy.id), reasons: item.reasons })), automaticScreened: screened.ready.length + screened.skipped.length, automaticSkipped: screened.skipped.length, unsupportedRoutes: pool.filter(item => submissionRouteRank(item.vacancy) === 0).length, skippedExamples: screened.skipped.slice(0, 10).map(item => ({ title: item.candidate.vacancy.title, company: item.candidate.vacancy.company_name, reason: item.reason })), refreshedSources, rejectedExamples: candidates.filter(item => reviewed.get(item.vacancy.id)?.suitable === false).slice(0, 10).map(item => ({ title: item.vacancy.title, company: item.vacancy.company_name, reason: reviewed.get(item.vacancy.id)?.reason })) } };
 }
 
 export async function reviewDeferredMatches(orderId: string, vacancyIds: string[]) {

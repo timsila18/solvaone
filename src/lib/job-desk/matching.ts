@@ -7,6 +7,31 @@ const words = (value: string) => new Set((normalizeRoleLanguage(value).match(/[a
 const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
 
 const skillText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const evidenceGroups = [
+  ["customer service", "customer support", "customer care", "client support", "customer enquiries", "customer inquiries"],
+  ["complaint resolution", "resolving complaints", "resolved complaints", "customer complaints"],
+  ["cash handling", "cash reconciliation", "reconciled cash", "cash and m pesa reconciliation", "payment reconciliation"],
+  ["stock control", "stock monitoring", "inventory control", "inventory management", "stock replenishment"],
+  ["appointment management", "coordinated appointments", "appointment scheduling", "calendar management"],
+  ["switchboard", "switchboard calls", "telephone enquiries", "telephone inquiries"],
+  ["data entry", "entering data", "updated records", "record keeping", "records management"],
+  ["document handling", "document preparation", "document formatting", "document management"],
+  ["team scheduling", "scheduled staff", "staff scheduling", "shift scheduling"],
+  ["sales", "selling", "product sales", "upselling", "product upselling"],
+  ["payroll", "payroll processing", "payroll administration"],
+  ["recruitment", "staff recruitment", "talent acquisition"],
+  ["onboarding", "employee onboarding", "staff onboarding"],
+  ["microsoft excel", "ms excel", "excel"],
+  ["microsoft word", "ms word"],
+];
+
+export function workHistoryKeywordMatches(profile: Record<string, unknown>, advert: string) {
+  const structured = (profile.structured_profile ?? {}) as Record<string, unknown>;
+  const experience = Array.isArray(structured.experience) ? structured.experience as Array<Record<string, unknown>> : [];
+  const evidence = [...list(structured.skills), ...list(structured.tools), ...experience.flatMap(role => [...list(role.responsibilities), ...list(role.achievements)])].join(" ");
+  const contains = (text: string, phrase: string) => ` ${skillText(text)} `.includes(` ${skillText(phrase)} `);
+  return evidenceGroups.filter(group => group.some(phrase => contains(evidence, phrase)) && group.some(phrase => contains(advert, phrase))).map(group => group[0]);
+}
 export function documentedSkillMatches(skill: string, advert: string) {
   const phrase = skillText(skill);
   const text = ` ${skillText(advert)} `;
@@ -88,7 +113,8 @@ export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, 
     const terms = [...words(title)];
     return terms.length > 0 && terms.every(term => titleWords.has(term));
   });
-  const matchingSkills = [...new Set(skills.map(skill => skillText(skill)))].filter(skill => documentedSkillMatches(skill, description));
+  const canonicalSkill = (skill: string) => evidenceGroups.find(group => group.some(phrase => skillText(phrase) === skillText(skill)))?.[0] ?? skillText(skill);
+  const matchingSkills = [...new Set([...skills.filter(skill => documentedSkillMatches(skill, description)).map(canonicalSkill), ...workHistoryKeywordMatches(profile, description)])];
   const industries = list(structured.industries).filter((industry) => industry.length > 3 && description.includes(industry.toLowerCase()));
   const reasons: string[] = [];
   const gaps: string[] = [];

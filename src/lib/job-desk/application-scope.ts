@@ -87,7 +87,7 @@ export function applicationScopeHold(scope: ApplicationScope, vacancy: {
   const location = normalize(vacancy.location);
   const advert = normalize(`${vacancy.title} ${vacancy.company_name} ${vacancy.description}`);
   if (scope.excludedEmployers.some((item) => employer.includes(normalize(item)))) return "Employer is excluded by the client.";
-  if (scope.excludedRoles.some((item) => title.includes(normalize(item)))) return "Role is excluded by the client.";
+  if (scope.excludedRoles.some((item) => title.includes(normalize(item)) || normalize(normalizeRoleLanguage(vacancy.title)).includes(normalize(normalizeRoleLanguage(item))))) return "Role is excluded by the client.";
   if (scope.excludedKeywords.some((item) => advert.includes(normalize(item)))) return "Vacancy conflicts with a client exclusion.";
   const vacancyTerms = terms(vacancy.title);
   const authorizedRoles = [...scope.targetRoles, ...(scope.includeBroaderRoles ? scope.broaderRoles ?? [] : [])];
