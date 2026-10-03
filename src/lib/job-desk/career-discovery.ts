@@ -1,6 +1,7 @@
 import { generalJobFamilies } from "./general-jobs";
 const origin = "https://www.corporatestaffing.co.ke";
 export const careerCatalogues = [
+  { path: "accounting-jobs-in-kenya", roles: /accountant|accounting|accounts|bookkeep|finance|audit|billing|credit.?control/i },
   { path: "customer-service-jobs-in-kenya", roles: /reception|front.?office|front.?desk|customer|call.?cent[er]|retail|cashier|shop|store|petrol/i },
   { path: "administration-jobs-in-kenya", roles: /admin|reception|front.?office|secretar|office|assistant/i },
   { path: "hr-jobs-in-kenya", roles: /\bhr\b|human.?resource|payroll|recruit|people.?operation|personnel/i },

@@ -3,6 +3,7 @@ import test from "node:test";
 import { adjacentRoleTitles, balancedDiscoveryLinks, searchLanePlan } from "../src/lib/job-desk/search-lanes.ts";
 import { applicationScopeHold, createApplicationScope, readApplicationScope } from "../src/lib/job-desk/application-scope.ts";
 import { scoreVacancy } from "../src/lib/job-desk/matching.ts";
+import { careerCatalogueUrls, isCareerCatalogueUrl } from "../src/lib/job-desk/career-discovery.ts";
 
 const input = { targetRoles: "HR Officer", preferredLocations: "Nairobi", remotePreference: "flexible", excludedEmployers: "Excluded Employer", excludedRoles: "Director", excludedKeywords: "unpaid", channel: "admin_recorded", evidence: "Client accepts broader career work" };
 const vacancy = { title: "Records Clerk", company_name: "Employer", location: "Kisumu, Kenya", workplace_type: "onsite", description: "Records management using Microsoft Excel" };
@@ -35,4 +36,26 @@ test("discovery budgets are shared across categories and rotate older adverts", 
   assert.ok(selected.includes("shared"));
   assert.equal(balancedDiscoveryLinks([first], 5, 1)[0], "hr-10");
   assert.deepEqual(balancedDiscoveryLinks([], 100), []);
+});
+
+test("All is a supported-skills wildcard for old and new scopes, never a location bypass", () => {
+  const scope = createApplicationScope({ ...input, targetRoles:"Accountant", includeBroaderRoles:"true", broaderRoles:"All" });
+  const old = readApplicationScope({applicationScope:scope});
+  const job = {...vacancy,title:"Billing Officer",location:"Nairobi, Kenya",description:"Financial reports and bank reconciliations"};
+  assert.equal(applicationScopeHold(old,job),null);
+  assert.ok(scoreVacancy(job,{structured_profile:{skills:["Financial reporting","Bank reconciliation"]}},old).score >= 25);
+  assert.ok(scoreVacancy(job,{structured_profile:{experience:[{jobTitle:"Accountant",responsibilities:["Preparing financial statements","Reconciling bank accounts"]}]}},old).score >= 25);
+  assert.equal(scoreVacancy(job,{structured_profile:{skills:[]}},old).score,0);
+  assert.match(applicationScopeHold(old,{...job,location:"London"}),/Location/);
+  assert.match(applicationScopeHold(old,{...job,company_name:"Excluded Employer"}),/excluded/);
+  assert.equal(applicationScopeHold(createApplicationScope({...input,targetRoles:"Accountant"}),job),"Role is outside the client's authorized target roles.");
+  assert.ok(adjacentRoleTitles(old).includes("Accounts assistant"));
+});
+
+test("finance profiles prioritize only the approved Kenyan accounting catalogue", () => {
+  const urls = careerCatalogueUrls([{target_job_titles:["Accountant","Finance Intern","Junior Auditor"]}]);
+  assert.equal(urls[0],"https://www.corporatestaffing.co.ke/category/accounting-jobs-in-kenya/");
+  assert.equal(isCareerCatalogueUrl(urls[0]),true);
+  assert.equal(isCareerCatalogueUrl(urls[0].replace("corporatestaffing.co.ke","evil.example")),false);
+  assert.deepEqual(careerCatalogueUrls([{target_job_titles:["Teacher"]}]).filter(url=>url.includes("accounting")),[]);
 });

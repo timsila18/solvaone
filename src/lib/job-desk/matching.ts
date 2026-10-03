@@ -1,6 +1,6 @@
 import { normalizeRoleLanguage } from "./role-language";
 import { authorizedGeneralRole, candidateHasSecondaryEducation, entryLevelAdvert } from "./general-jobs";
-import { authorizedAdjacentRole } from "./search-lanes";
+import { authorizedAdjacentRole, authorizedBroaderRole } from "./search-lanes";
 
 export type MatchableVacancy = { title: string; description: string; location: string; workplace_type: string };
 
@@ -25,6 +25,11 @@ const evidenceGroups = [
   ["onboarding", "employee onboarding", "staff onboarding"],
   ["microsoft excel", "ms excel", "excel"],
   ["microsoft word", "ms word"],
+  ["bookkeeping", "book keeping"],
+  ["bank reconciliation", "bank reconciliations", "reconciling bank accounts"],
+  ["accounts payable", "payables", "creditor reconciliation"],
+  ["accounts receivable", "receivables", "debtor reconciliation"],
+  ["financial reporting", "financial reports", "preparing financial statements"],
   ["lesson planning", "lesson preparation", "planning lessons"],
   ["classroom management", "managing classrooms"],
   ["student assessment", "learner assessment", "assessing students"],
@@ -60,6 +65,11 @@ export function documentedSkillMatches(skill: string, advert: string) {
     ["customer service", "customer support", "client support"],
     ["microsoft excel", "excel", "ms excel"],
     ["office administration", "administrative support"],
+    ["bookkeeping", "book keeping"],
+    ["bank reconciliation", "bank reconciliations", "reconciling bank accounts"],
+    ["accounts payable", "payables", "creditor reconciliation"],
+    ["accounts receivable", "receivables", "debtor reconciliation"],
+    ["financial reporting", "financial reports", "preparing financial statements"],
     ...evidenceGroups.slice(-4)
   ];
   return equivalents.some(group => group.includes(phrase) && group.some(item => text.includes(` ${item} `)));
@@ -121,10 +131,7 @@ export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, 
   const titleWords = words(vacancy.title);
   const description = vacancy.description.toLowerCase();
   const overlap = Math.max(0, ...supportedTitles.map((title) => [...words(title)].filter((word) => titleWords.has(word)).length));
-  const broaderOverlap = (scope && authorizedAdjacentRole({ ...scope, targetRoles: scope.targetRoles ?? list(profile.target_job_titles) }, vacancy.title)) || scope?.includeBroaderRoles && (scope.broaderRoles ?? []).some(title => {
-    const terms = [...words(title)];
-    return terms.length > 0 && terms.every(term => titleWords.has(term));
-  });
+  const broaderOverlap = scope && (authorizedAdjacentRole({ ...scope, targetRoles: scope.targetRoles ?? list(profile.target_job_titles) }, vacancy.title) || authorizedBroaderRole(scope, vacancy.title));
   const canonicalSkill = (skill: string) => evidenceGroups.find(group => group.some(phrase => skillText(phrase) === skillText(skill)))?.[0] ?? skillText(skill);
   const matchingSkills = [...new Set([...skills.filter(skill => documentedSkillMatches(skill, description)).map(canonicalSkill), ...workHistoryKeywordMatches(profile, description)])];
   const industries = list(structured.industries).filter((industry) => industry.length > 3 && description.includes(industry.toLowerCase()));

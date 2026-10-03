@@ -81,7 +81,7 @@ export async function fetchEmailAdverts(careerUrls: string[] = []) {
   const discoveredGroups: string[][] = [];
   let catalogueFailures = 0;
   // Read career categories first so broad listings cannot consume the entire advert budget.
-  for (const category of careerUrls.filter(isCareerCatalogueUrl).slice(0, 7)) {
+  for (const category of careerUrls.filter(isCareerCatalogueUrl)) {
     try { discoveredGroups.push(emailAdvertLinks(await fetchEmailPage(category))); }
     catch { catalogueFailures++; }
   }

@@ -1,6 +1,6 @@
 import { normalizeRoleLanguage } from "./role-language";
 import { authorizedGeneralRole, generalJobFamilies } from "./general-jobs";
-import { authorizedAdjacentRole } from "./search-lanes";
+import { authorizedAdjacentRole, authorizedBroaderRole } from "./search-lanes";
 
 export type ApplicationScope = {
   version: 1;
@@ -108,7 +108,7 @@ export function applicationScopeHold(scope: ApplicationScope, vacancy: {
   if (scope.excludedKeywords.some((item) => advert.includes(normalize(item)))) return "Vacancy conflicts with a client exclusion.";
   const vacancyTerms = terms(vacancy.title);
   const authorizedRoles = [...scope.targetRoles, ...(scope.includeBroaderRoles ? scope.broaderRoles ?? [] : [])];
-  if (!authorizedGeneralRole(scope, vacancy.title) && !authorizedAdjacentRole(scope, vacancy.title) && !authorizedRoles.some((role) => {
+  if (!authorizedGeneralRole(scope, vacancy.title) && !authorizedAdjacentRole(scope, vacancy.title) && !authorizedBroaderRole(scope, vacancy.title) && !authorizedRoles.some((role) => {
     const roleTerms = terms(role);
     const overlap = roleTerms.filter((term) => vacancyTerms.includes(term)).length;
     return roleTerms.length > 0 && overlap >= Math.min(2, roleTerms.length);
