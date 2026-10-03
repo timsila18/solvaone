@@ -11,6 +11,7 @@ const nav = [
   { href: "/dashboard/projects/new?product=cover_letter", label: "Cover Letter", icon: PenLine },
   { href: "/dashboard/projects/new?product=company_profile", label: "Company Profile", icon: BriefcaseBusiness },
   { href: "/dashboard/projects/new?product=business_plan", label: "Business Plan", icon: BarChart3 },
+  { href: "/job-desk", label: "Job Hunting", icon: BriefcaseBusiness },
   { href: "/dashboard/documents", label: "My Documents", icon: Files },
   { href: "/dashboard#payments", label: "Payments", icon: CreditCard },
   { href: "/dashboard/support", label: "Support", icon: PenLine }
@@ -33,7 +34,7 @@ export function AppShell({
 }) {
   return (
     <div className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 border-r border-black/10 bg-white/95 px-5 py-6 backdrop-blur dark:border-white/10 dark:bg-black/90 lg:block">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 overflow-y-auto border-r border-black/10 bg-white/95 px-5 py-6 backdrop-blur dark:border-white/10 dark:bg-black/90 lg:block">
         <Logo />
         <nav className="mt-8 flex flex-col gap-1">
           {nav.map((item) => (

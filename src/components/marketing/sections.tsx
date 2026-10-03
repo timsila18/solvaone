@@ -1,10 +1,28 @@
-import { ArrowRight, CheckCircle2, FileText, ShieldCheck, Sparkles, Star, TrendingUp } from "lucide-react";
+import { ArrowRight, BriefcaseBusiness, CheckCircle2, FileText, ShieldCheck, Sparkles, Star, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { ButtonLink } from "@/components/ui/button";
 import { faqs, productPages, productUrl } from "@/lib/marketing";
 import { pricingProducts, type ProductId } from "@/lib/pricing";
 import type { ProductKey } from "@/lib/types";
 import { cn, formatKes } from "@/lib/utils";
+import { jobDeskServices } from "@/lib/job-desk/services";
+
+export function JobHuntingCard() {
+  const service = jobDeskServices.job_search_full;
+  return (
+    <Link href="/job-desk" className="group flex flex-col rounded-lg border border-black/10 p-5 transition hover:border-brand-blue hover:shadow-soft dark:border-white/10">
+      <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-brand-blue text-white">
+        <BriefcaseBusiness className="h-5 w-5" aria-hidden="true" />
+      </div>
+      <h3 className="mt-5 text-xl font-black">Job Hunting</h3>
+      <p className="mt-3 text-sm leading-6 text-black/60 dark:text-white/60">Upload your CV and share your job preferences for CV review, vacancy matching and supported application assistance.</p>
+      <div className="mt-auto flex flex-wrap items-center justify-between gap-3 pt-5 text-sm font-black">
+        <span>{formatKes(service.price)}</span>
+        <span className="flex items-center gap-2 text-brand-blue">Request job hunting <ArrowRight className="h-4 w-4" aria-hidden="true" /></span>
+      </div>
+    </Link>
+  );
+}
 
 export function Hero({
   title,

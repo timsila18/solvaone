@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { PublicShell } from "@/components/marketing/public-shell";
-import { CheckoutCTA, DocumentPreviewCard, FAQAccordion, Hero, PricingCard, ProductCard, ProgressSteps, TestimonialCard } from "@/components/marketing/sections";
+import { CheckoutCTA, DocumentPreviewCard, FAQAccordion, Hero, JobHuntingCard, PricingCard, ProductCard, ProgressSteps, TestimonialCard } from "@/components/marketing/sections";
 import { ButtonLink } from "@/components/ui/button";
 import { faqs, productPages, site } from "@/lib/marketing";
 
@@ -21,8 +21,9 @@ export default function HomePage() {
         subtitle="CVs, cover letters, company profiles and business plans powered by Solva Intelligence."
       />
       <section className="border-y border-black/10 dark:border-white/10">
-        <div className="mx-auto grid max-w-7xl gap-4 px-4 py-10 md:grid-cols-5 md:px-6">
+        <div className="mx-auto grid max-w-7xl gap-4 px-4 py-10 sm:grid-cols-2 lg:grid-cols-3 md:px-6">
           {productPages.map((page) => <ProductCard key={page.key} productKey={page.key} />)}
+          <JobHuntingCard />
         </div>
       </section>
       <section className="border-b border-black/10 dark:border-white/10">

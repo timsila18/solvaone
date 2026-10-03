@@ -1,7 +1,7 @@
 import { ArrowRight, CheckCircle2, Clock, CreditCard, Download, FileText, Gift, Lock, Plus } from "lucide-react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
-import { EmptyState, DashboardMetricCard } from "@/components/marketing/sections";
+import { EmptyState, DashboardMetricCard, JobHuntingCard } from "@/components/marketing/sections";
 import { ButtonLink } from "@/components/ui/button";
 import { productPages, productUrl, site } from "@/lib/marketing";
 import { pricingProducts } from "@/lib/pricing";
@@ -73,7 +73,7 @@ export default async function DashboardPage() {
       <section className="mt-8">
         <div className="mb-5 flex items-end justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-black">Recommended products</h2>
+            <h2 className="text-2xl font-black">Recommended services</h2>
             <p className="mt-1 text-sm text-black/55 dark:text-white/55">Pick the fastest path to your next application or business document.</p>
           </div>
         </div>
@@ -88,6 +88,7 @@ export default async function DashboardPage() {
               </div>
             </div>
           ))}
+          <JobHuntingCard />
         </div>
       </section>
 
