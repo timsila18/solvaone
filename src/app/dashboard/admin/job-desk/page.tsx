@@ -47,7 +47,7 @@ export default async function JobDeskPage() {
   return (
     <AppShell email={user.email} isAdmin>
       <div className="flex flex-col justify-between gap-4 border-b border-black/10 pb-6 dark:border-white/10 md:flex-row md:items-end">
-        <div><h1 className="text-3xl font-black">SolvaOne Job Hunting</h1><p className="mt-2 max-w-2xl text-sm text-black/55 dark:text-white/55">Manual WhatsApp intake, payment recording, structured candidate profiles, and approval-ready CV processing.</p></div>
+        <div><h1 className="text-3xl font-black">SolvaOne Job Hunting</h1><p className="mt-2 max-w-2xl text-sm text-black/55 dark:text-white/55">Manual WhatsApp intake, payment recording, structured candidate profiles, and approval-ready CV processing.</p><Link className="mt-3 inline-block text-sm font-bold text-brand-blue" href="/dashboard/admin/job-desk/employers">Employer vacancy verification</Link></div>
         <div className="flex flex-wrap items-center gap-4 text-sm font-bold text-brand-blue"><AutomationControls action="run_queue" label="Process queue now" /><Link href="/dashboard/admin/job-desk/review">Needs your attention</Link><Link href="/dashboard/admin/job-desk/vacancies">Vacancies and sources</Link><Link href="/dashboard/admin">Admin dashboard</Link></div>
       </div>
 

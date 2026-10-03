@@ -10,6 +10,11 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const moduleInstance = new Module("job-desk-application-scope", module);
 const requireOriginal = moduleInstance.require.bind(moduleInstance);
 moduleInstance.require = id => {
+  if (id === "./general-jobs") {
+    const helper = new Module("general-jobs", module);
+    helper._compile(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, "../src/lib/job-desk/general-jobs.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, "general-jobs.js");
+    return helper.exports;
+  }
   if (id !== "./role-language") return requireOriginal(id);
   const helper = new Module("role-language", module);
   helper._compile(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, "../src/lib/job-desk/role-language.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, "role-language.js");

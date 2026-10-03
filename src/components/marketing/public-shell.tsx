@@ -62,6 +62,7 @@ export function PublicFooter() {
           <h2 className="text-sm font-black">Company</h2>
           <div className="mt-4 grid gap-2 text-sm text-white/65">
             <Link href="/about" className="hover:text-white">About</Link>
+            <Link href="/employers" className="hover:text-white">Submit an employer vacancy</Link>
             <Link href="/terms" className="hover:text-white">Terms and Conditions</Link>
             <Link href="/privacy" className="hover:text-white">Privacy Policy</Link>
             <Link href="/refund-policy" className="hover:text-white">Refund Policy</Link>

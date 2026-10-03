@@ -1,4 +1,6 @@
 import { after, NextResponse } from "next/server";
+import { completionHold } from "@/lib/job-desk/general-jobs";
+import { successfulDelivery } from "@/lib/job-desk/application-progress";
 import { z } from "zod";
 import { logAdminAction, requireAdmin } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -111,6 +113,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     const { data: order } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference,source_channel,service_type").eq("id", orderId).single();
     if (!order) return NextResponse.json({ error: "Job Desk order was not found." }, { status: 404 });
     if (order.source_channel === "website" && !hasVerifiedJobDeskPayment(order) && parsed.data.status !== "cancelled") return NextResponse.json({ error: "Confirm payment before advancing this website request." }, { status: 409 });
+    if (parsed.data.status === "completed" && order.service_type === "job_search_full") {
+      const { data: applications, error: evidenceError } = await db.from("job_desk_applications").select("status,method,provider_message_id,provider_response").eq("order_id", orderId);
+      if (evidenceError) return NextResponse.json({ error: "Could not verify application delivery evidence." }, { status: 500 });
+      const hold = completionHold(order.service_type, (applications ?? []).filter(successfulDelivery).length);
+      if (hold) return NextResponse.json({ error: hold }, { status: 409 });
+    }
     if (["approved", "active"].includes(parsed.data.status) && ["job_search_full", "cv_revamp", "cv_build"].includes(order.service_type)) {
       const { data: latestCv, error: cvError } = await db.from("job_desk_documents").select("status").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
       if (cvError) return NextResponse.json({ error: cvError.message }, { status: 500 });

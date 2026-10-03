@@ -1,4 +1,5 @@
 import { normalizeRoleLanguage } from "./role-language";
+import { authorizedGeneralRole, candidateHasSecondaryEducation, entryLevelAdvert } from "./general-jobs";
 
 export type MatchableVacancy = { title: string; description: string; location: string; workplace_type: string };
 
@@ -86,13 +87,15 @@ export function vacancyEligibility(vacancy: MatchableVacancy, profile: Record<st
   if (/\b(?:director|vice president|chief|cfo|cto|ceo)\b/i.test(vacancy.title) && Number.isFinite(totalYears) && totalYears < 5) return "Leadership seniority exceeds the documented experience.";
   const requirement = advert.match(/(?:minimum|at least|requires?|minimum of)\s+(\d{1,2})\+?\s+years?\s+(?:of\s+)?experience/i);
   if (requirement && Number.isFinite(totalYears) && totalYears + 1 < Number(requirement[1])) return "Advert requires more years of experience than the CV documents.";
-  if (/\b(?:internship|graduate trainee)\b/i.test(vacancy.title) && experience.length > 3 && Number.isFinite(totalYears) && totalYears > 8) return "Entry-level placement is below the candidate's career level.";
+  if (!profile.acceptEntryLevel && /\b(?:internship|graduate trainee)\b/i.test(vacancy.title) && experience.length > 3 && Number.isFinite(totalYears) && totalYears > 8) return "Entry-level placement is below the candidate's career level.";
   return null;
 }
 
-export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, unknown>, scope?: { targetRoles?: string[]; preferredLocations?: string[]; remotePreference?: string; includeBroaderRoles?: boolean; broaderRoles?: string[]; broaderSeniority?: string; minimumMonthlyKes?: number; includeUnspecifiedKenyaLocations?: boolean } | null) {
+export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, unknown>, scope?: { targetRoles?: string[]; preferredLocations?: string[]; remotePreference?: string; includeBroaderRoles?: boolean; broaderRoles?: string[]; broaderSeniority?: string; minimumMonthlyKes?: number; includeUnspecifiedKenyaLocations?: boolean; includeGeneralRoles?: boolean; generalRoleFamilies?: string[] } | null) {
+  const general = scope ? authorizedGeneralRole(scope, vacancy.title) : false;
   const scopedProfile = {
     ...profile,
+    acceptEntryLevel: general || Boolean(scope?.includeBroaderRoles && scope.broaderSeniority === "any"),
     preferred_locations: scope?.preferredLocations ?? profile.preferred_locations,
     remote_preference: scope?.remotePreference ?? profile.remote_preference
   };
@@ -118,19 +121,21 @@ export function scoreVacancy(vacancy: MatchableVacancy, profile: Record<string, 
   const industries = list(structured.industries).filter((industry) => industry.length > 3 && description.includes(industry.toLowerCase()));
   const reasons: string[] = [];
   const gaps: string[] = [];
-  if (!supportedTitles.length && !skills.length) return { score: 0, reasons, gaps: ["Candidate has not supplied a target role or CV skill evidence."] };
+  if (!supportedTitles.length && !skills.length && !general) return { score: 0, reasons, gaps: ["Candidate has not supplied a target role or CV skill evidence."] };
   const isBroader = overlap === 0;
-  if (isBroader && (!broaderOverlap || matchingSkills.length < 2)) return { score: 0, reasons, gaps: ["Broader role needs explicit opt-in, an accepted job title and at least two documented skills."] };
+  const entryPath = general && entryLevelAdvert(description) && (candidateHasSecondaryEducation(profile) || /\b(no (?:formal )?qualifications? required|no experience (?:is )?required|training (?:is |will be )?provided)\b/i.test(description));
+  if (isBroader && !(general && (entryPath || matchingSkills.length >= 1)) && (!broaderOverlap || matchingSkills.length < 1)) return { score: 0, reasons, gaps: ["Broader role needs accepted scope and a documented transferable skill, or an explicitly entry-level general advert."] };
   if (isBroader) {
-    if (scope?.broaderSeniority !== "any" && /\b(intern|internship|trainee|graduate|entry.level|junior)\b/i.test(vacancy.title)) return { score: 0, reasons, gaps: ["Broader role is below the accepted career level."] };
-    if (scope?.broaderSeniority === "senior" && !/\b(senior|lead|head|manager|supervisor|director)\b/i.test(vacancy.title)) return { score: 0, reasons, gaps: ["Broader role does not meet the senior-level preference."] };
-    if (scope?.minimumMonthlyKes) {
-      const salary = vacancy.description.match(/(?:KES|KSh)\s*([\d,]+)(?:\s*[-–]\s*(?:KES|KSh)?\s*([\d,]+))?\s*(?:per month|monthly|\/month|p\.?m\.?)/i);
-      if (!salary || Number(salary[1].replace(/,/g, "")) < scope.minimumMonthlyKes) return { score: 0, reasons, gaps: ["Advert does not confirm the minimum monthly KES salary."] };
-    }
+    if (!general && scope?.broaderSeniority !== "any" && /\b(intern|internship|trainee|graduate|entry.level|junior)\b/i.test(vacancy.title)) return { score: 0, reasons, gaps: ["Broader role is below the accepted career level."] };
+    if (!general && scope?.broaderSeniority === "senior" && !/\b(senior|lead|head|manager|supervisor|director)\b/i.test(vacancy.title)) return { score: 0, reasons, gaps: ["Broader role does not meet the senior-level preference."] };
+  }
+  if ((isBroader || general) && scope?.minimumMonthlyKes) {
+    const salary = vacancy.description.match(/(?:KES|KSh)\s*([\d,]+)(?:\s*[-–]\s*(?:KES|KSh)?\s*([\d,]+))?\s*(?:per month|monthly|\/month|p\.?m\.?)/i);
+    if (!salary || Number(salary[1].replace(/,/g, "")) < scope.minimumMonthlyKes) return { score: 0, reasons, gaps: ["Advert does not confirm the minimum monthly KES salary."] };
   }
   let score = Math.min(48, overlap * 23) + Math.min(32, matchingSkills.length * 8) + Math.min(10, industries.length * 5);
   if (overlap) reasons.push("Role aligns with target or documented experience");
+  else if (general) { score += 25; reasons.push("General-jobs pathway: accepted job family; full mandatory-requirement review required"); }
   else { score += 20; reasons.push("Transferable-skills match: opted-in broader role supported by documented skills"); }
   if (matchingSkills.length) reasons.push(`CV skills: ${matchingSkills.slice(0, 5).join(", ")}`);
   if (vacancy.workplace_type === "remote") { score += 10; reasons.push("Remote arrangement is potentially accessible from Kenya"); }

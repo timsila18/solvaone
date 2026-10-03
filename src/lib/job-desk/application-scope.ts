@@ -1,4 +1,5 @@
 import { normalizeRoleLanguage } from "./role-language";
+import { authorizedGeneralRole, generalJobFamilies } from "./general-jobs";
 
 export type ApplicationScope = {
   version: 1;
@@ -12,6 +13,8 @@ export type ApplicationScope = {
   channel: "website" | "admin_recorded";
   evidence: string;
   includeBroaderRoles?: boolean;
+  includeGeneralRoles?: boolean;
+  generalRoleFamilies?: string[];
   broaderRoles?: string[];
   broaderSeniority?: "any" | "professional" | "senior";
   minimumMonthlyKes?: number;
@@ -25,6 +28,8 @@ type ScopeInput = Pick<ApplicationScope, "remotePreference" | "channel" | "evide
   excludedRoles: string;
   excludedKeywords: string;
   includeBroaderRoles?: string;
+  includeGeneralRoles?: string;
+  generalRoleFamilies?: string;
   broaderRoles?: string;
   broaderSeniority?: "any" | "professional" | "senior";
   minimumMonthlyKes?: string;
@@ -40,6 +45,8 @@ export function createApplicationScope(input: ScopeInput): ApplicationScope {
   const targetRoles = entries(input.targetRoles);
   if (!targetRoles.length) throw new Error("At least one target role is required for application authorization.");
   const broaderRoles = entries(input.broaderRoles ?? "");
+  const families = entries(input.generalRoleFamilies ?? "");
+  if (input.includeGeneralRoles === "true" && (!families.length || families.some(id => !generalJobFamilies.some(family => family.id === id)))) throw new Error("Select accepted general-job families.");
   if (input.includeBroaderRoles === "true" && !broaderRoles.length) throw new Error("Record accepted broader roles before enabling them.");
   return {
     version: 1,
@@ -54,9 +61,11 @@ export function createApplicationScope(input: ScopeInput): ApplicationScope {
     channel: input.channel,
     evidence: input.evidence.trim().slice(0, 1000),
     includeBroaderRoles: input.includeBroaderRoles === "true",
+    includeGeneralRoles: input.includeGeneralRoles === "true",
+    generalRoleFamilies: input.includeGeneralRoles === "true" ? [...new Set(families)] : [],
     broaderRoles: input.includeBroaderRoles === "true" ? broaderRoles : [],
     broaderSeniority: input.broaderSeniority ?? "professional",
-    minimumMonthlyKes: input.includeBroaderRoles === "true" ? Number(input.minimumMonthlyKes || 0) : 0
+    minimumMonthlyKes: input.includeBroaderRoles === "true" || input.includeGeneralRoles === "true" ? Number(input.minimumMonthlyKes || 0) : 0
   };
 }
 
@@ -65,6 +74,8 @@ export function readApplicationScope(details: unknown): ApplicationScope | null 
   const scope = (details as { applicationScope?: unknown }).applicationScope;
   if (!scope || typeof scope !== "object") return null;
   const value = scope as Partial<ApplicationScope>;
+  if (value.includeGeneralRoles !== undefined && typeof value.includeGeneralRoles !== "boolean") return null;
+  if (value.includeGeneralRoles && (!Array.isArray(value.generalRoleFamilies) || !value.generalRoleFamilies.length || value.generalRoleFamilies.some(id => !generalJobFamilies.some(family => family.id === id)))) return null;
   if (value.includeUnspecifiedKenyaLocations !== undefined && typeof value.includeUnspecifiedKenyaLocations !== "boolean") return null;
   if (value.includeBroaderRoles && (!Array.isArray(value.broaderRoles) || !value.broaderRoles.length || !value.broaderRoles.every(role => typeof role === "string" && role.trim()))) return null;
   if (value.broaderSeniority && !["any", "professional", "senior"].includes(value.broaderSeniority)) return null;
@@ -91,7 +102,7 @@ export function applicationScopeHold(scope: ApplicationScope, vacancy: {
   if (scope.excludedKeywords.some((item) => advert.includes(normalize(item)))) return "Vacancy conflicts with a client exclusion.";
   const vacancyTerms = terms(vacancy.title);
   const authorizedRoles = [...scope.targetRoles, ...(scope.includeBroaderRoles ? scope.broaderRoles ?? [] : [])];
-  if (!authorizedRoles.some((role) => {
+  if (!authorizedGeneralRole(scope, vacancy.title) && !authorizedRoles.some((role) => {
     const roleTerms = terms(role);
     const overlap = roleTerms.filter((term) => vacancyTerms.includes(term)).length;
     return roleTerms.length > 0 && overlap >= Math.min(2, roleTerms.length);

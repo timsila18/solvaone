@@ -78,12 +78,15 @@ export async function discoverVacancies(sourceId: string) {
 
 export async function discoverEmailVacancies() {
   const db = createSupabaseAdminClient();
-  const { data: activeOrders, error: activeError } = await db.from("job_desk_orders").select("client_id").eq("service_type", "job_search_full").in("status", ["approved", "active"]).limit(500);
+  const { data: activeOrders, error: activeError } = await db.from("job_desk_orders").select("client_id,service_details").eq("service_type", "job_search_full").in("status", ["approved", "active"]).limit(500);
   if (activeError) throw new Error(activeError.message);
   const clientIds = [...new Set((activeOrders ?? []).map(order => order.client_id))];
-  const { data: profiles, error: profileError } = clientIds.length ? await db.from("job_desk_candidate_profiles").select("target_job_titles,structured_profile").in("client_id", clientIds) : { data: [], error: null };
+  const { data: profiles, error: profileError } = clientIds.length ? await db.from("job_desk_candidate_profiles").select("client_id,target_job_titles,structured_profile").in("client_id", clientIds) : { data: [], error: null };
   if (profileError) throw new Error(profileError.message);
-  const careerUrls = careerCatalogueUrls(profiles ?? []);
+  const careerUrls = careerCatalogueUrls((profiles ?? []).map(profile => {
+    const scopes = (activeOrders ?? []).filter(order => order.client_id === profile.client_id).map(order => readApplicationScope(order.service_details)).filter(Boolean);
+    return { ...profile, generalRoleFamilies: scopes.flatMap(scope => scope?.includeGeneralRoles ? scope.generalRoleFamilies ?? [] : []), broaderRoles: scopes.flatMap(scope => scope?.includeBroaderRoles ? scope.broaderRoles ?? [] : []) };
+  }));
   const { results, checked, failures } = await fetchEmailAdverts(careerUrls);
   for (const row of results) {
     const { data: duplicate, error: duplicateError } = await db.from("job_desk_vacancies").select("id").eq("apply_url", row.apply_url).neq("external_id", row.external_id).eq("status", "open").limit(1).maybeSingle();
@@ -145,7 +148,7 @@ export async function matchOrder(orderId: string) {
   const committedSlots = committedMatches.length;
   for (const item of committedMatches) handledIds.add(item.vacancy_id);
   const remainingSlots = Math.max(0, APPLICATION_TARGET - committedSlots);
-  const pool = vacancies.filter(vacancy => !handledIds.has(vacancy.id) && (!scope || !applicationScopeHold(scope, vacancy))).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, profile, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates);
+  const pool = vacancies.filter(vacancy => !handledIds.has(vacancy.id) && (!scope || !applicationScopeHold(scope, vacancy))).map((vacancy) => ({ vacancy, ...scoreVacancy(vacancy, { ...profile, approvedCvText: plainText(approved.html ?? "") }, scope) })).filter((item) => item.score >= 25).sort(compareSubmissionCandidates);
   const { data: client, error: clientError } = await db.from("job_desk_clients").select("full_name,email,whatsapp_phone").eq("id", order.client_id).single();
   if (clientError || !client) throw new Error(clientError?.message ?? "Candidate contact details are missing.");
   const { data: sourceRows, error: sourcesError } = await db.from("job_desk_sources").select("id,provider,site_token,active").eq("active", true);

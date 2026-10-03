@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { applicationScopeHold, createApplicationScope } from "@/lib/job-desk/application-scope";
+import { applicationScopeHold, createApplicationScope, readApplicationScope } from "@/lib/job-desk/application-scope";
 import { enqueueTask } from "@/lib/job-desk/automation";
 import { scoreVacancy } from "@/lib/job-desk/matching";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
@@ -11,6 +11,7 @@ import { broaderPreferenceFields, validateBroaderPreferences } from "@/lib/job-d
 
 const schema = z.object({
   ...broaderPreferenceFields,
+  previousAuthorizedAt: z.string().max(80).optional().default(""),
   targetRoles: z.string().trim().min(2).max(1000),
   preferredLocations: z.string().trim().max(1000),
   includeUnspecifiedKenyaLocations: z.enum(["true", "false"]).optional(),
@@ -36,20 +37,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
   const db = createSupabaseAdminClient();
   const { data: order } = await db.from("job_desk_orders").select("id,client_id,service_type,service_details,application_authorized,payment_status,amount,payment_reference,status,client:job_desk_clients(consent_to_process)").eq("id", orderId).maybeSingle();
   if (!order || order.service_type !== "job_search_full") return NextResponse.json({ error: "Job search order not found." }, { status: 404 });
-  if (order.application_authorized) return NextResponse.json({ error: "Authorization is already recorded. Revoke it before requesting a new scope from the client." }, { status: 409 });
+  const previousScope = readApplicationScope(order.service_details);
+  if (order.application_authorized && parsed.data.previousAuthorizedAt !== previousScope?.authorizedAt) return NextResponse.json({ error: "Search scope changed. Refresh the order before updating it." }, { status: 409 });
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   if (!client?.consent_to_process) return NextResponse.json({ error: "Client processing consent is missing." }, { status: 409 });
   const scope = createApplicationScope({ ...parsed.data, channel: "admin_recorded", evidence: parsed.data.evidence });
   const details = order.service_details && typeof order.service_details === "object" ? order.service_details as Record<string, unknown> : {};
-  const { data: updated, error } = await db.from("job_desk_orders")
+  let update = db.from("job_desk_orders")
     .update({ application_authorized: true, service_details: { ...details, applicationScope: scope } })
-    .eq("id", orderId).eq("application_authorized", false).select("id").maybeSingle();
+    .eq("id", orderId).eq("application_authorized", order.application_authorized);
+  update = order.service_details === null ? update.is("service_details", null) : update.eq("service_details", JSON.stringify(order.service_details));
+  const { data: updated, error } = await update.select("id").maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!updated) return NextResponse.json({ error: "Authorization changed. Refresh the order." }, { status: 409 });
-  await logAdminAction({ adminId: user.id, action: "job_desk.scope_authorized", targetType: "job_desk_order", targetId: orderId, details: { authorizedAt: scope.authorizedAt, channel: scope.channel, targetRoles: scope.targetRoles } });
+  await logAdminAction({ adminId: user.id, action: "job_desk.scope_authorized", targetType: "job_desk_order", targetId: orderId, details: { authorizedAt: scope.authorizedAt, previousAuthorizedAt: previousScope?.authorizedAt, channel: scope.channel, targetRoles: scope.targetRoles, generalRoleFamilies: scope.generalRoleFamilies } });
 
   let queued = 0;
   if (hasVerifiedJobDeskPayment(order) && ["approved", "active"].includes(order.status)) {
+    if (await enqueueTask("match", `scope-match:${orderId}:${scope.authorizedAt}`, orderId)) queued++;
     const [{ data: profile }, { data: cv }, { data: matches }] = await Promise.all([
       db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle(),
       db.from("job_desk_documents").select("status").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle(),
