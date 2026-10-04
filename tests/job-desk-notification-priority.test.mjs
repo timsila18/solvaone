@@ -27,3 +27,10 @@ test('CV approval wakes the worker even for CV-only services', async () => {
   const source=await readFile(new URL('../src/app/api/admin/job-desk/orders/[orderId]/route.ts',import.meta.url),'utf8');
   assert.match(source, /queueClientUpdate\(orderId, "cv_approved", document.id\);\s+queued = true;/);
 });
+
+test('an order-specific worker cannot pick another client from a global backlog', async () => {
+  const filters=[];
+  const db={from(){const q={select(){return q},eq(field,value){filters.push([field,value]);return q},lt(){return q},lte(){return q},order(){return q},limit(){return q},in(){return q},then(resolve){return Promise.resolve({data:[],error:null}).then(resolve)}};return q}};
+  assert.equal(await claimPrioritizedTask(db,'worker',false,'beryl'),null);
+  assert.equal(filters.filter(([field,value])=>field==='order_id'&&value==='beryl').length,2);
+});

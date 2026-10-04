@@ -163,7 +163,7 @@ export async function POST(request: Request) {
     }
     await logAdminAction({ adminId: user.id, action: `job_desk.${input.action}`, targetType: "job_desk", targetId: "orderId" in input ? input.orderId : "matchId" in input ? input.matchId : "sourceId" in input ? input.sourceId : "vacancyId" in input ? input.vacancyId : user.id, details: { action: input.action, ...("decision" in input ? { decision: input.decision } : {}) } });
     if (queued) after(async () => {
-      try { await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }); }
+      try { await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000, orderId: "orderId" in input ? input.orderId : undefined }); }
       catch (cause) { await logSystemEvent({ category: "job_desk.worker", level: "error", message: cause instanceof Error ? cause.message : "Queue processing failed" }); }
     });
     return NextResponse.json({ ok: true, ...result });

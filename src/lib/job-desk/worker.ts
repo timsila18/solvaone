@@ -385,13 +385,13 @@ async function processTask(task: Task) {
   throw new Error(`Unknown Job Desk task: ${task.task_type}`);
 }
 
-export async function runJobDeskWorker({ maxTasks = 10, maxRunMs = 45000 }: { maxTasks?: number; maxRunMs?: number } = {}) {
+export async function runJobDeskWorker({ maxTasks = 10, maxRunMs = 45000, orderId }: { maxTasks?: number; maxRunMs?: number; orderId?: string } = {}) {
   const db = createSupabaseAdminClient();
   const workerId = `vercel-${crypto.randomUUID()}`;
   const deadline = Date.now() + maxRunMs;
   let processed = 0;
   for (let index = 0; index < maxTasks && Date.now() < deadline; index += 1) {
-    const task = await claimPrioritizedTask(db, workerId, index % 6 === 5) as Task | null;
+    const task = await claimPrioritizedTask(db, workerId, index % 6 === 5, orderId) as Task | null;
     if (!task) break;
     const heartbeat = setInterval(() => {
       void renewTaskLease(db, task.id, workerId).catch(() => {

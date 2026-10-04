@@ -5,7 +5,10 @@ import { balancedDiscoveryLinks } from "./search-lanes";
 
 const origin = "https://www.corporatestaffing.co.ke";
 export const emailCatalogueUrl = `${origin}/category/corporate-staffing-jobs/`;
-const recipient = "jobs@corporatestaffing.co.ke";
+const recruiterRecipients = new Set(["jobs@corporatestaffing.co.ke", "vacancies@corporatestaffing.co.ke"]);
+// Recruitment address published in the trusted recruiter's application section;
+// employer identity/domain independently checked before inclusion here.
+const employerRecipients = [{ email: "recruitment@westmedical.co.ke", employer: /westlands? medical centre/i }];
 
 export function isEmailCatalogueUrl(value: string) {
   return value === emailCatalogueUrl || isCareerCatalogueUrl(value) || [2, 3].some(page => value === `${emailCatalogueUrl}page/${page}/`);
@@ -35,11 +38,16 @@ export function parseEmailAdvert(html: string, url: string, now = new Date()) {
   const $ = load(html);
   $("script,style,nav,footer,.related-posts").remove();
   const title = $("h1").first().text().replace(/\s+/g, " ").trim();
+  $("article").first().find("h1,h2,h3,h4,p,li,div,dt,dd,td,th").append(" ");
   const text = $("article").first().text().replace(/\s+/g, " ").trim();
   const description = text.split(/Job Seeker Testimonials|Job Search Support Service:/i)[0].slice(0, 18000);
   const instructions = description.split(/How to Apply/i)[1] ?? "";
   // Never infer a recipient from a footer or a recruiter contact address.
-  if (!title || description.length < 400 || !/send your CV/i.test(instructions) || !instructions.toLowerCase().includes(recipient)) return null;
+  const employer = description.match(/Employer:\s*(.*?)(?=Industry:|Salary:|Location:|Country:|Deadline:|$)/i)?.[1]?.trim() ?? "";
+  const emails = [...new Set((instructions.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) ?? []).map(email => email.toLowerCase()))];
+  const verified = emails.filter(email => recruiterRecipients.has(email) && /send your CV/i.test(instructions) || employerRecipients.some(item => item.email === email && item.employer.test(employer)));
+  if (!title || description.length < 400 || verified.length !== 1 || emails.length !== 1) return null;
+  const recipient = verified[0];
   const dates: number[] = [];
   for (const match of description.matchAll(/(?:deadline\s*:\s*|before\s+)(\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}(?:st|nd|rd|th)?\s+[a-z]+\s+\d{4})/gi)) {
     const numeric = match[1].match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -54,7 +62,7 @@ export function parseEmailAdvert(html: string, url: string, now = new Date()) {
   if (!location || !/Country:\s*Kenya\b/i.test(description)) return null;
   return {
     external_id: `official-email:${createHash("sha256").update(url).digest("hex")}`,
-    provider: "manual", source_id: null, company_name: "Corporate Staffing Services (recruiter)", title,
+    provider: "manual", source_id: null, company_name: recruiterRecipients.has(recipient) ? "Corporate Staffing Services (recruiter)" : employer, title,
     location: `${location}, Kenya`, workplace_type: "onsite", description,
     apply_url: url, application_method: "email", application_email: recipient, email_verified: true,
     status: expired ? "closed" : "open", review_status: conflict ? "needs_review" : "approved",

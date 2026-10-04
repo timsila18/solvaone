@@ -130,6 +130,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
   }
 
   await logAdminAction({ adminId: user.id, action: `job_desk.${parsed.data.action}`, targetType: "job_desk_order", targetId: orderId, details: parsed.data.action === "save_answers" ? { answerCount: Object.keys(parsed.data.answers).length } : parsed.data.action === "save_applicant_details" ? { updatedFields: Object.keys(parsed.data.details) } : parsed.data });
-  if (queued) after(async () => { try { await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000 }); } catch { /* The scheduled worker retains queued tasks. */ } });
+  if (queued) after(async () => { try { await runJobDeskWorker({ maxTasks: 10, maxRunMs: 45000, orderId }); } catch { /* The scheduled worker retains queued tasks. */ } });
   return NextResponse.json({ ok: true });
 }

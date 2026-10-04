@@ -18,7 +18,7 @@ export function compareClientTasks(a: QueuedTask, b: QueuedTask, successes: Map<
 }
 
 // Compare-and-swap claims retain exclusivity across concurrent server workers.
-export async function claimPrioritizedTask(db: any, workerId: string, fairnessTurn = false) {
+export async function claimPrioritizedTask(db: any, workerId: string, fairnessTurn = false, orderId?: string) {
   const now = new Date().toISOString();
   const { data: expired, error: expiredError } = await db.from("job_desk_tasks").select("id,attempts,max_attempts,lease_until").eq("status", "running").lt("lease_until", now).limit(20);
   if (expiredError) throw new Error(expiredError.message);
@@ -32,6 +32,7 @@ export async function claimPrioritizedTask(db: any, workerId: string, fairnessTu
   for (const tier of tiers) {
     for (let contention = 0; contention < 4; contention++) {
       let query = db.from("job_desk_tasks").select("*").eq("status", "queued").lte("available_at", now).order("available_at").order("created_at").limit(100);
+      if (orderId) query = query.eq("order_id", orderId);
       if (tier) query = query.in("task_type", tier);
       const { data, error } = await query;
       if (error) throw new Error(error.message);

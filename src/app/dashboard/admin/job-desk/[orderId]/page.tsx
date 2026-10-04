@@ -28,6 +28,7 @@ import { applicationLane } from "@/lib/job-desk/application-lane";
 import { BlockerNote } from "@/components/job-desk/blocker-note";
 import { ClientProgress } from "@/components/job-desk/client-progress";
 import { deliveryStage } from "@/lib/job-desk/application-progress";
+import { OrderRefresh } from "@/components/job-desk/order-refresh";
 
 type Question = { id: string; category: string; question: string; reason: string; required?: boolean };
 
@@ -54,6 +55,8 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   const { data: candidate, error: candidateError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (candidateError) throw new Error(`Could not load candidate profile: ${candidateError.message}`);
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
+  const { data: clientUpdates, error: updatesError } = await db.from("job_desk_tasks").select("id,status,payload,result,last_error,created_at").eq("order_id", orderId).eq("task_type", "notify_client").order("created_at", { ascending: false }).limit(8);
+  if (updatesError) throw new Error(`Could not load client updates: ${updatesError.message}`);
   const serviceDetails = (order.service_details ?? {}) as Record<string, unknown>;
   const applicantDetails = readApplicantDetails(serviceDetails);
   const applicationScope = order.application_authorized ? readApplicationScope(order.service_details) : null;
@@ -97,6 +100,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
 
   return (
     <AppShell email={user.email} isAdmin>
+      <OrderRefresh active={["intake", "cv_review", "approved", "active"].includes(order.status)} />
       <div className="flex flex-col justify-between gap-5 border-b border-black/10 pb-6 dark:border-white/10 lg:flex-row lg:items-end">
         <div><a href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Hunting / Orders</a><h1 className="mt-2 text-3xl font-black">{client?.full_name ?? "Client order"}</h1><p className="mt-2 text-sm text-black/55 dark:text-white/55">{order.service_type.replaceAll("_", " ")} · {client?.whatsapp_phone} · {order.status.replaceAll("_", " ")}</p></div>
         <JobDeskOrderActions key={order.status} orderId={orderId} canProcess={isCvService && file?.extraction_status === "succeeded" && order.status !== "cv_processing"} canApprove={isCvService && document?.status === "review"} currentStatus={order.status} paymentStatus={order.payment_status} paymentNeedsReview={paymentNeedsReview} showCvActions={isCvService} />
@@ -108,7 +112,12 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
       <div className="grid gap-6 py-7 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="space-y-6">
           <Panel title="Order"><Detail label="Payment" value={`${order.payment_status} · ${formatKes(order.amount)}`} /><Detail label="Reference" value={order.payment_reference || "Not recorded"} /><Detail label="Channel" value={order.source_channel} /><Detail label="Created" value={new Date(order.created_at).toLocaleString()} /></Panel>
-          {isJobSearch ? <Panel title="Client contact"><ClientEmailForm orderId={orderId} email={client?.email ?? ""} /></Panel> : null}
+          {isJobSearch ? <Panel title="Client contact"><ClientEmailForm orderId={orderId} email={client?.email ?? ""} /><h3 className="mt-4 text-sm font-bold">Client email updates</h3>{clientUpdates?.length ? clientUpdates.map(update => {
+            const result = (update.result ?? {}) as { skipped?: boolean; delivery?: { event?: string }; providerMessageId?: string };
+            const event = String(((update.payload ?? {}) as { event?: string }).event ?? "Update").replace(/_/g, " ");
+            const status = result.skipped ? "Superseded" : result.delivery?.event === "email.delivered" ? "Delivered to mail server" : result.delivery?.event === "email.bounced" || result.delivery?.event === "email.failed" ? "Delivery failed" : update.status === "succeeded" && result.providerMessageId ? "Accepted by email provider" : update.status === "failed" ? "Sending failed" : update.status === "running" ? "Sending" : "Queued";
+            return <p key={update.id} className="mt-2 text-sm break-words">{event}: {status}{update.last_error ? ` - ${update.last_error}` : ""}</p>;
+          }) : <p className="mt-2 text-sm">No email updates recorded.</p>}</Panel> : null}
           {isJobSearch ? <Panel title="Reusable application details"><Detail label="Current location" value={[applicantDetails?.currentCity, applicantDetails?.currentCountry].filter(Boolean).join(", ") || "Not provided"} /><Detail label="Kenya work eligibility (client-declared)" value={applicantDetails?.kenyaWorkEligibility && applicantDetails.kenyaWorkEligibility !== "not_provided" ? applicantDetails.kenyaWorkEligibility : "Not confirmed"} /><Detail label="Sponsorship needed (client-declared)" value={applicantDetails?.sponsorshipNeeded && applicantDetails.sponsorshipNeeded !== "not_provided" ? applicantDetails.sponsorshipNeeded : "Not confirmed"} /><Detail label="Notice period" value={applicantDetails?.noticePeriod || "Not provided"} /><Detail label="LinkedIn" value={applicantDetails?.applicantLinkedinUrl || "Not provided"} /><Detail label="Portfolio" value={applicantDetails?.portfolioUrl || "Not provided"} /><p className="text-xs leading-5 text-black/60 dark:text-white/60">Use these client-confirmed answers for common portal fields. Identity checks still require the client through the employer's official process.</p><ApplicantDetailsForm orderId={orderId} details={applicantDetails} /></Panel> : null}
           {isJobSearch ? <Panel title="Application authorization">{applicationScope ? <><Detail label="Recorded" value={new Date(applicationScope.authorizedAt).toLocaleString()} /><Detail label="Target roles" value={applicationScope.targetRoles.join(", ")} /><Detail label="Locations" value={applicationScope.preferredLocations.join(", ") || "Kenya-eligible roles"} /><Detail label="Employers excluded" value={applicationScope.excludedEmployers.join(", ") || "None"} /><Detail label="Roles excluded" value={applicationScope.excludedRoles.join(", ") || "None"} /><Detail label="Other exclusions" value={applicationScope.excludedKeywords.join(", ") || "None"} /></> : null}<ScopeAuthorizationForm orderId={orderId} authorized={Boolean(applicationScope)} scope={applicationScope} targetRoles={(candidate?.target_job_titles ?? []).join(", ")} preferredLocations={(candidate?.preferred_locations ?? []).join(", ")} remotePreference={candidate?.remote_preference ?? "flexible"} /></Panel> : null}
           {order.instructions ? <Panel title="Client instructions"><p className="whitespace-pre-wrap text-sm leading-6">{order.instructions}</p></Panel> : null}

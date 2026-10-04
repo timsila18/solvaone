@@ -26,6 +26,28 @@ test("official instructions provide an email route and full requirements", () =>
   assert.equal(job.application_email, "jobs@corporatestaffing.co.ke");
   assert.equal(job.location, "Nairobi, Kenya");
 });
+
+test("published alternative recruiter mailbox is retained exactly", () => {
+  const job = parseEmailAdvert(page().replaceAll('jobs@corporatestaffing.co.ke','vacancies@corporatestaffing.co.ke'),url,now);
+  assert.equal(job.application_email,'vacancies@corporatestaffing.co.ke');
+  assert.equal(job.email_verified,true);
+});
+
+test("verified employer recruitment mailbox does not need the recruiter's CV wording", () => {
+  const html=page().replace('Location: Nairobi','Employer: Westland Medical Centre Industry: Admin Location: Nairobi').replace('Please send your CV only to jobs@corporatestaffing.co.ke before 5th October 2026','recruitment@westmedical.co.ke').replace('Country: Kenya','Country: Kenya Deadline: 08/10/2026');
+  const job=parseEmailAdvert(html,url,now);
+  assert.equal(job.application_email,'recruitment@westmedical.co.ke');
+  assert.equal(job.company_name,'Westland Medical Centre');
+  assert.equal(parseEmailAdvert(html.replace('Westland Medical Centre','Unknown Employer'),url,now),null);
+  assert.equal(parseEmailAdvert(html.replace('recruitment@westmedical.co.ke','recruitment@westmedical.co.ke.evil.test'),url,now),null);
+});
+
+test("adjacent HTML metadata and bare email never merge into invalid tokens", () => {
+  const html = `<article><h1>Receptionist</h1><div>Employer: Westland Medical Centre</div><div>Industry: Admin</div><div>Location: Nairobi</div><div>Country: Kenya</div><div>Deadline: 08/10/2026</div><p>${'Hospital reception, administration, patient scheduling and records. '.repeat(12)}</p><h2>How to Apply</h2><p>recruitment@westmedical.co.ke</p><h2>Job Seeker Testimonials</h2></article>`;
+  const job=parseEmailAdvert(html,url,now);
+  assert.equal(job.application_email,'recruitment@westmedical.co.ke');
+  assert.equal(job.status,'open');
+});
 test("expired and conflicting deadlines cannot enter automatic matching", () => {
   assert.equal(parseEmailAdvert(page("29th September 2026"), url, now).status, "closed");
   const conflict = parseEmailAdvert(page("5th October 2026", "Deadline: 30/09/2026"), url, now);
