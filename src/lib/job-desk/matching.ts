@@ -10,6 +10,11 @@ const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((
 
 const skillText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const evidenceGroups = [
+  ["communication", "communication skills", "clear communication", "verbal communication", "written communication", "interpersonal communication"],
+  ["confidentiality", "confidential records", "confidential documentation", "confidential clinical documentation", "maintain confidentiality", "maintained confidentiality"],
+  ["documentation", "clinical documentation", "accurate reporting", "accurate records", "documenting", "case reports"],
+  ["teamwork", "team collaboration", "multidisciplinary collaboration", "multidisciplinary teams", "collaborate with healthcare teams", "team collaboration and professional boundaries"],
+  ["active listening", "listening skills", "empathy", "empathetic", "empathy and emotional resilience"],
   ["customer service", "customer support", "customer care", "client support", "customer enquiries", "customer inquiries"],
   ["complaint resolution", "resolving complaints", "resolved complaints", "customer complaints"],
   ["cash handling", "cash reconciliation", "reconciled cash", "cash and m pesa reconciliation", "payment reconciliation"],
@@ -50,6 +55,7 @@ export function documentedSkillMatches(skill: string, advert: string) {
   if (text.includes(` ${phrase} `)) return true;
   // Only explicit equivalent phrases, not arbitrary single-word overlap.
   const equivalents = [
+    ...evidenceGroups.slice(0, 5),
     ["key account management", "account management", "managing key accounts"],
     ["customer relationship management", "client relationship management", "crm"],
     ["sales forecasting", "sales forecasts", "forecasting sales"],

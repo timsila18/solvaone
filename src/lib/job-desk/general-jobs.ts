@@ -3,7 +3,7 @@ export const generalJobFamilies = [
   { id: "hospitality", label: "Hospitality and restaurant support", titles: /\b(waiter|waitress|restaurant server|food and beverage server|kitchen assistant|kitchen steward|housekeeping attendant|room attendant|restaurant attendant)\b|^server$/i },
   { id: "warehouse", label: "Warehouse and packing", titles: /\b(warehouse assistant|warehouse attendant|packer|packing assistant|loader|dispatch assistant|stock assistant)\b/i },
   { id: "cleaning", label: "Cleaning and general support", titles: /\b(cleaner|cleaning attendant|general worker|office messenger|messenger|office runner)\b/i },
-  { id: "customer_service", label: "Reception and customer service", titles: /\b(receptionist|reception assistant|front desk attendant|front desk assistant|customer service assistant|customer service representative|call cent(?:er|re) agent)\b/i },
+  { id: "customer_service", label: "Reception and customer service", titles: /\b(receptionist|reception assistant|front desk attendant|front desk assistant|customer service assistant|customer service representative|customer service executive|customer care representative|customer support representative|call cent(?:er|re) agent)\b/i },
   { id: "office_support", label: "Office and data-entry support", titles: /\b(office assistant|administrative assistant|clerical assistant|data entry clerk|records clerk)\b/i }
 ] as const;
 
