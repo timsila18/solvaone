@@ -1,0 +1,13 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const ts = require('typescript');
+const mod = { exports: {} };
+const code = ts.transpileModule(fs.readFileSync('src/lib/job-desk/application-agent.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+new Function('exports', 'module', 'require', code)(mod.exports, mod, require);
+const { verifiedAgentResult } = mod.exports;
+assert.equal(verifiedAgentResult({ status: 'submitted' }).status, 'needs_human');
+assert.equal(verifiedAgentResult({ status: 'submitted', confirmation: 'Received', clicked: false, finalUrl: 'https://jobs.lever.co/test' }).status, 'needs_human');
+assert.equal(verifiedAgentResult({ status: 'submitted', confirmation: 'Received', clicked: true, finalUrl: 'https://jobs.lever.co/test' }).status, 'submitted');
+assert.equal(verifiedAgentResult(null).clicked, true);
+assert.equal(verifiedAgentResult({ status: 'needs_human', clicked: false }).clicked, false);
+console.log('Dedicated agent evidence validation and uncertain outcome tests passed. No applications sent.');

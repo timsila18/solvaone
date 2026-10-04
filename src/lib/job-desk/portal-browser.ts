@@ -3,6 +3,7 @@ import { Document, Packer, Paragraph } from "docx";
 import { isOfficialApplyUrl } from "./vacancy-feeds";
 
 export type PortalApplication = {
+  applicationId?: string;
   provider?: "greenhouse" | "lever";
   url: string;
   siteToken: string;
@@ -20,7 +21,7 @@ export type PortalApplication = {
   coverLetter: string;
 };
 
-type PortalResult = { status: "submitted" | "needs_human"; reason?: string; confirmation?: string; finalUrl?: string; clicked?: boolean };
+export type PortalResult = { status: "submitted" | "needs_human"; reason?: string; confirmation?: string; finalUrl?: string; clicked?: boolean };
 
 export function canAutomatePortal(provider: string, siteToken: string, url: string) {
   return (provider === "greenhouse" || provider === "lever") && isOfficialApplyUrl(provider, siteToken, url);
@@ -30,7 +31,8 @@ export function canAutomatePortal(provider: string, siteToken: string, url: stri
 const runner = String.raw`
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
-const data = JSON.parse(fs.readFileSync('/vercel/sandbox/application.json', 'utf8'));
+const root = process.env.APPLICATION_WORKDIR || '/vercel/sandbox';
+const data = JSON.parse(fs.readFileSync(root + '/application.json', 'utf8'));
 let clicked = false;
 function browser(...args) { return execFileSync('agent-browser', args, { encoding: 'utf8', timeout: 30000, maxBuffer: 2 * 1024 * 1024 }).trim(); }
 function evaluate(expression) {
@@ -56,10 +58,10 @@ try {
   for (const field of page.fields) {
     const key = field.name || field.id;
     if (field.type === 'file' && /resume|cv/i.test(key + ' ' + field.label)) {
-      browser('upload', field.name ? '[name="' + field.name + '"]' : '#' + field.id, '/vercel/sandbox/cv.docx');
+      browser('upload', field.name ? '[name="' + field.name + '"]' : '#' + field.id, root + '/cv.docx');
       handled.add(key);
     } else if (field.type === 'file' && /cover.?letter/i.test(key + ' ' + field.label)) {
-      browser('upload', field.name ? '[name="' + field.name + '"]' : '#' + field.id, '/vercel/sandbox/cover-letter.docx');
+      browser('upload', field.name ? '[name="' + field.name + '"]' : '#' + field.id, root + '/cover-letter.docx');
       handled.add(key);
     } else if (values[key] && ['text','email','tel','url',''].includes(field.type)) {
       browser('fill', field.name ? '[name="' + field.name + '"]' : '#' + field.id, values[key]);
@@ -123,9 +125,13 @@ async function checked(sandbox: Sandbox, cmd: string, args: string[]) {
 export async function runPortalApplication(data: PortalApplication, cv: Buffer): Promise<PortalResult> {
   if (!canAutomatePortal(data.provider ?? "greenhouse", data.siteToken, data.url)) throw new Error("Unsupported or unverified portal URL.");
   if (!data.firstName || !data.lastName || !data.email || !data.phone) return { status: "needs_human", reason: "Candidate name, email or phone is missing." };
+  const coverLetter = await Packer.toBuffer(new Document({ sections: [{ children: data.coverLetter.split(/\r?\n/).map((line) => new Paragraph({ text: line })) }] }));
+  if (process.env.APPLICATION_AGENT_URL) {
+    const { runDedicatedApplication } = await import("./application-agent");
+    return runDedicatedApplication(data, cv, coverLetter);
+  }
   const sandbox = await Sandbox.create({ runtime: "node24", timeout: 180000 });
   try {
-    const coverLetter = await Packer.toBuffer(new Document({ sections: [{ children: data.coverLetter.split(/\r?\n/).map((line) => new Paragraph({ text: line })) }] }));
     await checked(sandbox, "sh", ["-c", "sudo dnf install -y nss nspr libxkbcommon atk at-spi2-atk libXcomposite libXdamage libXrandr mesa-libgbm libdrm alsa-lib pango cairo gtk3 >/dev/null"]);
     await checked(sandbox, "npm", ["install", "-g", "agent-browser"]);
     await checked(sandbox, "agent-browser", ["install"]);

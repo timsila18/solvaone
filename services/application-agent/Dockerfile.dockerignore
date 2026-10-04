@@ -1,0 +1,10 @@
+**
+!src/
+!src/lib/
+!src/lib/job-desk/
+!src/lib/job-desk/portal-browser.ts
+!services/
+!services/application-agent/
+!services/application-agent/server.mjs
+!services/application-agent/build-runner.cjs
+!services/application-agent/Dockerfile
