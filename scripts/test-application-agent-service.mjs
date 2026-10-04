@@ -11,8 +11,10 @@ const id = '11111111-1111-4111-8111-111111111111';
 let child;
 await fs.copyFile('services/application-agent/server.mjs', path.join(root, 'server.mjs'));
 await fs.writeFile(path.join(root, 'runner.cjs'), 'console.log(JSON.stringify({status:"needs_human",clicked:false,reason:"TEST FIXTURE: no external browser or submission"}));');
-async function start() {
-  child = spawn(process.execPath, [path.join(root, 'server.mjs')], { env: { ...process.env, PORT: String(port), APPLICATION_AGENT_TOKEN: token, APPLICATION_AGENT_DATA_DIR: path.join(root, 'data') }, stdio: 'ignore' });
+async function start(useSecretFile = false) {
+  const secretPath = path.join(root, 'agent-token');
+  await fs.writeFile(secretPath, token + '\n', { mode: 0o600 });
+  child = spawn(process.execPath, [path.join(root, 'server.mjs')], { env: { ...process.env, PORT: String(port), APPLICATION_AGENT_TOKEN: useSecretFile ? '' : token, APPLICATION_AGENT_TOKEN_FILE: useSecretFile ? secretPath : '', APPLICATION_AGENT_DATA_DIR: path.join(root, 'data') }, stdio: 'ignore' });
   for (let i = 0; i < 40; i++) {
     try { if ((await fetch(endpoint + '/health')).ok) return; } catch {}
     await new Promise(r => setTimeout(r, 100));
@@ -32,7 +34,7 @@ try {
   assert.equal(job.result.clicked, false);
   const repeated = await (await fetch(endpoint + '/applications/' + id, { method: 'POST', headers, body })).json();
   assert.deepEqual(repeated, job);
-  await stop(); await start();
+  await stop(); await start(true);
   assert.deepEqual(await (await fetch(endpoint + '/applications/' + id, { headers })).json(), job);
   await stop();
   const interrupted = { id, status: 'running' };

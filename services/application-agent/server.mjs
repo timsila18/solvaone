@@ -4,7 +4,9 @@ import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 
-const token = process.env.APPLICATION_AGENT_TOKEN;
+const token = process.env.APPLICATION_AGENT_TOKEN_FILE
+  ? (await fs.readFile(process.env.APPLICATION_AGENT_TOKEN_FILE, 'utf8')).trim()
+  : process.env.APPLICATION_AGENT_TOKEN;
 if (!token || token.length < 32) throw Error('Set a unique APPLICATION_AGENT_TOKEN of at least 32 characters.');
 const root = path.resolve(process.env.APPLICATION_AGENT_DATA_DIR || '/data');
 await fs.mkdir(root, { recursive: true, mode: 0o700 });
@@ -37,6 +39,7 @@ async function execute(job) {
     const dir = path.join(root, job.id);
     const childEnv = { ...process.env, APPLICATION_WORKDIR: dir, AGENT_BROWSER_SESSION: job.id };
     delete childEnv.APPLICATION_AGENT_TOKEN;
+    delete childEnv.APPLICATION_AGENT_TOKEN_FILE;
     const child = spawn(process.execPath, [path.join(import.meta.dirname, 'runner.cjs')], { env: childEnv, stdio: ['ignore', 'pipe', 'ignore'] });
     let output = '';
     child.stdout.on('data', chunk => { output = (output + chunk.toString()).slice(-65536); });

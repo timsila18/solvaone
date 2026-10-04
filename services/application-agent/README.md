@@ -66,3 +66,33 @@ Uploads can transmit personal information before final submission. Keep the
 printed attempt ID to retrieve the result after a disconnect.
 
 Container/browser checks and a real authorized submission remain release gates.
+
+## Always-on server deployment
+
+Use a Linux server with Docker Compose, persistent encrypted storage and a DNS
+hostname pointing to its public IP. Do not use ordinary shared web hosting.
+Allow inbound ports 80 and 443; do not expose port 8080. The included Compose
+stack runs the agent behind Caddy HTTPS with durable data and bounded logs.
+The server must already have Docker installed; this does not provision a VPS.
+
+From a checkout on that server:
+
+```sh
+export AGENT_DOMAIN=agent.solvaone.co.ke
+read -rs -p 'Agent token (at least 32 characters): ' APPLICATION_AGENT_TOKEN
+export APPLICATION_AGENT_TOKEN
+docker compose -f services/application-agent/compose.yaml config --quiet
+docker compose -f services/application-agent/compose.yaml up -d --build
+docker compose -f services/application-agent/compose.yaml ps
+```
+
+Enter a securely generated token without placing it in chat or shell history.
+Set the matching token and HTTPS URL in Vercel only after authenticated readiness
+and browser checks pass. Compose mounts the token as a secret file. Keep the
+token available securely for later deployments. Never use `down --volumes` on
+this stack: its application ledger prevents duplicate submissions.
+
+Health checks prove the HTTP process responds, not successful applications.
+No Docker socket, database credentials or Resend credentials are mounted in the
+agent. Restrict server administration and establish backup and retention policy
+before processing client documents. A local deployment is for testing only.
