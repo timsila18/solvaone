@@ -20,7 +20,7 @@ function cli(command, args) {
   }
   return '';
 }
-vm.runInNewContext(runner, { URL, process: { env: {} }, console: { log: value => logs.push(JSON.parse(value)) }, require: name => name === 'node:fs' ? { readFileSync: () => JSON.stringify(data) } : { execFileSync: cli } });
+vm.runInNewContext(runner, { URL, process: { env: {} }, console: { log: value => logs.push(JSON.parse(value)) }, require: name => name === 'node:fs' ? { readFileSync: () => JSON.stringify(data), writeFileSync() {}, renameSync() {} } : { execFileSync: cli } });
 assert.equal(logs.at(-1).testReady, true);
 assert.equal(logs.at(-1).clicked, false);
 assert.ok(calls.some(args => args[0] === 'upload'));

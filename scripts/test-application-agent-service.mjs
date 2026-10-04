@@ -41,5 +41,11 @@ try {
   const recovered = await (await fetch(endpoint + '/applications/' + id, { headers })).json();
   assert.equal(recovered.result.status, 'needs_human');
   assert.equal(recovered.result.clicked, true);
+  await stop();
+  const confirmation = { status: 'submitted', clicked: true, confirmation: 'TEST FIXTURE employer receipt', finalUrl: 'https://jobs.lever.co/fixture/example' };
+  await fs.writeFile(path.join(root, 'data', id, 'result.json'), JSON.stringify(confirmation));
+  await fs.writeFile(path.join(root, 'data', id, 'state.json'), JSON.stringify(interrupted));
+  await start();
+  assert.deepEqual((await (await fetch(endpoint + '/applications/' + id, { headers })).json()).result, confirmation);
   console.log('Service authentication, host restrictions, idempotency, durable reconnect and interrupted-job recovery passed. No employer contacted.');
 } finally { await stop(); await fs.rm(root, { recursive: true, force: true }); }

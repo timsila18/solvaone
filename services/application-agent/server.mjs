@@ -22,7 +22,12 @@ for (const entry of await fs.readdir(root)) {
   let job;
   try { job = JSON.parse(await fs.readFile(path.join(root, entry, 'state.json'), 'utf8')); }
   catch { job = { id: entry, status: 'finished', result: { status: 'needs_human', clicked: true, reason: 'Attempt ledger is unreadable. Reconcile before retrying.' } }; }
-  if (job.status === 'running') { job.status = 'finished'; job.result = { status: 'needs_human', clicked: true, reason: 'Agent restarted during application. Check employer evidence before any retry.' }; await save(job); }
+  if (job.status === 'running') {
+    job.status = 'finished';
+    try { job.result = JSON.parse(await fs.readFile(path.join(root, entry, 'result.json'), 'utf8')); }
+    catch { job.result = { status: 'needs_human', clicked: true, reason: 'Agent restarted during application. Check employer evidence before any retry.' }; }
+    await save(job);
+  }
   jobs.set(job.id, job);
 }
 async function execute(job) {

@@ -42,6 +42,11 @@ function evaluate(expression) {
   return value;
 }
 function hold(reason) { return { status: 'needs_human', reason, clicked }; }
+function finish(result) {
+  fs.writeFileSync(root + '/result.tmp', JSON.stringify(result), { mode: 0o600 });
+  fs.renameSync(root + '/result.tmp', root + '/result.json');
+  console.log(JSON.stringify(result));
+}
 function allowed(url) {
   try { const u = new URL(url); const hosts = data.provider === 'lever' ? ['jobs.lever.co'] : ['boards.greenhouse.io', 'job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io']; return u.protocol === 'https:' && hosts.includes(u.hostname) && u.pathname.split('/')[1].toLowerCase() === data.siteToken.toLowerCase(); }
   catch { return false; }
@@ -105,7 +110,7 @@ try {
   const submit = evaluate("JSON.stringify([...document.querySelectorAll('button,input[type=submit]')].filter(e=>e.getClientRects().length && /submit application|apply now|submit/i.test((e.innerText||e.value||'').trim())).map(e=>({id:e.id,type:e.type,text:(e.innerText||e.value||'').trim()})))");
   if (!Array.isArray(submit) || submit.length !== 1 || submit[0].text.toLowerCase() !== 'submit application') throw new Error('No unambiguous application submission button.');
   if (data.dryRun) {
-    console.log(JSON.stringify({ status: 'needs_human', testReady: true, reason: 'Test passed: required fields and documents completed. Submission intentionally disabled.', finalUrl: page.url, clicked: false }));
+    finish({ status: 'needs_human', testReady: true, reason: 'Test passed: required fields and documents completed. Submission intentionally disabled.', finalUrl: page.url, clicked: false });
   } else {
   clicked = true;
   browser('find', 'role', 'button', 'click', '--name', 'Submit application');
@@ -115,10 +120,10 @@ try {
   const confirmation = page.body.match(/.{0,80}(?:thank you for applying|application (?:was |has been )?submitted|we (?:have )?received your application).{0,200}/i)?.[0];
   const stillHasSubmit = evaluate("JSON.stringify([...document.querySelectorAll('button,input[type=submit]')].some(e=>e.getClientRects().length && /submit application/i.test(e.innerText||e.value||'')))");
   if (!confirmation || stillHasSubmit) throw new Error('Submission confirmation was not visible. Check the employer portal before retrying.');
-  console.log(JSON.stringify({ status: 'submitted', confirmation, finalUrl: page.url, clicked }));
+  finish({ status: 'submitted', confirmation, finalUrl: page.url, clicked });
   }
 } catch (error) {
-  console.log(JSON.stringify(hold(error instanceof Error ? error.message.slice(0,500) : 'Portal application needs review.')));
+  finish(hold(error instanceof Error ? error.message.slice(0,500) : 'Portal application needs review.'));
 } finally { try { browser('close'); } catch {} }
 `;
 
