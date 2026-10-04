@@ -9,6 +9,8 @@ export async function middleware(request: NextRequest) {
   const isDashboard = request.nextUrl.pathname.startsWith("/dashboard");
   const isAuth = request.nextUrl.pathname.startsWith("/login") || request.nextUrl.pathname.startsWith("/register");
   const isApi = request.nextUrl.pathname.startsWith("/api");
+  const needsSession = isDashboard || isAuth || isApi;
+  const supabaseDeadline = Date.now() + 12_000;
 
   function withSecurityHeaders(nextResponse: NextResponse) {
     nextResponse.headers.set("X-Frame-Options", "DENY");
@@ -30,6 +32,8 @@ export async function middleware(request: NextRequest) {
     }
     return nextResponse;
   }
+
+  if (!needsSession) return withSecurityHeaders(response);
 
   if (!hasSupabaseEnv) {
     if (isDashboard) {
@@ -53,13 +57,32 @@ export async function middleware(request: NextRequest) {
           response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
         }
+      },
+      global: {
+        fetch: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          const timeout = AbortSignal.timeout(Math.max(1, supabaseDeadline - Date.now()));
+          const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+          return fetch(input, { ...init, signal });
+        }
       }
     }
   );
 
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  let user;
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    const upstreamFailure = error && typeof error.status === "number" && error.status >= 500;
+    if (error && (upstreamFailure || error.name === "AuthRetryableFetchError")) {
+      throw error;
+    }
+    user = data.user;
+  } catch (error) {
+    console.error("[middleware] Supabase auth check failed", {
+      path: isDashboard ? "dashboard" : isApi ? "api" : "auth",
+      error: error instanceof Error ? error.name : "unknown"
+    });
+    return withSecurityHeaders(new NextResponse("Authentication is temporarily unavailable. Please retry shortly.", { status: 503 }));
+  }
 
   if (isDashboard && !user) {
     const url = request.nextUrl.clone();
@@ -69,7 +92,18 @@ export async function middleware(request: NextRequest) {
   }
 
   if ((isDashboard || isApi) && user) {
-    const { data: profile } = await supabase.from("users").select("status").eq("id", user.id).single();
+    let profile;
+    try {
+      const { data, error } = await supabase.from("users").select("status").eq("id", user.id).single();
+      if (error && error.code !== "PGRST116") throw error;
+      profile = data;
+    } catch (error) {
+      console.error("[middleware] Supabase profile check failed", {
+        path: isDashboard ? "dashboard" : "api",
+        error: error instanceof Error ? error.name : "unknown"
+      });
+      return withSecurityHeaders(new NextResponse("Account status is temporarily unavailable. Please retry shortly.", { status: 503 }));
+    }
     if (profile?.status && profile.status !== "active") {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
