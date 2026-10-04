@@ -1,6 +1,7 @@
 name: solvaone-application-agent
 services:
   agent:
+    image: solvaone-application-agent:latest
     build:
       context: ../..
       dockerfile: services/application-agent/Dockerfile
