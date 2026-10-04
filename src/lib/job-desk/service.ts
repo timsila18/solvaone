@@ -53,6 +53,7 @@ function buildPrompt(input: {
       role: "developer" as const,
       content: [
         "Perform one consolidated intake pass to avoid repeated AI calls.",
+        `Today's date is ${new Date().toISOString().slice(0, 10)}. Evaluate employment dates and tenure against this date, not your training cutoff. Preserve supplied month/year precision; do not flag past dates as future dates.`,
         "First extract a structured candidate profile using only supplied facts.",
         "Then produce a premium, employer-ready, ATS-readable revamped CV for admin approval.",
         "Never invent employers, dates, qualifications, certifications, referees, achievements, metrics, tools, salary, identity details, or contact information.",
