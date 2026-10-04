@@ -11,3 +11,5 @@ assert.equal(verifiedAgentResult({ status: 'submitted', confirmation: 'Received'
 assert.equal(verifiedAgentResult(null).clicked, true);
 assert.equal(verifiedAgentResult({ status: 'needs_human', clicked: false }).clicked, false);
 console.log('Dedicated agent evidence validation and uncertain outcome tests passed. No applications sent.');
+assert.equal(verifiedAgentResult({ status: 'needs_human', testReady: true, clicked: false }).testReady, true);
+assert.equal(verifiedAgentResult({ status: 'needs_human', testReady: true, clicked: true }).testReady, false);

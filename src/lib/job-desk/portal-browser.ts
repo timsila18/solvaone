@@ -4,6 +4,7 @@ import { isOfficialApplyUrl } from "./vacancy-feeds";
 
 export type PortalApplication = {
   applicationId?: string;
+  dryRun?: boolean;
   provider?: "greenhouse" | "lever";
   url: string;
   siteToken: string;
@@ -21,7 +22,7 @@ export type PortalApplication = {
   coverLetter: string;
 };
 
-export type PortalResult = { status: "submitted" | "needs_human"; reason?: string; confirmation?: string; finalUrl?: string; clicked?: boolean };
+export type PortalResult = { status: "submitted" | "needs_human"; reason?: string; confirmation?: string; finalUrl?: string; clicked?: boolean; testReady?: boolean };
 
 export function canAutomatePortal(provider: string, siteToken: string, url: string) {
   return (provider === "greenhouse" || provider === "lever") && isOfficialApplyUrl(provider, siteToken, url);
@@ -103,6 +104,9 @@ try {
   if (page.challenge || /security challenge|verify you are human|complete (?:an? )?assessment|identity verification required/i.test(page.body)) throw new Error('The portal requires a challenge or assessment.');
   const submit = evaluate("JSON.stringify([...document.querySelectorAll('button,input[type=submit]')].filter(e=>e.getClientRects().length && /submit application|apply now|submit/i.test((e.innerText||e.value||'').trim())).map(e=>({id:e.id,type:e.type,text:(e.innerText||e.value||'').trim()})))");
   if (!Array.isArray(submit) || submit.length !== 1 || submit[0].text.toLowerCase() !== 'submit application') throw new Error('No unambiguous application submission button.');
+  if (data.dryRun) {
+    console.log(JSON.stringify({ status: 'needs_human', testReady: true, reason: 'Test passed: required fields and documents completed. Submission intentionally disabled.', finalUrl: page.url, clicked: false }));
+  } else {
   clicked = true;
   browser('find', 'role', 'button', 'click', '--name', 'Submit application');
   browser('wait', '2000');
@@ -112,6 +116,7 @@ try {
   const stillHasSubmit = evaluate("JSON.stringify([...document.querySelectorAll('button,input[type=submit]')].some(e=>e.getClientRects().length && /submit application/i.test(e.innerText||e.value||'')))");
   if (!confirmation || stillHasSubmit) throw new Error('Submission confirmation was not visible. Check the employer portal before retrying.');
   console.log(JSON.stringify({ status: 'submitted', confirmation, finalUrl: page.url, clicked }));
+  }
 } catch (error) {
   console.log(JSON.stringify(hold(error instanceof Error ? error.message.slice(0,500) : 'Portal application needs review.')));
 } finally { try { browser('close'); } catch {} }

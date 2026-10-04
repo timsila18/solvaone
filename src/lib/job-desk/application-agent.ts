@@ -3,7 +3,7 @@ import type { PortalApplication, PortalResult } from "./portal-browser";
 export function verifiedAgentResult(value: unknown): PortalResult {
   const result = value as Partial<PortalResult> | null;
   if (result?.status === "submitted" && result.clicked === true && typeof result.confirmation === "string" && result.confirmation.trim() && typeof result.finalUrl === "string") return result as PortalResult;
-  return { status: "needs_human", clicked: result?.clicked !== false, reason: result?.reason ?? "The dedicated agent returned no verifiable confirmation. Do not resubmit until reviewed." };
+  return { status: "needs_human", clicked: result?.clicked !== false, testReady: result?.testReady === true && result.clicked === false, finalUrl: result?.finalUrl, reason: result?.reason ?? "The dedicated agent returned no verifiable confirmation. Do not resubmit until reviewed." };
 }
 
 export async function runDedicatedApplication(data: PortalApplication, cv: Buffer, letter: Buffer): Promise<PortalResult> {

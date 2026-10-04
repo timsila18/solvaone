@@ -38,3 +38,31 @@ Candidate documents remain in the mounted volume. Establish access controls,
 encrypted backups and a retention/deletion policy before importing clients.
 After an uncertain result, an administrator must reconcile employer evidence.
 Do not delete its ledger or change its application ID to force a retry.
+
+## Testing
+
+Run the fixture tests from the repository root:
+
+```sh
+node scripts/test-application-agent.cjs
+node scripts/test-application-agent-service.mjs
+node scripts/test-application-agent-dry-run.cjs
+```
+
+These contact no employer. After configuring and starting the service:
+
+```sh
+node scripts/check-application-agent.mjs
+node scripts/test-application-agent-portal.mjs candidate.json cv.docx letter.docx
+```
+
+The readiness check validates authentication, runner presence and browser CLI
+availability. It does not prove Chromium launches or that a portal works.
+The portal test reads a JSON object matching PortalApplication, forces dryRun,
+fills fields and uploads documents, but never clicks Submit. A passing result
+has testReady true and clicked false; it must never increment an application
+counter. Use an employer-authorized staging portal for synthetic candidates.
+Uploads can transmit personal information before final submission. Keep the
+printed attempt ID to retrieve the result after a disconnect.
+
+Container/browser checks and a real authorized submission remain release gates.

@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const token = process.env.APPLICATION_AGENT_TOKEN;
 if (!token || token.length < 32) throw Error('Set a unique APPLICATION_AGENT_TOKEN of at least 32 characters.');
@@ -19,7 +19,9 @@ async function save(job) {
 }
 for (const entry of await fs.readdir(root)) {
   if (!/^[a-f0-9-]{36}$/i.test(entry)) continue;
-  const job = JSON.parse(await fs.readFile(path.join(root, entry, 'state.json'), 'utf8'));
+  let job;
+  try { job = JSON.parse(await fs.readFile(path.join(root, entry, 'state.json'), 'utf8')); }
+  catch { job = { id: entry, status: 'finished', result: { status: 'needs_human', clicked: true, reason: 'Attempt ledger is unreadable. Reconcile before retrying.' } }; }
   if (job.status === 'running') { job.status = 'finished'; job.result = { status: 'needs_human', clicked: true, reason: 'Agent restarted during application. Check employer evidence before any retry.' }; await save(job); }
   jobs.set(job.id, job);
 }
@@ -34,10 +36,10 @@ async function execute(job) {
     let output = '';
     child.stdout.on('data', chunk => { output = (output + chunk.toString()).slice(-65536); });
     const timer = setTimeout(() => child.kill('SIGKILL'), 150000);
-    await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
-    clearTimeout(timer);
+    try { await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); }); }
+    finally { clearTimeout(timer); }
     const result = JSON.parse(output.trim().split('\n').at(-1));
-    job.result = result.status === 'submitted' && result.confirmation && result.clicked === true ? result : { status: 'needs_human', reason: result.reason || 'No employer confirmation.', clicked: result.clicked !== false };
+    job.result = result.status === 'submitted' && result.confirmation && result.clicked === true ? result : { status: 'needs_human', reason: result.reason || 'No employer confirmation.', clicked: result.clicked !== false, testReady: result.testReady === true && result.clicked === false, finalUrl: result.finalUrl };
   } catch { job.result = { status: 'needs_human', clicked: true, reason: 'Agent execution ended without a verifiable result. Do not automatically resubmit.' }; }
   finally { job.status = 'finished'; await save(job); busy = false; }
 }
@@ -49,6 +51,11 @@ http.createServer(async (req, res) => {
     if (req.url === '/health' && req.method === 'GET') return reply(res, 200, { ok: true });
     const supplied = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return reply(res, 401, { error: 'Unauthorized' });
+    if (req.url === '/ready' && req.method === 'GET') {
+      const browser = spawnSync('agent-browser', ['--version'], { timeout: 10000, encoding: 'utf8' });
+      const runner = await fs.access(path.join(import.meta.dirname, 'runner.cjs')).then(() => true, () => false);
+      return reply(res, browser.status === 0 && runner ? 200 : 503, { ready: browser.status === 0 && runner, runner, browserAvailable: browser.status === 0, active: busy, queued: [...jobs.values()].filter(j => j.status === 'queued').length });
+    }
     const id = req.url?.match(/^\/applications\/([a-f0-9-]{36})$/i)?.[1];
     if (!id) return reply(res, 404, { error: 'Not found' });
     if (req.method === 'GET') return reply(res, jobs.has(id) ? 200 : 404, jobs.get(id) || { error: 'Not found' });
@@ -62,7 +69,7 @@ http.createServer(async (req, res) => {
       const { data, cv, letter } = JSON.parse(body);
       const url = new URL(data.url);
       const hosts = data.provider === 'lever' ? ['jobs.lever.co'] : data.provider === 'greenhouse' ? ['boards.greenhouse.io', 'job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io'] : [];
-      if (data.applicationId !== id || url.protocol !== 'https:' || !hosts.includes(url.hostname) || url.pathname.split('/')[1]?.toLowerCase() !== data.siteToken?.toLowerCase() || !cv || !letter) return reply(res, 400, { error: 'Unsupported application' });
+      if (data.applicationId !== id || url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443') || !hosts.includes(url.hostname) || url.pathname.split('/')[1]?.toLowerCase() !== data.siteToken?.toLowerCase() || typeof cv !== 'string' || typeof letter !== 'string' || !cv || !letter || (data.dryRun !== undefined && typeof data.dryRun !== 'boolean')) return reply(res, 400, { error: 'Unsupported application' });
       const dir = path.join(root, id); await fs.mkdir(dir, { recursive: true, mode: 0o700 });
       await fs.writeFile(path.join(dir, 'application.json'), JSON.stringify(data), { mode: 0o600 });
       await fs.writeFile(path.join(dir, 'cv.docx'), Buffer.from(cv, 'base64'), { mode: 0o600 });
