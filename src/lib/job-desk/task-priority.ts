@@ -8,8 +8,10 @@ export function taskPriority(type: string) {
 
 type QueuedTask = { order_id?: string | null; task_type: string; available_at: string; created_at: string; payload?: Record<string, unknown> };
 export function compareClientTasks(a: QueuedTask, b: QueuedTask, successes: Map<string, number>) {
+  const notification = (task: QueuedTask) => task.task_type === "notify_client" ? 0 : 1;
   const firstDelivery = (task: QueuedTask) => task.order_id && !successes.get(task.order_id) && ["match", "submit", "resume_assisted", "prepare"].includes(task.task_type) && task.payload?.assisted !== "true" ? 0 : 1;
-  return firstDelivery(a) - firstDelivery(b)
+  return notification(a) - notification(b)
+    || firstDelivery(a) - firstDelivery(b)
     || taskPriority(a.task_type) - taskPriority(b.task_type)
     || Number(a.payload?.assisted === "true") - Number(b.payload?.assisted === "true")
     || a.available_at.localeCompare(b.available_at) || a.created_at.localeCompare(b.created_at);
@@ -24,8 +26,9 @@ export async function claimPrioritizedTask(db: any, workerId: string, fairnessTu
     const { error } = await db.from("job_desk_tasks").update({ status: task.attempts >= task.max_attempts ? "failed" : "queued", locked_at: null, locked_by: null, lease_until: null, available_at: new Date(Date.now() + 30000).toISOString(), last_error: "Worker lease expired; task returned to queue." }).eq("id", task.id).eq("status", "running").eq("lease_until", task.lease_until);
     if (error) throw new Error(error.message);
   }
-  // One FIFO turn per six claims prevents discovery, CVs and notifications starving.
-  const tiers: (readonly string[] | null)[] = [null];
+  // A separate query finds updates even beyond the first 100 matching tasks.
+  // One FIFO turn per six claims preserves progress for other task types.
+  const tiers: (readonly string[] | null)[] = fairnessTurn ? [null] : [["notify_client"], null];
   for (const tier of tiers) {
     for (let contention = 0; contention < 4; contention++) {
       let query = db.from("job_desk_tasks").select("*").eq("status", "queued").lte("available_at", now).order("available_at").order("created_at").limit(100);

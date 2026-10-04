@@ -54,6 +54,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     const { error: statusError } = await db.from("job_desk_orders").update({ status: "approved" }).eq("id", orderId).in("status", ["cv_review", "approved"]);
     if (statusError) return NextResponse.json({ error: statusError.message }, { status: 500 });
     await queueClientUpdate(orderId, "cv_approved", document.id);
+    queued = true;
     const { data: paidOrder } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", orderId).single();
     const { data: serviceOrder } = await db.from("job_desk_orders").select("service_type").eq("id", orderId).single();
     if (serviceOrder?.service_type === "job_search_full" && hasVerifiedJobDeskPayment(paidOrder)) {
