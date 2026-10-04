@@ -39,7 +39,15 @@ require.extensions[".ts"] = function (module, filename) {
   module._compile(code, filename);
 };
 
-const { clientUpdateContent, queueClientUpdate, sendClientUpdate } = require("../src/lib/job-desk/client-updates.ts");
+const { clientUpdateContent, queueClientUpdate, sendClientUpdate, currentCvUpdate } = require("../src/lib/job-desk/client-updates.ts");
+
+test("delayed CV notices cannot contradict the latest approved CV", () => {
+  const latest = { id: "cv-4", status: "approved" };
+  assert.equal(currentCvUpdate("cv_review", "cv-4", latest), false);
+  assert.equal(currentCvUpdate("cv_approved", "cv-3", latest), false);
+  assert.equal(currentCvUpdate("cv_approved", "cv-4", latest), true);
+  assert.equal(currentCvUpdate("cv_approved", "cv-4", null), false);
+});
 
 test("client updates are addressed to the supplied email and use the configured sender", async () => {
   process.env.RESEND_API_KEY = "test-only";

@@ -10,6 +10,11 @@ export async function queueClientUpdate(orderId: string, event: ClientUpdate, re
   return enqueueTask("notify_client", `client-update:${event}:${reference}`, orderId, { event, reference });
 }
 
+export function currentCvUpdate(event: ClientUpdate, reference: string, latest: { id: string; status: string } | null) {
+  if (event !== "cv_review" && event !== "cv_approved") return true;
+  return latest?.id === reference && (event === "cv_approved" ? latest.status === "approved" : latest.status === "review");
+}
+
 export function clientUpdateContent(event: ClientUpdate, name: string, role?: string, company?: string) {
   const firstName = name.trim().split(/\s+/)[0] || "there";
   const position = [role, company].filter(Boolean).join(" at ");
@@ -30,6 +35,11 @@ export function clientUpdateContent(event: ClientUpdate, name: string, role?: st
 export async function sendClientUpdate(orderId: string, event: ClientUpdate, reference: string) {
   if (!clientUpdateEvents.has(event)) throw new Error("Unknown Job Desk client update event.");
   const db = createSupabaseAdminClient();
+  if (event === "cv_review" || event === "cv_approved") {
+    const { data: latest, error: cvError } = await db.from("job_desk_documents").select("id,status").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
+    if (cvError) throw new Error(cvError.message);
+    if (!currentCvUpdate(event, reference, latest)) return { skipped: true, event, reason: "Superseded by the current CV status." };
+  }
   const { data: order, error } = await db.from("job_desk_orders").select("id,client:job_desk_clients(full_name,email)").eq("id", orderId).single();
   if (error || !order) throw new Error(error?.message ?? "Job Desk order not found.");
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
