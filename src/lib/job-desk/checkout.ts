@@ -33,8 +33,12 @@ export async function startJobDeskPayment(orderId: string) {
   if (order.status !== "awaiting_payment") throw new Error("This request is not awaiting payment.");
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   const phone = normalizeSafaricomPhone(client?.whatsapp_phone ?? "");
-  const { data: last } = await db.from("job_desk_payment_attempts").select("id,status").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (last && ["initiating", "processing"].includes(last.status)) return { status: last.status as "initiating" | "processing" };
+  const { data: last } = await db.from("job_desk_payment_attempts").select("id,status,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (last?.status === "initiating" && Date.now() - Date.parse(last.created_at) > 120_000) {
+    await db.from("job_desk_payment_attempts").update({ status: "needs_review", result_description: "Prompt outcome could not be confirmed. Verify before retrying." }).eq("id", last.id).eq("status", "initiating");
+    return { status: "needs_review" as const };
+  }
+  if (last && ["initiating", "processing", "needs_review"].includes(last.status)) return { status: last.status as "initiating" | "processing" | "needs_review" };
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const { count } = await db.from("job_desk_payment_attempts").select("id", { count: "exact", head: true }).eq("order_id", orderId).gte("created_at", since);
   if ((count ?? 0) >= 5) throw new Error("Too many payment attempts. Contact support before trying again.");

@@ -18,9 +18,10 @@ export async function POST(request: Request) {
   if (!order) return NextResponse.json({ error: "Request not found." }, { status: 404 });
   try { await reconcileJobDeskPayment(order.id); } catch { /* Callback or support can complete reconciliation. */ }
   const db = createSupabaseAdminClient();
-  const [{ data: current }, { data: attempt }] = await Promise.all([
+  const [{ data: current, error: orderError }, { data: attempt, error: attemptError }] = await Promise.all([
     db.from("job_desk_orders").select("payment_status,payment_reference,status").eq("id", order.id).single(),
     db.from("job_desk_payment_attempts").select("status,result_description").eq("order_id", order.id).order("created_at", { ascending: false }).limit(1).maybeSingle()
   ]);
-  return NextResponse.json({ reference: order.id.slice(0, 8).toUpperCase(), paid: current?.payment_status === "paid", paymentStatus: current?.payment_status === "paid" ? "successful" : attempt?.status ?? "failed", message: attempt?.status === "needs_review" ? "Payment needs verification. Contact us with your M-Pesa receipt; do not pay again." : null });
+  if (orderError || attemptError || !current) return NextResponse.json({ error: "Payment status is temporarily unavailable. Please try again shortly." }, { status: 503 });
+  return NextResponse.json({ reference: order.id.slice(0, 8).toUpperCase(), paid: current?.payment_status === "paid", paymentStatus: current?.payment_status === "paid" ? "successful" : attempt?.status ?? "ready", message: attempt?.status === "needs_review" ? "Payment needs verification. Contact us with your M-Pesa receipt; do not pay again." : null });
 }
