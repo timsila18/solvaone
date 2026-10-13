@@ -11,8 +11,13 @@ export default async function JobDeskReport({ params }: { params: Promise<{ orde
   const { data: account } = await db.from("users").select("role").eq("id", user.id).single();
   if (!account || !["admin", "super_admin"].includes(account.role)) redirect("/dashboard");
   const { orderId } = await params;
-  const [{ data: order }, matches] = await Promise.all([db.from("job_desk_orders").select("id,status,client:job_desk_clients(full_name,email)").eq("id", orderId).single(), loadReportMatches(db, orderId)]);
+  const [{ data: order }, matches, { data: applications, error: applicationError }] = await Promise.all([
+    db.from("job_desk_orders").select("id,status,client:job_desk_clients(full_name,email)").eq("id", orderId).single(),
+    loadReportMatches(db, orderId),
+    db.from("job_desk_applications").select("match_id,status,method,provider_message_id,provider_response").eq("order_id", orderId).limit(1000)
+  ]);
   if (!order) notFound();
+  if (applicationError) throw new Error("Submission progress could not be loaded. Please refresh.");
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   return <AppShell email={user.email} isAdmin>
     <Link href={`/dashboard/admin/job-desk/${orderId}`} className="text-sm font-bold text-brand-blue">Back to order</Link>
@@ -20,7 +25,7 @@ export default async function JobDeskReport({ params }: { params: Promise<{ orde
       <div><h1 className="text-3xl font-black">Application report</h1><p className="mt-2 text-sm">{client?.full_name} · {client?.email || "Add the client email before sending updates"}</p></div>
       <AutomationControls action="send_report" id={orderId} label="Email report to client" />
     </div>
-    <div className="mt-6"><ClientProgress matches={matches} /></div>
+    <div className="mt-6"><ClientProgress matches={matches} applications={applications ?? []} /></div>
     <pre className="mt-6 whitespace-pre-wrap break-words font-sans text-sm leading-7">{buildApplicationReport(matches)}</pre>
   </AppShell>;
 }

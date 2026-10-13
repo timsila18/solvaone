@@ -1,8 +1,8 @@
-import { applicationProgress, type ProgressMatch } from "@/lib/job-desk/application-progress";
+import { applicationDeliveryCounts, applicationProgress, type DeliveryApplication, type ProgressMatch } from "@/lib/job-desk/application-progress";
 import { APPLICATION_TARGET } from "@/lib/job-desk/match-shortlist";
 
-export function ClientProgress({ matches, shortlist = [] }: { matches: ProgressMatch[]; shortlist?: { id: string }[] }) {
-  const progress = applicationProgress(matches, shortlist);
+export function ClientProgress({ matches, shortlist = [], applications }: { matches: ProgressMatch[]; shortlist?: { id: string }[]; applications?: DeliveryApplication[] }) {
+  const progress = { ...applicationProgress(matches, shortlist), ...(applications ? applicationDeliveryCounts(applications) : {}) };
   return <section aria-label="Client application progress" className="border-y border-black/10 py-5 dark:border-white/10">
     <h2 className="text-lg font-black">Application progress</h2>
     <p className="mt-2 text-xl font-bold text-brand-blue">{progress.delivered + progress.confirmed}/{APPLICATION_TARGET} verified applications</p>

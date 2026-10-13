@@ -40,7 +40,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
   if (profile?.role !== "admin" && profile?.role !== "super_admin") redirect("/dashboard");
   const { orderId } = await params;
 
-  const [{ data: order, error: orderError }, { data: files }, { data: document }, { data: questionnaire }, { data: aiRun }, { data: rawMatches }, { data: tasks }, { data: openVacancies }] = await Promise.all([
+  const [{ data: order, error: orderError }, { data: files }, { data: document }, { data: questionnaire }, { data: aiRun }, { data: rawMatches }, { data: tasks }, { data: openVacancies }, { data: recordedApplications, error: applicationError }] = await Promise.all([
     db.from("job_desk_orders").select("*, client:job_desk_clients(*)").eq("id", orderId).single(),
     db.from("job_desk_intake_files").select("id,file_name,document_kind,extraction_status,extraction_warning,created_at").eq("order_id", orderId).order("created_at", { ascending: true }),
     db.from("job_desk_documents").select("id,title,html,status,version,structured_content,created_at").eq("order_id", orderId).eq("document_type", "revamped_cv").neq("status", "superseded").order("version", { ascending: false }).limit(1).maybeSingle(),
@@ -48,9 +48,11 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
     db.from("job_desk_ai_runs").select("status,total_tokens,estimated_cost,error_message,output_payload,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     db.from("job_desk_matches").select("id,vacancy_id,score,reasons,gaps,status,cover_letter,authorized_at,submitted_at,vacancy:job_desk_vacancies(title,company_name,location,workplace_type,description,status,review_status,duplicate_of,last_seen_at,apply_url,application_method,application_email,email_verified),application:job_desk_applications(status,method,provider_message_id,provider_response,error_message)").eq("order_id", orderId).order("score", { ascending: false }).limit(100),
     db.from("job_desk_tasks").select("id,task_type,status,last_error,result,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(12),
-    db.from("job_desk_vacancies").select("id,title,company_name,location,apply_url,last_seen_at").eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).gte("last_seen_at", new Date(Date.now() - 72 * 3600000).toISOString()).order("last_seen_at", { ascending: false }).limit(8)
+    db.from("job_desk_vacancies").select("id,title,company_name,location,apply_url,last_seen_at").eq("status", "open").eq("review_status", "approved").is("duplicate_of", null).gte("last_seen_at", new Date(Date.now() - 72 * 3600000).toISOString()).order("last_seen_at", { ascending: false }).limit(8),
+    db.from("job_desk_applications").select("match_id,status,method,provider_message_id,provider_response").eq("order_id", orderId).limit(1000)
   ]);
   if (orderError && orderError.code !== "PGRST116") throw new Error(`Could not load Job Desk order: ${orderError.message}`);
+  if (applicationError) throw new Error("Submission progress could not be loaded. Please refresh.");
   if (!order) notFound();
   const { data: candidate, error: candidateError } = await db.from("job_desk_candidate_profiles").select("*").eq("client_id", order.client_id).maybeSingle();
   if (candidateError) throw new Error(`Could not load candidate profile: ${candidateError.message}`);
@@ -107,7 +109,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
       </div>
       {paymentNeedsReview ? <p role="alert" className="mt-5 border-l-4 border-brand-blue bg-brand-blue/5 p-4 text-sm font-semibold">This order is marked paid without a positive amount and receipt reference. Verify the payment record before treating it as confirmed.</p> : null}
       {isJobSearch && document?.status !== "approved" ? <p role="alert" className="mt-5 border-l-4 border-brand-blue bg-brand-blue/5 p-4 text-sm font-semibold">{document?.status === "review" ? "The CV is ready for your review. Check it below and click Approve CV to start job matching." : "No approved CV is attached to this order. Prepare the CV and profile first, then review and approve it. The order status alone does not approve the CV."}</p> : null}
-      {isJobSearch ? <ClientProgress matches={matches} shortlist={shortlist} /> : null}
+      {isJobSearch ? <ClientProgress matches={matches} shortlist={shortlist} applications={recordedApplications ?? []} /> : null}
 
       <div className="grid gap-6 py-7 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="space-y-6">

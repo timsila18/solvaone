@@ -10,7 +10,7 @@ import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/serve
 import { formatKes } from "@/lib/utils";
 import { hasSubmissionEvidence } from "@/lib/job-desk/search-recovery";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
-import { applicationProgress, deliveryStage, type ProgressMatch } from "@/lib/job-desk/application-progress";
+import { applicationDeliveryCounts, applicationProgress, type DeliveryApplication, type ProgressMatch } from "@/lib/job-desk/application-progress";
 import { AgentOperationsPanel } from "@/components/job-desk/agent-operations-panel";
 import { orderPagination, prioritizeOrders } from "@/lib/job-desk/order-pagination";
 
@@ -54,23 +54,31 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
     db.from("job_desk_matches").select("id", { count: "exact", head: true }).eq("status", "needs_human")
   ]);
   const activeOrders = (orders ?? []).filter(order => order.service_type === "job_search_full" && ["approved", "active"].includes(order.status) && hasVerifiedJobDeskPayment(order));
-  const submissionCounts = new Map<string, number>();
-  if (activeOrders.length) {
-    const { data: applications, error } = await db.from("job_desk_applications").select("order_id,status,method,provider_message_id,provider_response").in("order_id", activeOrders.map(order => order.id));
-    if (error) throw new Error("Application outcomes could not be loaded. Please refresh.");
-    for (const application of applications ?? []) if (hasSubmissionEvidence(application)) submissionCounts.set(application.order_id, (submissionCounts.get(application.order_id) ?? 0) + 1);
+  const { data: recordedApplications, error: applicationError } = orders.length
+    ? await db.from("job_desk_applications").select("order_id,match_id,status,method,provider_message_id,provider_response").in("order_id", orders.map(order => order.id)).limit(5000)
+    : { data: [], error: null };
+  if (applicationError) throw new Error("Application outcomes could not be loaded. Please refresh.");
+  const applicationsByOrder = new Map<string, DeliveryApplication[]>();
+  for (const application of recordedApplications ?? []) {
+    const entries = applicationsByOrder.get(application.order_id) ?? [];
+    entries.push(application);
+    applicationsByOrder.set(application.order_id, entries);
   }
-  const zeroOrders = activeOrders.filter(order => !submissionCounts.get(order.id));
+  const zeroOrders = activeOrders.filter(order => {
+    const counts = applicationDeliveryCounts(applicationsByOrder.get(order.id) ?? []);
+    return counts.delivered + counts.confirmed === 0;
+  });
   const progressByOrder = new Map<string, ReturnType<typeof applicationProgress>>();
   if (orders?.length) {
     const { data: matches, error: progressError } = await db.from("job_desk_matches").select("id,order_id,vacancy_id,reasons,status,cover_letter,application:job_desk_applications(status,method,provider_message_id,provider_response)").in("order_id", orders.map(order => order.id)).neq("status", "rejected").limit(1000);
     if (progressError) throw new Error("Client progress could not be loaded. Please refresh.");
-    for (const order of orders) progressByOrder.set(order.id, applicationProgress((matches ?? []).filter(match => {
-      if (match.order_id !== order.id) return false;
-      const application = Array.isArray(match.application) ? match.application[0] : match.application;
-      return ["confirmed", "delivered", "accepted", "submittedPendingConfirmation"].includes(deliveryStage(application))
-        || (Array.isArray(match.reasons) && match.reasons.some(reason => typeof reason === "string" && reason.startsWith("Suitability review:")));
-    }) as ProgressMatch[]));
+    for (const order of orders) {
+      const matched = (matches ?? []).filter(match => match.order_id === order.id) as ProgressMatch[];
+      progressByOrder.set(order.id, {
+        ...applicationProgress(matched),
+        ...applicationDeliveryCounts(applicationsByOrder.get(order.id) ?? [])
+      });
+    }
   }
   const priorityOrders = orders;
 

@@ -28,6 +28,20 @@ export function distinctSuccessfulDeliveries(applications: DeliveryApplication[]
   return new Set(applications.filter(successfulDelivery).filter(application => application.match_id).map(application => application.match_id)).size;
 }
 
+export function applicationDeliveryCounts(applications: DeliveryApplication[]) {
+  const counts = { delivered: 0, confirmed: 0, accepted: 0, processing: 0, blocked: 0 };
+  const byMatch = new Map<string, ReturnType<typeof deliveryStage>>();
+  const priority = { none: 0, blocked: 1, processing: 2, accepted: 3, confirmed: 4, delivered: 4 };
+  for (const application of applications) {
+    if (!application.match_id) continue;
+    const stage = deliveryStage(application);
+    const previous = byMatch.get(application.match_id) ?? "none";
+    if (priority[stage] > priority[previous]) byMatch.set(application.match_id, stage);
+  }
+  for (const stage of byMatch.values()) if (stage !== "none") counts[stage]++;
+  return counts;
+}
+
 export function applicationProgress(matches: ProgressMatch[], shortlist: { id: string }[] = []) {
   const result = { suitable: 0, ready: 0, delivered: 0, confirmed: 0, blocked: 0, accepted: 0, processing: 0 };
   const vacancies = new Set(shortlist.map(item => item.id));
