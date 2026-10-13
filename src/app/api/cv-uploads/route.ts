@@ -3,6 +3,7 @@ import { checkRateLimit, clientIpFromHeaders, rateLimitResponse } from "@/lib/se
 import { extractTextFromCvFile } from "@/lib/cv-extraction";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { hostAfricaPrivateStorageEnabled, storePrivateFile } from "@/lib/hostafrica-private-storage";
 
 const allowedTypes = new Map([
   ["text/plain", "txt"],
@@ -56,13 +57,20 @@ export async function POST(request: Request) {
   const path = `${user.id}/${Date.now()}-${safeName(file.name)}`;
   const bytes = await file.arrayBuffer();
 
-  const { error } = await admin.storage.from("cv-uploads").upload(path, bytes, {
-    contentType: inferredType,
-    upsert: false
-  });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  let storedPath: string = path;
+  if (hostAfricaPrivateStorageEnabled()) {
+    try {
+      storedPath = await storePrivateFile(Buffer.from(bytes), user.id);
+    } catch (error) {
+      console.error("HostAfrica CV upload failed; using Supabase fallback", error);
+    }
+  }
+  if (storedPath === path) {
+    const { error } = await admin.storage.from("cv-uploads").upload(path, bytes, {
+      contentType: inferredType,
+      upsert: false
+    });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   const extraction = await extractTextFromCvFile(file.name, inferredType, bytes);
@@ -72,8 +80,8 @@ export async function POST(request: Request) {
     action: "cv.upload",
     entity_type: "storage_object",
     metadata: {
-      bucket: "cv-uploads",
-      path,
+      bucket: storedPath === path ? "cv-uploads" : "hostafrica-private",
+      path: storedPath,
       fileName: file.name,
       fileSize: file.size,
       contentType: inferredType,
@@ -87,7 +95,7 @@ export async function POST(request: Request) {
       name: file.name,
       size: file.size,
       type: inferredType,
-      path,
+      path: storedPath,
       parsed: Boolean(extraction.text)
     },
     extractedText: extraction.text,

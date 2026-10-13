@@ -10,6 +10,7 @@ import { normalizeSafaricomPhone } from "@/lib/payments";
 import { createApplicationScope } from "@/lib/job-desk/application-scope";
 import { broaderPreferenceFields, validateBroaderPreferences } from "@/lib/job-desk/broader-preferences";
 import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
+import { deletePrivateFile, hostAfricaPrivateStorageEnabled, isHostAfricaPrivatePath, storePrivateFile } from "@/lib/hostafrica-private-storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -170,9 +171,19 @@ export async function POST(request: Request) {
 
     for (const { file, kind, info, bytes } of prepared) {
       if (!info) throw new Error("Invalid file.");
-      const path = `${orderId}/${randomUUID()}-${info.safeName}`;
-      const { error: uploadError } = await db.storage.from("job-desk-intake").upload(path, bytes, { contentType: info.contentType, upsert: false });
-      if (uploadError) throw new Error(uploadError.message);
+      const legacyPath = `${orderId}/${randomUUID()}-${info.safeName}`;
+      let path: string = legacyPath;
+      if (hostAfricaPrivateStorageEnabled()) {
+        try {
+          path = await storePrivateFile(Buffer.from(bytes), orderId);
+        } catch (error) {
+          console.error("HostAfrica intake upload failed; using Supabase fallback", error);
+        }
+      }
+      if (path === legacyPath) {
+        const { error: uploadError } = await db.storage.from("job-desk-intake").upload(path, bytes, { contentType: info.contentType, upsert: false });
+        if (uploadError) throw new Error(uploadError.message);
+      }
       uploadedPaths.push(path);
       const extraction = kind === "cv" ? await extractTextFromCvFile(file.name, info.contentType, Buffer.from(bytes)) : null;
       const pasted = kind === "cv" ? parsed.data.pastedCvText : "";
@@ -201,7 +212,10 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, accessToken, reference: orderId.slice(0, 8).toUpperCase(), paymentStatus, paymentError, price: service.price, needsReadableCv: prepared.find((item) => item.kind === "cv")?.info?.extension === "doc" && parsed.data.pastedCvText.length < 120 }, { status: 201 });
   } catch (error) {
-    if (uploadedPaths.length) await db.storage.from("job-desk-intake").remove(uploadedPaths);
+    const legacyPaths = uploadedPaths.filter((path) => !isHostAfricaPrivatePath(path));
+    const privatePaths = uploadedPaths.filter(isHostAfricaPrivatePath);
+    if (legacyPaths.length) await db.storage.from("job-desk-intake").remove(legacyPaths);
+    if (privatePaths.length) await Promise.allSettled(privatePaths.map(deletePrivateFile));
     if (clientId) await db.from("job_desk_clients").delete().eq("id", clientId);
     await logSystemEvent({ category: "job_desk.public_intake", level: "error", message: error instanceof Error ? error.message : "Unknown intake error" });
     return NextResponse.json({ error: "We could not receive your documents. Please try again or contact support." }, { status: 500 });
