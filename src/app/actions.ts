@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseLoginClient, createSupabaseServerClient } from "@/lib/supabase/server";
 import { clientIpFromHeaders, logSystemEvent, passwordSchema } from "@/lib/security";
 import { absoluteUrl } from "@/lib/utils";
 import { headers } from "next/headers";
@@ -77,7 +77,7 @@ export async function loginAction(formData: FormData) {
     redirect("/login?error=locked");
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseLoginClient();
   let result: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
   try {
     result = await withinDeadline(supabase.auth.signInWithPassword({
