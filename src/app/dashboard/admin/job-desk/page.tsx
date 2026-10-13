@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { JobDeskIntakeForm } from "@/components/job-desk/intake-form";
@@ -9,17 +10,41 @@ import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/serve
 import { formatKes } from "@/lib/utils";
 import { hasSubmissionEvidence } from "@/lib/job-desk/search-recovery";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
-import { applicationProgress, type ProgressMatch } from "@/lib/job-desk/application-progress";
+import { applicationProgress, deliveryStage, type ProgressMatch } from "@/lib/job-desk/application-progress";
+import { AgentOperationsPanel } from "@/components/job-desk/agent-operations-panel";
+import { orderPagination, prioritizeOrders } from "@/lib/job-desk/order-pagination";
 
-export default async function JobDeskPage() {
+export default async function JobDeskPage({ searchParams }: { searchParams: Promise<{ page?: string | string[] }> }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   const db = await createSupabaseServerClient();
   const { data: profile } = await db.from("users").select("role").eq("id", user.id).single();
   if (profile?.role !== "admin" && profile?.role !== "super_admin") redirect("/dashboard");
 
-  const [{ data: orders }, { count: websiteCount }, { count: activeCount }, { count: reviewCount }, { count: awaitingCount }, { count: queuedCount }, { count: failedCount }, { count: humanCount }] = await Promise.all([
-    db.from("job_desk_orders").select("id,status,payment_status,amount,payment_reference,service_type,source_channel,created_at,client:job_desk_clients(full_name,whatsapp_phone)").neq("status", "awaiting_payment").order("created_at", { ascending: false }).limit(30),
+  const params = await searchParams;
+  const { count: totalCount, error: countError } = await db.from("job_desk_orders").select("id", { count: "exact", head: true });
+  if (countError) throw new Error("Order count could not be loaded. Please refresh.");
+  const totalOrders = totalCount ?? 0;
+  const pagination = orderPagination(params.page, totalOrders);
+
+  // Rank the whole queue before slicing pages, including older unhandled orders.
+  const allOrders = [];
+  for (let from = 0; from < totalOrders; from += 500) {
+    const { data, error } = await db.from("job_desk_orders").select("id,status,payment_status,amount,payment_reference,service_type,source_channel,created_at,client:job_desk_clients(full_name,whatsapp_phone)").order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, from + 499);
+    if (error) throw new Error("Orders could not be loaded. Please refresh.");
+    allOrders.push(...(data ?? []));
+  }
+  const handled = new Set<string>();
+  for (let from = 0; from < allOrders.length; from += 100) {
+    const { data, error } = await db.from("job_desk_applications").select("order_id,status,method,provider_message_id,provider_response").in("order_id", allOrders.slice(from, from + 100).map(order => order.id)).eq("status", "submitted");
+    if (error) throw new Error("Application outcomes could not be loaded. Please refresh.");
+    for (const application of data ?? []) {
+      if (hasSubmissionEvidence(application) || application.provider_message_id || application.provider_response?.clicked === true) handled.add(application.order_id);
+    }
+  }
+  const orders = prioritizeOrders(allOrders, handled).slice(pagination.from, pagination.to + 1);
+
+  const [{ count: websiteCount }, { count: activeCount }, { count: reviewCount }, { count: awaitingCount }, { count: queuedCount }, { count: failedCount }, { count: humanCount }] = await Promise.all([
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).eq("source_channel", "website").eq("status", "intake"),
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).in("status", ["active", "approved", "cv_processing"]),
     db.from("job_desk_orders").select("id", { count: "exact", head: true }).eq("status", "cv_review"),
@@ -40,15 +65,20 @@ export default async function JobDeskPage() {
   if (orders?.length) {
     const { data: matches, error: progressError } = await db.from("job_desk_matches").select("id,order_id,vacancy_id,reasons,status,cover_letter,application:job_desk_applications(status,method,provider_message_id,provider_response)").in("order_id", orders.map(order => order.id)).neq("status", "rejected").limit(1000);
     if (progressError) throw new Error("Client progress could not be loaded. Please refresh.");
-    for (const order of orders) progressByOrder.set(order.id, applicationProgress((matches ?? []).filter(match => match.order_id === order.id && (match.reasons as string[]).some(reason => reason.startsWith("Suitability review:"))) as ProgressMatch[]));
+    for (const order of orders) progressByOrder.set(order.id, applicationProgress((matches ?? []).filter(match => {
+      if (match.order_id !== order.id) return false;
+      const application = Array.isArray(match.application) ? match.application[0] : match.application;
+      return ["confirmed", "delivered", "accepted", "submittedPendingConfirmation"].includes(deliveryStage(application))
+        || (Array.isArray(match.reasons) && match.reasons.some(reason => typeof reason === "string" && reason.startsWith("Suitability review:")));
+    }) as ProgressMatch[]));
   }
-  const priorityOrders = [...(orders ?? [])].sort((a, b) => Number(zeroOrders.some(order => order.id === b.id)) - Number(zeroOrders.some(order => order.id === a.id)));
+  const priorityOrders = orders;
 
   return (
     <AppShell email={user.email} isAdmin>
       <div className="flex flex-col justify-between gap-4 border-b border-black/10 pb-6 dark:border-white/10 md:flex-row md:items-end">
         <div><h1 className="text-3xl font-black">SolvaOne Job Hunting</h1><p className="mt-2 max-w-2xl text-sm text-black/55 dark:text-white/55">Manual WhatsApp intake, payment recording, structured candidate profiles, and approval-ready CV processing.</p><Link className="mt-3 inline-block text-sm font-bold text-brand-blue" href="/dashboard/admin/job-desk/employers">Employer vacancy verification</Link></div>
-        <div className="flex flex-wrap items-center gap-4 text-sm font-bold text-brand-blue"><AutomationControls action="run_queue" label="Process queue now" /><Link href="/dashboard/admin/job-desk/review">Needs your attention</Link><Link href="/dashboard/admin/job-desk/vacancies">Vacancies and sources</Link><Link href="/dashboard/admin">Admin dashboard</Link></div>
+        <div className="flex flex-wrap items-center gap-4 text-sm font-bold text-brand-blue"><AutomationControls action="run_queue" label="Run agent queue" /><AutomationControls action="refresh_all" label="Refresh vacancy sources" /><Link href="/dashboard/admin/job-desk/review">Needs your attention</Link><Link href="/dashboard/admin/job-desk/vacancies">Vacancies and sources</Link><Link href="/dashboard/admin">Admin dashboard</Link></div>
       </div>
 
       <div className="flex flex-col justify-between gap-3 border-b border-black/10 py-5 dark:border-white/10 sm:flex-row sm:items-center">
@@ -57,9 +87,10 @@ export default async function JobDeskPage() {
       </div>
 
       <EmailSenderTest />
+      <AgentOperationsPanel />
       {zeroOrders.length > 0 && <section className="border-b border-black/10 py-5 dark:border-white/10" aria-label="Orders without submissions">
         <h2 className="font-black">No confirmed submissions yet · {zeroOrders.length}</h2>
-        <p className="mt-1 text-sm text-black/55 dark:text-white/55">Paid, active orders in the latest 30. Approved and authorized orders are rechecked every two hours. No eligible vacancy is not a completed application.</p>
+        <p className="mt-1 text-sm text-black/55 dark:text-white/55">Paid, active orders on this page. Approved and authorized orders are recovery-checked every five minutes; clients without a confirmed delivery are prioritized. No eligible vacancy is not a completed application.</p>
         <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm font-bold text-brand-blue">{zeroOrders.map(order => { const client = Array.isArray(order.client) ? order.client[0] : order.client; return <li key={order.id}><Link href={`/dashboard/admin/job-desk/${order.id}`}>{client?.full_name ?? "Review order"}</Link></li>; })}</ul>
       </section>}
       <div className="grid border-b border-black/10 dark:border-white/10 sm:grid-cols-2 xl:grid-cols-7">
@@ -72,22 +103,35 @@ export default async function JobDeskPage() {
         <Metric label="Human review" value={humanCount ?? 0} />
       </div>
 
-      <div className="grid gap-8 py-8 2xl:grid-cols-[minmax(0,1.1fr)_minmax(560px,0.9fr)]">
-        <section className="min-w-0"><h2 className="text-xl font-black">Order queue</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">Paid website requests and manual intakes appear here. Unpaid checkouts stay out of the service queue.</p>
-          <div className="mt-5 overflow-x-auto border-y border-black/10 dark:border-white/10">
-            <table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-black/[0.03] text-xs uppercase text-black/45 dark:bg-white/[0.05] dark:text-white/45"><tr><th className="px-3 py-3">Client</th><th className="px-3 py-3">Service</th><th className="px-3 py-3">Payment</th><th className="px-3 py-3">Workflow</th><th className="px-3 py-3">Created</th></tr></thead>
+      <div className="grid items-start gap-6 py-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+        <section className="min-w-0"><h2 className="text-xl font-black">All orders</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">{totalOrders} orders · Unhandled paid orders first. Unpaid orders are visible but do not enter the service queue.</p>
+          <OrderPagination {...pagination} total={totalOrders} shown={orders?.length ?? 0} />
+          <div role="region" aria-label="Order queue" tabIndex={0} className="mt-5 max-h-[70dvh] min-h-60 overflow-auto overscroll-contain [scrollbar-gutter:stable] border-y border-black/10 dark:border-white/10">
+            <table className="w-full min-w-[720px] text-left text-sm"><thead className="sticky top-0 z-[1] bg-gray-100 text-xs uppercase text-black/45 dark:bg-neutral-900 dark:text-white/45"><tr><th className="px-3 py-3">Client</th><th className="px-3 py-3">Service</th><th className="px-3 py-3">Payment</th><th className="px-3 py-3">Workflow</th><th className="px-3 py-3">Created</th></tr></thead>
               <tbody>{orders?.length ? priorityOrders.map((order) => {
                 const client = Array.isArray(order.client) ? order.client[0] : order.client;
                 return <tr key={order.id} className="border-t border-black/10 dark:border-white/10"><td className="px-3 py-4"><Link className="font-bold hover:text-brand-blue" href={`/dashboard/admin/job-desk/${order.id}`}>{client?.full_name ?? "Unnamed client"}</Link><div className="text-xs text-black/45 dark:text-white/45">{client?.whatsapp_phone} · {order.source_channel}</div></td><td className="px-3 py-4">{order.service_type.replaceAll("_", " ")}</td><td className="px-3 py-4"><span className="font-semibold">{order.payment_status}</span><div className="text-xs text-black/45 dark:text-white/45">{formatKes(order.amount)}</div></td><td className="px-3 py-4"><Status value={order.status} />{order.service_type === "job_search_full" ? <OrderProgress value={progressByOrder.get(order.id)} /> : null}</td><td className="px-3 py-4 text-black/50 dark:text-white/50">{new Date(order.created_at).toLocaleDateString()}</td></tr>;
               }) : <tr><td colSpan={5} className="px-3 py-10 text-center text-black/50 dark:text-white/50">No Job Hunting orders yet.</td></tr>}</tbody>
             </table>
           </div>
+          <OrderPagination {...pagination} total={totalOrders} shown={orders?.length ?? 0} />
         </section>
 
-        <section className="min-w-0 border border-black/10 p-5 dark:border-white/10"><JobDeskIntakeForm /></section>
+        <section aria-label="New order form" tabIndex={0} className="max-h-[75dvh] min-w-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] border border-black/10 p-5 dark:border-white/10"><JobDeskIntakeForm /></section>
       </div>
     </AppShell>
   );
+}
+function OrderPagination({ page, pages, from, total, shown }: { page: number; pages: number; from: number; total: number; shown: number }) {
+  const controlClass = "inline-flex h-10 w-10 items-center justify-center border border-black/15 text-brand-blue hover:bg-brand-blue/5 dark:border-white/15";
+  return <nav aria-label="Order pagination" className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+    <span className="text-black/55 dark:text-white/55">{shown ? from + 1 : 0}-{from + shown} of {total} orders</span>
+    <div className="flex items-center gap-3">
+      {page > 1 ? <Link href={`?page=${page - 1}`} scroll={false} prefetch={false} aria-label="Previous page" title="Previous page" className={controlClass}><ChevronLeft size={18} /></Link> : <button disabled aria-label="Previous page" className={`${controlClass} opacity-30`}><ChevronLeft size={18} /></button>}
+      <span aria-live="polite" className="font-semibold">Page {page} of {pages}</span>
+      {page < pages ? <Link href={`?page=${page + 1}`} scroll={false} prefetch={false} aria-label="Next page" title="Next page" className={controlClass}><ChevronRight size={18} /></Link> : <button disabled aria-label="Next page" className={`${controlClass} opacity-30`}><ChevronRight size={18} /></button>}
+    </div>
+  </nav>;
 }
 
 function Metric({ label, value }: { label: string; value: number }) { return <div className="border-black/10 px-4 py-5 first:pl-0 dark:border-white/10 sm:border-r"><div className="text-2xl font-black">{value}</div><div className="mt-1 text-xs font-bold uppercase text-black/45 dark:text-white/45">{label}</div></div>; }
