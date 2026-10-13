@@ -4,6 +4,7 @@ import { enqueueTask } from "@/lib/job-desk/automation";
 import { reconcileJobDeskPipeline } from "@/lib/job-desk/reconcile";
 import { discoveryWindow } from "@/lib/job-desk/worker-lifecycle";
 import { recoverUnderfilledSearches } from "@/lib/job-desk/search-recovery";
+import { cleanupExpiredIntakeUploads } from "@/lib/job-desk/cleanup-staging";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 export async function GET(request: Request) {
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
     .some(secret => Boolean(secret) && authorization === `Bearer ${secret}`);
   if (!authorized) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
+    try { await cleanupExpiredIntakeUploads(); } catch (error) { console.error("Job Desk staging cleanup failed", error); }
     await reconcileJobDeskPipeline();
     const searchRecovery = await recoverUnderfilledSearches();
     await enqueueTask("schedule", `schedule:${discoveryWindow()}`, null);
