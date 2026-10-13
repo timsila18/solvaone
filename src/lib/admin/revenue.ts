@@ -6,10 +6,13 @@ export type RevenueRow = {
 export type RevenueOrder = { id: string; service_type: string; amount: number | string; payment_status: string; payment_reference?: string | null; created_at: string; paid_at?: string | null };
 export type RevenueAttempt = Omit<RevenueRow, "product"> & { order_id: string; updated_at?: string };
 
-export async function readAllRows<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
+export async function readAllRows<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown; status?: number }>): Promise<T[]> {
   const rows: T[] = [];
   for (let from = 0; ; from += 500) {
-    const result = await page(from, from + 499);
+    let result = await page(from, from + 499);
+    if (result.error && (result.status === 0 || result.status === 408 || result.status === 429 || (result.status ?? 0) >= 500)) {
+      result = await page(from, from + 499);
+    }
     if (result.error) throw new Error("Dashboard records could not be loaded. Retry instead of relying on incomplete totals.");
     rows.push(...(result.data ?? []));
     if ((result.data?.length ?? 0) < 500) return rows;

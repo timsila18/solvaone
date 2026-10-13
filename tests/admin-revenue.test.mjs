@@ -29,6 +29,15 @@ test("pagination reads beyond API page limits and errors never become zero", asy
   const rows = await readAllRows(async from => ({data:Array.from({length:from===0?500:2},(_,i)=>({id:from+i})),error:null}));
   assert.equal(rows.length,502);
   await assert.rejects(readAllRows(async()=>({data:null,error:{message:"Denied"}})),/could not be loaded/);
+  let transientAttempts = 0;
+  const retried = await readAllRows(async () => {
+    transientAttempts++;
+    return transientAttempts === 1
+      ? { data: null, error: { message: "upstream timeout" }, status: 503 }
+      : { data: [{ id: "recovered" }], error: null, status: 200 };
+  });
+  assert.deepEqual(retried, [{ id: "recovered" }]);
+  assert.equal(transientAttempts, 2);
 });
 
 test("unpaid, waived and zero-value orders are not sales; week starts Monday in Nairobi", () => {

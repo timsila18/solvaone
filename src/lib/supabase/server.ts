@@ -33,6 +33,10 @@ export async function getCurrentUser() {
     error
   } = await supabase.auth.getUser();
 
+  if (error && (error.name === "AuthRetryableFetchError" || error.status === 402 || error.status === 429 || (typeof error.status === "number" && error.status >= 500))) {
+    throw new Error("Authentication service is temporarily unavailable. Please retry.");
+  }
+
   if (error || !user) {
     return null;
   }
