@@ -29,6 +29,7 @@ import { BlockerNote } from "@/components/job-desk/blocker-note";
 import { ClientProgress } from "@/components/job-desk/client-progress";
 import { deliveryStage } from "@/lib/job-desk/application-progress";
 import { OrderRefresh } from "@/components/job-desk/order-refresh";
+import { AgentPhase } from "@/components/job-desk/agent-phase";
 
 type Question = { id: string; category: string; question: string; reason: string; required?: boolean };
 
@@ -109,6 +110,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
       </div>
       {paymentNeedsReview ? <p role="alert" className="mt-5 border-l-4 border-brand-blue bg-brand-blue/5 p-4 text-sm font-semibold">This order is marked paid without a positive amount and receipt reference. Verify the payment record before treating it as confirmed.</p> : null}
       {isJobSearch && document?.status !== "approved" ? <p role="alert" className="mt-5 border-l-4 border-brand-blue bg-brand-blue/5 p-4 text-sm font-semibold">{document?.status === "review" ? "The CV is ready for your review. Check it below and click Approve CV to start job matching." : "No approved CV is attached to this order. Prepare the CV and profile first, then review and approve it. The order status alone does not approve the CV."}</p> : null}
+      {isJobSearch ? <AgentPhase tasks={tasks ?? []} eligible={document?.status === "approved" && !paymentNeedsReview && order.payment_status === "paid" && Boolean(applicationScope)} /> : null}
       {isJobSearch ? <ClientProgress matches={matches} shortlist={shortlist} applications={recordedApplications ?? []} /> : null}
 
       <div className="grid gap-6 py-7 xl:grid-cols-[340px_minmax(0,1fr)]">

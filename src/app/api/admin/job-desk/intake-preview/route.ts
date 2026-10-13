@@ -22,18 +22,16 @@ const previewSchema = z.object({
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user || !(await requireAdmin(user)).allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  const limited = checkRateLimit(`job-desk-preview:${user.id}:${clientIpFromHeaders(request.headers)}`, 6, 10 * 60 * 1000);
+  const limited = checkRateLimit(`job-desk-preview:${user.id}:${clientIpFromHeaders(request.headers)}`, 12, 10 * 60 * 1000);
   if (!limited.allowed) return rateLimitResponse(limited.resetAt);
   const form = await request.formData();
   const file = form.get("cvFile");
   if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024 || !/\.(pdf|doc|docx|txt)$/i.test(file.name)) return NextResponse.json({ error: "Upload a PDF, DOCX, DOC or TXT CV up to 10MB." }, { status: 400 });
   const types: Record<string, string> = { pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", txt: "text/plain" };
   const extension = file.name.split(".").pop()!.toLowerCase();
-  if (file.type && file.type !== types[extension] && file.type !== "application/octet-stream") return NextResponse.json({ error: "CV file type does not match its extension." }, { status: 400 });
   try {
-    const extraction = await extractTextFromCvFile(file.name, types[extension], await file.arrayBuffer());
     const pasted = String(form.get("pastedCvText") ?? "").trim();
-    const text = pasted.length >= 120 ? pasted : extraction.text;
+    const text = pasted.length >= 120 ? pasted : (await extractTextFromCvFile(file.name, types[extension], await file.arrayBuffer())).text;
     if (text.length < 120) return NextResponse.json({ error: "This CV has too little selectable text. Paste its text in the field below the upload." }, { status: 422 });
     const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
     const response = await createOpenAIClient().responses.create({ model, input: [
