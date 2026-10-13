@@ -11,18 +11,10 @@ import { createApplicationScope } from "@/lib/job-desk/application-scope";
 import { broaderPreferenceFields, validateBroaderPreferences } from "@/lib/job-desk/broader-preferences";
 import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
 import { deletePrivateFile, hostAfricaPrivateStorageEnabled, isHostAfricaPrivatePath, storePrivateFile } from "@/lib/hostafrica-private-storage";
+import { INTAKE_BUCKET, MAX_INTAKE_FILE_SIZE, MAX_INTAKE_TOTAL_SIZE, intakeMimeByExtension, verifyIntakeUpload, type IntakeUploadRef } from "@/lib/job-desk/public-upload";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_TOTAL_SIZE = 20 * 1024 * 1024;
-const mimeByExtension: Record<string, string> = {
-  pdf: "application/pdf",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  doc: "application/msword",
-  txt: "text/plain"
-};
 
 const schema = z.object({
   ...broaderPreferenceFields,
@@ -47,6 +39,7 @@ const schema = z.object({
   instructions: z.string().trim().max(8000),
   pastedCvText: z.string().trim().max(50000),
   checkoutToken: z.string().regex(/^[A-Za-z0-9_-]{40,80}$/).optional(),
+  uploadRefs: z.string().max(6000).optional(),
   consentToProcess: z.literal("true"),
   applicationAuthorization: z.string().optional(),
   ...applicantDetailsSchema.shape,
@@ -65,11 +58,11 @@ function list(value: string) {
   return value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
 }
 
-function fileInfo(file: File) {
-  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  const contentType = mimeByExtension[extension];
+function fileInfo(name: string) {
+  const extension = name.split(".").pop()?.toLowerCase() ?? "";
+  const contentType = intakeMimeByExtension[extension];
   if (!contentType) return null;
-  const base = file.name.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
+  const base = name.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
   return { extension, contentType, safeName: `${base || "document"}.${extension}` };
 }
 
@@ -85,7 +78,7 @@ export async function POST(request: Request) {
   const host = request.headers.get("host");
   if (origin && (!host || new URL(origin).host !== host)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > MAX_TOTAL_SIZE + 150000) return NextResponse.json({ error: "Files exceed the 20MB total limit." }, { status: 413 });
+  if (contentLength > MAX_INTAKE_TOTAL_SIZE + 150000) return NextResponse.json({ error: "Files exceed the 20MB total limit." }, { status: 413 });
 
   let formData: FormData;
   try { formData = await request.formData(); }
@@ -98,29 +91,49 @@ export async function POST(request: Request) {
   try { paymentPhone = normalizeSafaricomPhone(parsed.data.whatsappPhone); }
   catch { return NextResponse.json({ error: "Enter a valid Safaricom number for the M-Pesa prompt." }, { status: 400 }); }
 
-  const cv = formData.get("cvFile");
-  const supportingFiles = formData.getAll("supportingFiles").filter((item): item is File => item instanceof File && item.size > 0);
-  const hasCv = cv instanceof File && cv.size > 0;
-  if (parsed.data.serviceType !== "interview_coaching" && !hasCv) return NextResponse.json({ error: "Upload your CV to continue." }, { status: 400 });
-  const files = [...(hasCv ? [{ file: cv, kind: "cv" as const }] : []), ...supportingFiles.map((file) => ({ file, kind: "supporting" as const }))];
-  if (supportingFiles.length > 2 || files.some(({ file }) => file.size > MAX_FILE_SIZE) || files.reduce((sum, { file }) => sum + file.size, 0) > MAX_TOTAL_SIZE) {
-    return NextResponse.json({ error: "Upload one CV and up to two supporting files, each under 10MB and 20MB in total." }, { status: 400 });
-  }
-  const prepared = await Promise.all(files.map(async ({ file, kind }) => ({ file, kind, info: fileInfo(file), bytes: new Uint8Array(await file.arrayBuffer()) })));
-  if (prepared.some(({ info, bytes }) => !info || !hasExpectedSignature(bytes, info.extension))) {
-    return NextResponse.json({ error: "Use valid PDF, DOCX, DOC, or TXT files." }, { status: 400 });
-  }
-
   if (parsed.data.checkoutToken) {
     const existing = await findPublicJobDeskOrder(parsed.data.checkoutToken);
     if (existing) return NextResponse.json({ ok: true, accessToken: parsed.data.checkoutToken, reference: existing.id.slice(0, 8).toUpperCase(), paymentStatus: existing.payment_status === "paid" ? "successful" : "ready", price: Number(existing.amount) }, { status: 200 });
   }
+
+  const cv = formData.get("cvFile");
+  const supportingFiles = formData.getAll("supportingFiles").filter((item): item is File => item instanceof File && item.size > 0);
+  const hasCv = cv instanceof File && cv.size > 0;
+  const files = [...(hasCv ? [{ file: cv, kind: "cv" as const }] : []), ...supportingFiles.map((file) => ({ file, kind: "supporting" as const }))];
+  if (supportingFiles.length > 2 || files.some(({ file }) => file.size > MAX_INTAKE_FILE_SIZE) || files.reduce((sum, { file }) => sum + file.size, 0) > MAX_INTAKE_TOTAL_SIZE) {
+    return NextResponse.json({ error: "Upload one CV and up to two supporting files, each under 10MB and 20MB in total." }, { status: 400 });
+  }
+  let refs: IntakeUploadRef[] = [];
+  if (parsed.data.uploadRefs) {
+    if (!parsed.data.checkoutToken || files.length) return NextResponse.json({ error: "Invalid document upload." }, { status: 400 });
+    let values: unknown;
+    try { values = JSON.parse(parsed.data.uploadRefs); } catch { return NextResponse.json({ error: "Invalid document upload." }, { status: 400 }); }
+    if (!Array.isArray(values) || values.length > 3 || values.some((value) => typeof value !== "string")) return NextResponse.json({ error: "Invalid document upload." }, { status: 400 });
+    refs = values.map((value) => verifyIntakeUpload(value, parsed.data.checkoutToken!)).filter((value): value is IntakeUploadRef => value !== null);
+    if (refs.length !== values.length || new Set(refs.map((ref) => ref.path)).size !== refs.length || refs.filter((ref) => ref.kind === "cv").length > 1 || refs.filter((ref) => ref.kind === "supporting").length > 2 || refs.reduce((sum, ref) => sum + ref.size, 0) > MAX_INTAKE_TOTAL_SIZE) return NextResponse.json({ error: "Invalid or expired document upload. Please attach the files again." }, { status: 400 });
+  }
+  if (parsed.data.serviceType !== "interview_coaching" && !hasCv && !refs.some((ref) => ref.kind === "cv")) return NextResponse.json({ error: "Upload your CV to continue." }, { status: 400 });
+  const db = createSupabaseAdminClient();
+  const prepared = await Promise.all([
+    ...files.map(async ({ file, kind }) => ({ name: file.name, size: file.size, kind, info: fileInfo(file.name), bytes: new Uint8Array(await file.arrayBuffer()) })),
+    ...refs.map(async (ref) => {
+      const { data, error } = await db.storage.from(INTAKE_BUCKET).download(ref.path);
+      if (error || !data) throw new Error("Uploaded document is unavailable. Please attach it again.");
+      const bytes = new Uint8Array(await data.arrayBuffer());
+      return { name: ref.name, size: ref.size, kind: ref.kind, info: fileInfo(ref.name), bytes };
+    })
+  ]).catch(() => null);
+  if (!prepared) return NextResponse.json({ error: "Uploaded document is unavailable. Please attach it again." }, { status: 400 });
+  if (prepared.some(({ size, bytes }) => size !== bytes.length)) return NextResponse.json({ error: "Document size changed during upload. Please attach it again." }, { status: 400 });
+  if (prepared.some(({ info, bytes }) => !info || !hasExpectedSignature(bytes, info.extension))) {
+    return NextResponse.json({ error: "Use valid PDF, DOCX, DOC, or TXT files." }, { status: 400 });
+  }
+
   const limited = checkRateLimit(`public-job-desk:${clientIpFromHeaders(request.headers)}`, 30, 60 * 60 * 1000);
   if (!limited.allowed) return rateLimitResponse(limited.resetAt);
   const phoneLimit = checkRateLimit(`public-job-desk-phone:${createHash("sha256").update(paymentPhone).digest("hex")}`, 5, 60 * 60 * 1000);
   if (!phoneLimit.allowed) return rateLimitResponse(phoneLimit.resetAt);
 
-  const db = createSupabaseAdminClient();
   const orderId = randomUUID();
   const accessToken = parsed.data.checkoutToken ?? randomBytes(32).toString("base64url");
   const service = getJobDeskService(parsed.data.serviceType)!;
@@ -177,7 +190,7 @@ export async function POST(request: Request) {
     });
     if (orderError) throw new Error(orderError.message);
 
-    for (const { file, kind, info, bytes } of prepared) {
+    for (const { name, size, kind, info, bytes } of prepared) {
       if (!info) throw new Error("Invalid file.");
       const legacyPath = `${orderId}/${randomUUID()}-${info.safeName}`;
       let path: string = legacyPath;
@@ -189,19 +202,19 @@ export async function POST(request: Request) {
         }
       }
       if (path === legacyPath) {
-        const { error: uploadError } = await db.storage.from("job-desk-intake").upload(path, bytes, { contentType: info.contentType, upsert: false });
+        const { error: uploadError } = await db.storage.from(INTAKE_BUCKET).upload(path, bytes, { contentType: info.contentType, upsert: false });
         if (uploadError) throw new Error(uploadError.message);
       }
       uploadedPaths.push(path);
-      const extraction = kind === "cv" ? await extractTextFromCvFile(file.name, info.contentType, Buffer.from(bytes)) : null;
+      const extraction = kind === "cv" ? await extractTextFromCvFile(name, info.contentType, Buffer.from(bytes)) : null;
       const pasted = kind === "cv" ? parsed.data.pastedCvText : "";
       const text = pasted.length >= 120 ? pasted : extraction?.text ?? "";
       const { error: fileError } = await db.from("job_desk_intake_files").insert({
         order_id: orderId,
         client_id: clientId,
         storage_path: path,
-        file_name: file.name.slice(0, 180),
-        file_size: file.size,
+        file_name: name.slice(0, 180),
+        file_size: size,
         content_type: info.contentType,
         document_kind: kind,
         extracted_text: text,
@@ -210,11 +223,12 @@ export async function POST(request: Request) {
       });
       if (fileError) throw new Error(fileError.message);
     }
+    if (refs.length) await db.storage.from(INTAKE_BUCKET).remove(refs.map((ref) => ref.path));
     return NextResponse.json({ ok: true, accessToken, reference: orderId.slice(0, 8).toUpperCase(), paymentStatus: "ready", price: service.price, needsReadableCv: prepared.find((item) => item.kind === "cv")?.info?.extension === "doc" && parsed.data.pastedCvText.length < 120 }, { status: 201 });
   } catch (error) {
     const legacyPaths = uploadedPaths.filter((path) => !isHostAfricaPrivatePath(path));
     const privatePaths = uploadedPaths.filter(isHostAfricaPrivatePath);
-    if (legacyPaths.length) await db.storage.from("job-desk-intake").remove(legacyPaths);
+    if (legacyPaths.length) await db.storage.from(INTAKE_BUCKET).remove(legacyPaths);
     if (privatePaths.length) await Promise.allSettled(privatePaths.map(deletePrivateFile));
     if (clientId) await db.from("job_desk_clients").delete().eq("id", clientId);
     await logSystemEvent({ category: "job_desk.public_intake", level: "error", message: error instanceof Error ? error.message : "Unknown intake error" });

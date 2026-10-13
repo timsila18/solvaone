@@ -5,6 +5,7 @@ import { CheckCircle2, CreditCard, Loader2 } from "lucide-react";
 import { Input, Textarea } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { jobDeskServices, type PublicJobDeskService } from "@/lib/job-desk/services";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { BroaderRoleFields } from "./broader-role-fields";
 
 type PaymentState = "ready" | "initiating" | "processing" | "successful" | "failed" | "cancelled" | "timed_out" | "needs_review";
@@ -14,6 +15,7 @@ const selectClass = "h-11 w-full rounded border border-black/15 bg-white px-3 te
 export function PublicJobDeskIntakeForm() {
   const [service, setService] = useState<PublicJobDeskService>("job_search_full");
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("Uploading documents...");
   const [error, setError] = useState("");
   const [token, setToken] = useState("");
   const [reference, setReference] = useState("");
@@ -75,9 +77,30 @@ export function PublicJobDeskIntakeForm() {
       accessToken = typeof saved?.token === "string" && /^[A-Za-z0-9_-]{40,80}$/.test(saved.token) ? saved.token : `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`;
       formData.set("checkoutToken", accessToken);
       sessionStorage.setItem("solva-job-desk-checkout", JSON.stringify({ token: accessToken }));
+      const cv = formData.get("cvFile");
+      const documents = [
+        ...(cv instanceof File && cv.size ? [{ file: cv, kind: "cv" as const, index: 0 }] : []),
+        ...formData.getAll("supportingFiles").filter((file): file is File => file instanceof File && file.size > 0).map((file, index) => ({ file, kind: "supporting" as const, index }))
+      ];
+      if (documents.some(({ file }) => file.size > 10 * 1024 * 1024) || documents.reduce((sum, { file }) => sum + file.size, 0) > 20 * 1024 * 1024) throw new Error("Each document must be under 10 MB, with no more than 20 MB in total.");
+      if (documents.length > 3) throw new Error("Upload one CV and up to two supporting files.");
+      setBusyLabel("Uploading documents...");
+      const storage = createSupabaseBrowserClient().storage.from("job-desk-intake");
+      const uploadRefs: string[] = [];
+      for (const { file, kind, index } of documents) {
+        const ticketResponse = await fetch("/api/job-desk/upload-ticket", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ checkoutToken: accessToken, phone: String(formData.get("whatsappPhone") ?? ""), name: file.name, size: file.size, kind, index }) });
+        const ticket = await ticketResponse.json().catch(() => ({}));
+        if (!ticketResponse.ok) throw new Error(ticket.error ?? "Document upload could not start. Please try again.");
+        const { error: uploadError } = await storage.uploadToSignedUrl(ticket.path, ticket.token, file, { contentType: ticket.contentType });
+        if (uploadError) throw new Error(`Could not upload ${file.name}. Please try again.`);
+        uploadRefs.push(ticket.ref);
+      }
+      formData.delete("cvFile"); formData.delete("supportingFiles");
+      formData.set("uploadRefs", JSON.stringify(uploadRefs));
+      setBusyLabel("Saving request...");
       const response = await fetch("/api/job-desk/intake", { method: "POST", body: formData });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error ?? `We could not start your request (error ${response.status}). Please retry or contact support.`);
+      if (!response.ok) throw new Error(result.error ?? (response.status === 413 ? "The documents are too large. Each must be under 10 MB, with no more than 20 MB total." : `We could not start your request (error ${response.status}). Please retry or contact support.`));
       if (!result.accessToken || !result.reference) throw new Error("The order service did not return a reference. Please contact support before trying again so we can check whether an order was created.");
       sessionStorage.setItem("solva-job-desk-checkout", JSON.stringify({ token: result.accessToken, reference: result.reference }));
       setToken(result.accessToken); setReference(result.reference); setStatus(result.paymentStatus);
@@ -122,7 +145,7 @@ export function PublicJobDeskIntakeForm() {
     <label className="flex items-start gap-3 border-t border-black/10 pt-5 text-sm leading-6 dark:border-white/10"><input type="checkbox" name="consentToProcess" value="true" required className="mt-1.5 h-4 w-4 accent-brand-blue" /><span>I authorize SolvaOne to review my documents and contact me about this service.</span></label>
     {service === "job_search_full" ? <><BroaderRoleFields /><label className="flex items-start gap-3 text-sm leading-6"><input type="checkbox" name="applicationAuthorization" value="true" required className="mt-1.5 h-4 w-4 accent-brand-blue" /><span>I authorize SolvaOne to submit my approved CV, contact details and tailored letters to genuine open jobs matching the career roles and any broader roles I selected, locations and work arrangement above, excluding the employers, roles and conditions I listed. Applications needing unique answers or personal checks are held for review.</span></label></> : null}
     {error ? <p role="alert" className="border-l-4 border-brand-blue p-4 text-sm font-semibold">{error}</p> : null}
-    <Button type="submit" disabled={busy} className="h-12 w-full px-6 sm:w-auto">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}{busy ? "Starting M-Pesa..." : `Pay KSh ${jobDeskServices[service].price.toLocaleString()} with M-Pesa`}</Button>
+    <Button type="submit" disabled={busy} className="h-12 w-full px-6 sm:w-auto">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}{busy ? busyLabel : `Pay KSh ${jobDeskServices[service].price.toLocaleString()} with M-Pesa`}</Button>
   </form>;
 }
 
