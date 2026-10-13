@@ -34,7 +34,7 @@ export function AppShell({
 }) {
   return (
     <div className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 overflow-y-auto border-r border-black/10 bg-white/95 px-5 py-6 backdrop-blur dark:border-white/10 dark:bg-black/90 lg:block">
+      <aside aria-label="Services navigation" tabIndex={0} className="fixed inset-y-0 left-0 z-20 hidden w-72 overflow-y-scroll overscroll-contain [scrollbar-gutter:stable] border-r border-black/10 bg-white/95 px-5 py-6 backdrop-blur dark:border-white/10 dark:bg-black/90 lg:block">
         <Logo />
         <nav className="mt-8 flex flex-col gap-1">
           {nav.map((item) => (
@@ -77,7 +77,7 @@ export function AppShell({
                 <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg border border-black/10 dark:border-white/10" aria-label="Open dashboard navigation">
                   <Menu className="h-5 w-5" />
                 </summary>
-                <nav className="absolute left-0 top-12 z-30 w-72 border border-black/10 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-black">
+                <nav className="absolute left-0 top-12 z-30 max-h-[calc(100dvh-100px)] w-72 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] border border-black/10 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-black">
                   {nav.map((item) => (
                     <Link key={item.href} href={item.href} className="flex h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-black/5 dark:hover:bg-white/10">
                       <item.icon className="h-4 w-4" />
