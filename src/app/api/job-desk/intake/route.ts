@@ -4,7 +4,7 @@ import { z } from "zod";
 import { extractTextFromCvFile } from "@/lib/cv-extraction";
 import { checkRateLimit, clientIpFromHeaders, logSystemEvent, rateLimitResponse } from "@/lib/security";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { startJobDeskPayment } from "@/lib/job-desk/checkout";
+import { findPublicJobDeskOrder } from "@/lib/job-desk/public-access";
 import { getJobDeskService } from "@/lib/job-desk/services";
 import { normalizeSafaricomPhone } from "@/lib/payments";
 import { createApplicationScope } from "@/lib/job-desk/application-scope";
@@ -13,7 +13,7 @@ import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
 import { deletePrivateFile, hostAfricaPrivateStorageEnabled, isHostAfricaPrivatePath, storePrivateFile } from "@/lib/hostafrica-private-storage";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_TOTAL_SIZE = 20 * 1024 * 1024;
@@ -46,6 +46,7 @@ const schema = z.object({
   salaryExpectation: z.string().trim().max(160),
   instructions: z.string().trim().max(8000),
   pastedCvText: z.string().trim().max(50000),
+  checkoutToken: z.string().regex(/^[A-Za-z0-9_-]{40,80}$/).optional(),
   consentToProcess: z.literal("true"),
   applicationAuthorization: z.string().optional(),
   ...applicantDetailsSchema.shape,
@@ -67,7 +68,7 @@ function list(value: string) {
 function fileInfo(file: File) {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   const contentType = mimeByExtension[extension];
-  if (!contentType || (file.type && file.type !== contentType && file.type !== "application/octet-stream")) return null;
+  if (!contentType) return null;
   const base = file.name.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70);
   return { extension, contentType, safeName: `${base || "document"}.${extension}` };
 }
@@ -110,12 +111,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Use valid PDF, DOCX, DOC, or TXT files." }, { status: 400 });
   }
 
-  const limited = checkRateLimit(`public-job-desk:${clientIpFromHeaders(request.headers)}`, 3, 60 * 60 * 1000);
+  if (parsed.data.checkoutToken) {
+    const existing = await findPublicJobDeskOrder(parsed.data.checkoutToken);
+    if (existing) return NextResponse.json({ ok: true, accessToken: parsed.data.checkoutToken, reference: existing.id.slice(0, 8).toUpperCase(), paymentStatus: existing.payment_status === "paid" ? "successful" : "ready", price: Number(existing.amount) }, { status: 200 });
+  }
+  const limited = checkRateLimit(`public-job-desk:${clientIpFromHeaders(request.headers)}`, 30, 60 * 60 * 1000);
   if (!limited.allowed) return rateLimitResponse(limited.resetAt);
+  const phoneLimit = checkRateLimit(`public-job-desk-phone:${createHash("sha256").update(paymentPhone).digest("hex")}`, 5, 60 * 60 * 1000);
+  if (!phoneLimit.allowed) return rateLimitResponse(phoneLimit.resetAt);
 
   const db = createSupabaseAdminClient();
   const orderId = randomUUID();
-  const accessToken = randomBytes(32).toString("base64url");
+  const accessToken = parsed.data.checkoutToken ?? randomBytes(32).toString("base64url");
   const service = getJobDeskService(parsed.data.serviceType)!;
   let clientId: string | null = null;
   const uploadedPaths: string[] = [];
@@ -203,15 +210,7 @@ export async function POST(request: Request) {
       });
       if (fileError) throw new Error(fileError.message);
     }
-    let paymentStatus = "initiating";
-    let paymentError: string | null = null;
-    try { paymentStatus = (await startJobDeskPayment(orderId)).status; }
-    catch (cause) {
-      const { data: attempt } = await db.from("job_desk_payment_attempts").select("status").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      paymentStatus = attempt?.status ?? "failed";
-      paymentError = cause instanceof Error ? cause.message : "M-Pesa prompt could not be sent.";
-    }
-    return NextResponse.json({ ok: true, accessToken, reference: orderId.slice(0, 8).toUpperCase(), paymentStatus, paymentError, price: service.price, needsReadableCv: prepared.find((item) => item.kind === "cv")?.info?.extension === "doc" && parsed.data.pastedCvText.length < 120 }, { status: 201 });
+    return NextResponse.json({ ok: true, accessToken, reference: orderId.slice(0, 8).toUpperCase(), paymentStatus: "ready", price: service.price, needsReadableCv: prepared.find((item) => item.kind === "cv")?.info?.extension === "doc" && parsed.data.pastedCvText.length < 120 }, { status: 201 });
   } catch (error) {
     const legacyPaths = uploadedPaths.filter((path) => !isHostAfricaPrivatePath(path));
     const privatePaths = uploadedPaths.filter(isHostAfricaPrivatePath);
