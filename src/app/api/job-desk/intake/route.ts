@@ -83,8 +83,6 @@ export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   const host = request.headers.get("host");
   if (origin && (!host || new URL(origin).host !== host)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const limited = checkRateLimit(`public-job-desk:${clientIpFromHeaders(request.headers)}`, 3, 60 * 60 * 1000);
-  if (!limited.allowed) return rateLimitResponse(limited.resetAt);
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (contentLength > MAX_TOTAL_SIZE + 150000) return NextResponse.json({ error: "Files exceed the 20MB total limit." }, { status: 413 });
 
@@ -93,7 +91,7 @@ export async function POST(request: Request) {
   catch { return NextResponse.json({ error: "Could not read the submission." }, { status: 400 }); }
   const parsed = schema.safeParse(Object.fromEntries([...formData.entries()].filter(([key]) => key !== "cvFile" && key !== "supportingFiles")));
   if (!parsed.success) return NextResponse.json({ error: "Check the required details and consent." }, { status: 400 });
-  if (parsed.data.website) return NextResponse.json({ ok: true }, { status: 202 });
+  if (parsed.data.website) return NextResponse.json({ error: "Please reload the form and try again. Browser autofill may have entered an extra field." }, { status: 400 });
   if ([...formData.keys()].some((key) => /password/i.test(key))) return NextResponse.json({ error: "Do not submit account passwords." }, { status: 400 });
   let paymentPhone: string;
   try { paymentPhone = normalizeSafaricomPhone(parsed.data.whatsappPhone); }
@@ -111,6 +109,9 @@ export async function POST(request: Request) {
   if (prepared.some(({ info, bytes }) => !info || !hasExpectedSignature(bytes, info.extension))) {
     return NextResponse.json({ error: "Use valid PDF, DOCX, DOC, or TXT files." }, { status: 400 });
   }
+
+  const limited = checkRateLimit(`public-job-desk:${clientIpFromHeaders(request.headers)}`, 3, 60 * 60 * 1000);
+  if (!limited.allowed) return rateLimitResponse(limited.resetAt);
 
   const db = createSupabaseAdminClient();
   const orderId = randomUUID();
