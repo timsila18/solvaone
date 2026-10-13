@@ -9,7 +9,7 @@ export async function middleware(request: NextRequest) {
   const isDashboard = request.nextUrl.pathname.startsWith("/dashboard");
   const isAuth = request.nextUrl.pathname.startsWith("/login") || request.nextUrl.pathname.startsWith("/register");
   const isApi = request.nextUrl.pathname.startsWith("/api");
-  const needsSession = isDashboard || isAuth || isApi;
+  const needsSession = isDashboard || isApi;
   const supabaseDeadline = Date.now() + 12_000;
 
   function withSecurityHeaders(nextResponse: NextResponse) {
