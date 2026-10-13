@@ -123,7 +123,7 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
 
       <div className="grid items-start gap-6 py-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
         <section className="min-w-0"><h2 className="text-xl font-black">All orders</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">{totalOrders} orders · Unhandled paid orders first. Unpaid orders are visible but do not enter the service queue.</p>
-          <form action="/dashboard/admin/job-desk" method="get" role="search" className="mt-4 flex flex-wrap items-end gap-2 text-sm">
+          <form key={`${query}:${origin}`} action="/dashboard/admin/job-desk" method="get" role="search" className="mt-4 flex flex-wrap items-end gap-2 text-sm">
             <label className="min-w-48 flex-1 font-semibold">Find an order
               <input type="search" name="q" defaultValue={query} placeholder="Client name, phone or order ID" className="mt-1 h-10 w-full border border-black/15 bg-white px-3 font-normal text-black dark:border-white/20 dark:bg-black dark:text-white" />
             </label>
