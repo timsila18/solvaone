@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import pdf from "pdf-parse/lib/pdf-parse.js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { hostAfricaPrivateOwner, isHostAfricaPrivatePath, readPrivateFile } from "@/lib/hostafrica-private-storage";
 
 const MAX_EXTRACTED_CV_CHARS = 50000;
 
@@ -58,8 +59,16 @@ export async function extractTextFromCvFile(fileName: string, contentType: strin
 }
 
 export async function extractTextFromStoredCv(userId: string, path: string, fileName: string, contentType: string): Promise<CvExtractionResult> {
-  if (!path.startsWith(`${userId}/`)) {
+  if (isHostAfricaPrivatePath(path) ? hostAfricaPrivateOwner(path) !== userId : !path.startsWith(`${userId}/`)) {
     return { text: "", warning: "This uploaded CV does not belong to the current user." };
+  }
+
+  if (isHostAfricaPrivatePath(path)) {
+    try {
+      return extractTextFromCvFile(fileName, contentType, await readPrivateFile(path));
+    } catch {
+      return { text: "", warning: "We could not read the uploaded CV from storage. Upload it again or paste the CV text." };
+    }
   }
 
   const admin = createSupabaseAdminClient();

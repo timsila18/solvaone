@@ -48,7 +48,10 @@ export async function discoverVacancies(sourceId: string) {
       return true;
     });
     if (items.length > 0 && parsed.length === 0) throw new Error("No official application links were found; existing vacancies were retained.");
-    const { data: existing, error: existingError } = await db.from("job_desk_vacancies").select("id,source_id,company_name,title,location").eq("status", "open").or(`source_id.is.null,source_id.neq.${sourceId}`).limit(5000);
+    const companyNames = [...new Set(parsed.map((job) => job.company_name))];
+    const { data: existing, error: existingError } = companyNames.length
+      ? await db.from("job_desk_vacancies").select("id,source_id,company_name,title,location").eq("status", "open").in("company_name", companyNames).or(`source_id.is.null,source_id.neq.${sourceId}`).limit(5000)
+      : { data: [], error: null };
     if (existingError) throw new Error(existingError.message);
     const { data: previous, error: previousError } = await db.from("job_desk_vacancies").select("external_id,review_status,description,source_updated_at,application_readiness").eq("source_id", sourceId).limit(1500);
     if (previousError) throw new Error(previousError.message);

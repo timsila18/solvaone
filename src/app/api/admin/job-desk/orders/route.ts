@@ -9,6 +9,7 @@ import { enqueueTask } from "@/lib/job-desk/automation";
 import { createApplicationScope } from "@/lib/job-desk/application-scope";
 import { applicantDetailsSchema } from "@/lib/job-desk/applicant-details";
 import { broaderPreferenceFields, validateBroaderPreferences } from "@/lib/job-desk/broader-preferences";
+import { deletePrivateFile, hostAfricaPrivateStorageEnabled, isHostAfricaPrivatePath, storePrivateFile } from "@/lib/hostafrica-private-storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -163,9 +164,19 @@ export async function POST(request: Request) {
     if (orderError) throw new Error(orderError.message);
 
     const bytes = await file.arrayBuffer();
-    storagePath = `${orderId}/${Date.now()}-${safeName(file.name)}`;
-    const { error: uploadError } = await db.storage.from("job-desk-intake").upload(storagePath, bytes, { contentType: inferredType, upsert: false });
-    if (uploadError) throw new Error(uploadError.message);
+    const legacyPath = `${orderId}/${Date.now()}-${safeName(file.name)}`;
+    storagePath = legacyPath;
+    if (hostAfricaPrivateStorageEnabled()) {
+      try {
+        storagePath = await storePrivateFile(Buffer.from(bytes), orderId);
+      } catch (error) {
+        console.error("HostAfrica admin upload failed; using Supabase fallback", error);
+      }
+    }
+    if (storagePath === legacyPath) {
+      const { error: uploadError } = await db.storage.from("job-desk-intake").upload(storagePath, bytes, { contentType: inferredType, upsert: false });
+      if (uploadError) throw new Error(uploadError.message);
+    }
 
     const extraction = await extractTextFromCvFile(file.name, inferredType, bytes);
     const pastedText = parsed.data.pastedCvText.trim();
@@ -201,7 +212,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, orderId, extractionStatus, extractionWarning: warning ?? null }, { status: 201 });
   } catch (error) {
-    if (storagePath) await db.storage.from("job-desk-intake").remove([storagePath]);
+    if (storagePath && isHostAfricaPrivatePath(storagePath)) await deletePrivateFile(storagePath).catch(() => undefined);
+    else if (storagePath) await db.storage.from("job-desk-intake").remove([storagePath]);
     if (clientId) await db.from("job_desk_clients").delete().eq("id", clientId);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to create the Job Desk order." }, { status: 500 });
   }
