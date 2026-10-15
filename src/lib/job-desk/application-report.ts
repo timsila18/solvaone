@@ -10,7 +10,8 @@ export function reportTime(value?: string | null) {
 
 export function buildApplicationReport(matches: ReportMatch[]) {
   const progress = applicationProgress(matches);
-  const lines = [`Application report: ${progress.suitable} openings; ${progress.ready} ready; ${progress.delivered} delivered emails; ${progress.confirmed} confirmed portal submissions; ${progress.blocked} blocked.`, "Prepared materials and provider acceptance are not proof of delivery or employer review."];
+  const submitted = progress.accepted + progress.delivered + progress.confirmed;
+  const lines = [`Application report: ${submitted} submitted applications; ${progress.suitable} openings; ${progress.ready} ready; ${progress.accepted} emails sent, delivery unconfirmed; ${progress.delivered} delivered emails; ${progress.confirmed} confirmed portal submissions; ${progress.blocked} blocked.`, "Provider-accepted emails count as submitted, not as confirmed delivery or employer review. Prepared materials are not submitted applications."];
   for (const match of matches.filter(item => item.status !== "rejected")) {
     const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
     const application: DeliveryApplication | undefined | null = Array.isArray(match.application) ? match.application[0] : match.application;

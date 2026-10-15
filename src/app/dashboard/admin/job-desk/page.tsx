@@ -76,7 +76,7 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
   }
   const zeroOrders = activeOrders.filter(order => {
     const counts = applicationDeliveryCounts(applicationsByOrder.get(order.id) ?? []);
-    return counts.delivered + counts.confirmed === 0;
+    return counts.accepted + counts.delivered + counts.confirmed === 0;
   });
   const progressByOrder = new Map<string, ReturnType<typeof applicationProgress>>();
   if (orders?.length) {
@@ -107,8 +107,8 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
       <EmailSenderTest />
       <AgentOperationsPanel />
       {zeroOrders.length > 0 && <section className="border-b border-black/10 py-5 dark:border-white/10" aria-label="Orders without submissions">
-        <h2 className="font-black">No confirmed submissions yet · {zeroOrders.length}</h2>
-        <p className="mt-1 text-sm text-black/55 dark:text-white/55">Paid, active orders on this page. Approved and authorized orders are recovery-checked every five minutes; clients without a confirmed delivery are prioritized. No eligible vacancy is not a completed application.</p>
+        <h2 className="font-black">No submitted applications yet · {zeroOrders.length}</h2>
+        <p className="mt-1 text-sm text-black/55 dark:text-white/55">Paid, active orders on this page. Approved and authorized orders are recovery-checked every five minutes; clients without a submitted application are prioritized. Sent emails count as submitted while delivery remains separately tracked.</p>
         <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm font-bold text-brand-blue">{zeroOrders.map(order => { const client = Array.isArray(order.client) ? order.client[0] : order.client; return <li key={order.id}><Link href={`/dashboard/admin/job-desk/${order.id}`}>{client?.full_name ?? "Review order"}</Link></li>; })}</ul>
       </section>}
       <div className="grid border-b border-black/10 dark:border-white/10 sm:grid-cols-2 xl:grid-cols-7">
@@ -170,5 +170,5 @@ function Status({ value }: { value: string }) { return <span className="inline-f
 
 function OrderProgress({ value }: { value?: ReturnType<typeof applicationProgress> }) {
   if (!value) return null;
-  return <div className="mt-2 max-w-xs text-xs leading-5"><p>{value.suitable} suitable → {value.ready} ready → {value.delivered} delivered emails → {value.confirmed} confirmed portals → {value.blocked} blocked</p><p className="text-black/60 dark:text-white/60">{value.accepted} accepted, delivery unconfirmed</p>{!value.delivered && !value.confirmed ? <b className="text-brand-blue">First delivery priority</b> : null}</div>;
+  return <div className="mt-2 max-w-xs text-xs leading-5"><p>{value.suitable} suitable → {value.ready} ready → {value.accepted} emails sent → {value.delivered} delivered emails → {value.confirmed} confirmed portals → {value.blocked} blocked</p><p className="text-black/60 dark:text-white/60">{value.accepted + value.delivered + value.confirmed} submitted; sent-email delivery tracked separately</p>{!value.accepted && !value.delivered && !value.confirmed ? <b className="text-brand-blue">First submission priority</b> : null}</div>;
 }

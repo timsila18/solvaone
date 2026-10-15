@@ -22,5 +22,5 @@ export function underTargetDeliveryReview(order: Parameters<typeof zeroDeliveryR
   const delivered = distinctSuccessfulDeliveries(applications);
   if (delivered >= 10 || !hasVerifiedJobDeskPayment(order) || ["completed", "cancelled", "paused", "awaiting_payment"].includes(order.status)) return null;
   const review = zeroDeliveryReview(order, applications, now);
-  return { delivered, remaining: 10 - delivered, ageHours: review?.ageHours ?? Math.max(0, Math.floor((now - Date.parse(order.created_at)) / 3600000)), overdue: review?.overdue ?? now - Date.parse(order.created_at) >= 24 * 3600000, nextAction: review?.nextAction ?? "Continue discovery for replacement openings until ten distinct applications have verified delivery evidence." };
+  return { delivered, remaining: 10 - delivered, ageHours: review?.ageHours ?? Math.max(0, Math.floor((now - Date.parse(order.created_at)) / 3600000)), overdue: review?.overdue ?? now - Date.parse(order.created_at) >= 24 * 3600000, nextAction: review?.nextAction ?? "Continue discovery for replacement openings until ten distinct applications are submitted." };
 }
