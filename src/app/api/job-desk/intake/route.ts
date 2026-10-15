@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "crypto";
+import { databaseText } from "@/lib/database-text";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractTextFromCvFile } from "@/lib/cv-extraction";
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
   let formData: FormData;
   try { formData = await request.formData(); }
   catch { return NextResponse.json({ error: "Could not read the submission." }, { status: 400 }); }
-  const parsed = schema.safeParse(Object.fromEntries([...formData.entries()].filter(([key]) => key !== "cvFile" && key !== "supportingFiles")));
+  const parsed = schema.safeParse(Object.fromEntries([...formData.entries()].filter(([key]) => key !== "cvFile" && key !== "supportingFiles").map(([key, value]) => [key, typeof value === "string" ? databaseText(value) : value])));
   if (!parsed.success) return NextResponse.json({ error: "Check the required details and consent." }, { status: 400 });
   if (parsed.data.website) return NextResponse.json({ error: "Please reload the form and try again. Browser autofill may have entered an extra field." }, { status: 400 });
   if ([...formData.keys()].some((key) => /password/i.test(key))) return NextResponse.json({ error: "Do not submit account passwords." }, { status: 400 });
@@ -208,18 +209,18 @@ export async function POST(request: Request) {
       uploadedPaths.push(path);
       const extraction = kind === "cv" ? await extractTextFromCvFile(name, info.contentType, Buffer.from(bytes)) : null;
       const pasted = kind === "cv" ? parsed.data.pastedCvText : "";
-      const text = pasted.length >= 120 ? pasted : extraction?.text ?? "";
+      const text = databaseText(pasted.length >= 120 ? pasted : extraction?.text ?? "");
       const { error: fileError } = await db.from("job_desk_intake_files").insert({
         order_id: orderId,
         client_id: clientId,
         storage_path: path,
-        file_name: name.slice(0, 180),
+        file_name: databaseText(name.slice(0, 180)),
         file_size: size,
         content_type: info.contentType,
         document_kind: kind,
         extracted_text: text,
         extraction_status: kind === "cv" ? (text.length >= 120 ? "succeeded" : "needs_text") : "pending",
-        extraction_warning: kind === "cv" ? extraction?.warning ?? null : null
+        extraction_warning: kind === "cv" && extraction?.warning ? databaseText(extraction.warning) : null
       });
       if (fileError) throw new Error(fileError.message);
     }

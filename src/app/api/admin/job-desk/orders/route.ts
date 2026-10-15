@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { databaseText } from "@/lib/database-text";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractTextFromCvFile } from "@/lib/cv-extraction";
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
   if (!access.allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const formData = await request.formData();
-  const parsed = intakeSchema.safeParse(Object.fromEntries([...formData.entries()].filter(([key]) => key !== "cvFile")));
+  const parsed = intakeSchema.safeParse(Object.fromEntries([...formData.entries()].filter(([key]) => key !== "cvFile").map(([key, value]) => [key, typeof value === "string" ? databaseText(value) : value])));
   if (!parsed.success) {
     return NextResponse.json({ error: "Check the client, payment, consent, and job preference fields.", fields: parsed.error.flatten().fieldErrors }, { status: 400 });
   }
@@ -180,7 +181,7 @@ export async function POST(request: Request) {
 
     const extraction = await extractTextFromCvFile(file.name, inferredType, bytes);
     const pastedText = parsed.data.pastedCvText.trim();
-    const extractedText = pastedText.length >= 120 ? pastedText : extraction.text;
+    const extractedText = databaseText(pastedText.length >= 120 ? pastedText : extraction.text);
     const extractionStatus = extractedText.length >= 120 ? "succeeded" : "needs_text";
     const warning = pastedText.length >= 120 ? "Admin-supplied pasted text was used as the processing source." : extraction.warning;
 
@@ -189,12 +190,12 @@ export async function POST(request: Request) {
       client_id: client.id,
       uploaded_by: user.id,
       storage_path: storagePath,
-      file_name: file.name,
+      file_name: databaseText(file.name),
       file_size: file.size,
       content_type: inferredType,
       extracted_text: extractedText,
       extraction_status: extractionStatus,
-      extraction_warning: warning ?? null
+      extraction_warning: warning ? databaseText(warning) : null
     });
     if (intakeError) throw new Error(intakeError.message);
 
@@ -215,6 +216,7 @@ export async function POST(request: Request) {
     if (storagePath && isHostAfricaPrivatePath(storagePath)) await deletePrivateFile(storagePath).catch(() => undefined);
     else if (storagePath) await db.storage.from("job-desk-intake").remove([storagePath]);
     if (clientId) await db.from("job_desk_clients").delete().eq("id", clientId);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to create the Job Desk order." }, { status: 500 });
+    console.error("Job Desk order creation failed", error);
+    return NextResponse.json({ error: "Unable to create the order. Your entries are still here; please retry or contact support." }, { status: 500 });
   }
 }
