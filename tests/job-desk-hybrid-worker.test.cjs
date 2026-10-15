@@ -74,6 +74,14 @@ test("a suitable unsupported portal produces an approved-CV packet without submi
   assert.equal(state.job_desk_applications[0].provider_response.clicked, false);
   assert.equal(state.job_desk_applications[0].provider_response.cvId, "cv");
   assert.equal(queued.some(item => item[0] === "submit"), false);
+  assert.equal(queued.some(item => item[0] === "match" && item[2] === "order"), true);
+});
+test("a preflight blocker leaves the slot open and requests a replacement", async () => {
+  reset(false); ready = false; await runJobDeskWorker({ maxTasks: 1 });
+  assert.equal(state.job_desk_matches[0].status, "needs_human");
+  assert.equal(state.job_desk_applications[0].provider_response.clicked, false);
+  assert.equal(queued.some(item => item[0] === "match" && item[2] === "order"), true);
+  assert.equal(queued.some(item => item[0] === "submit"), false);
 });
 test("supported ready applications enter submission independently of assisted work", async () => {
   reset(false); await runJobDeskWorker({ maxTasks: 1 });

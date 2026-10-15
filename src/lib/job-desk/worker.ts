@@ -29,6 +29,10 @@ import { LETTER_PROMPT_VERSION, LETTER_WRITER_PROMPT, LETTER_REVIEW_PROMPT, lett
 
 type Task = { id: string; order_id: string | null; task_type: string; attempts: number; max_attempts: number; payload: Record<string, string> };
 
+async function replaceUnsentMatch(orderId: string, matchId: string) {
+  await enqueueTask("match", `replace-unsent:${orderId}:${matchId}:${Math.floor(Date.now() / 300000)}`, orderId);
+}
+
 async function checkSubmissionRequirements(matchId: string, order: any, client: any, vacancy: any) {
   const db = createSupabaseAdminClient();
   const { data: source, error } = vacancy.source_id ? await db.from("job_desk_sources").select("provider,site_token,active").eq("id", vacancy.source_id).maybeSingle() : { data: null, error: null };
@@ -47,7 +51,7 @@ async function checkSubmissionRequirements(matchId: string, order: any, client: 
     if (saveError) throw new Error(saveError.message);
     const { error: matchError } = await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId).in("status", ["suggested", "preparing", "authorized"]);
     if (matchError) throw new Error(matchError.message);
-    await enqueueTask("match", `replace-blocked:${order.id}:${Math.floor(Date.now() / 300000)}`, order.id);
+    await replaceUnsentMatch(order.id, matchId);
     if (draftableQuestions(preflight.blockers).length && !prohibitsAnswerDrafting(preflight.blockers.join(" "))) {
       await enqueueTask("draft_answers", `answer-drafts:${matchId}:${approvedCv.id}`, order.id, { matchId });
     }
@@ -91,9 +95,13 @@ async function prepareMatch(matchId: string, assistedRequested = false) {
     const scope = readApplicationScope(order.service_details);
     if (!scope || !vacancy || applicationScopeHold(scope, vacancy)) return;
   }
-  if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000) throw new Error("Vacancy is closed, unreviewed, duplicated or stale.");
-  if (scoreVacancy(vacancy, profile, order.application_authorized ? readApplicationScope(order.service_details) : null).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) throw new Error("Vacancy needs a fresh CV-based suitability review before preparation.");
-  if (!(await verifyVacancyStillOpen(vacancy))) throw new Error("Vacancy is no longer listed by its official source.");
+  const unsuitable = !vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || scoreVacancy(vacancy, profile, order.application_authorized ? readApplicationScope(order.service_details) : null).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"));
+  if (unsuitable || !(await verifyVacancyStillOpen(vacancy))) {
+    const { error } = await db.from("job_desk_matches").update({ status: "rejected" }).eq("id", matchId).in("status", ["suggested", "preparing", "ready"]);
+    if (error) throw new Error(error.message);
+    await replaceUnsentMatch(order.id, matchId);
+    return;
+  }
   if (!assisted && !(await checkSubmissionRequirements(matchId, order, client, vacancy))) return;
   const prompt = JSON.stringify({ version: LETTER_PROMPT_VERSION, cvId: latestCv.id, date: letterDate(), cv: plainText(cv.html).slice(0, 24000), clientName: client.full_name, role: vacancy.title, company: vacancy.company_name, description: vacancy.description.slice(0, 10000) });
   const fingerprint = createHash("sha256").update(prompt).digest("hex");
@@ -149,7 +157,7 @@ async function prepareMatch(matchId: string, assistedRequested = false) {
     const { data: held, error: holdError } = await db.from("job_desk_matches").update({ status: "needs_human", authorized_at: new Date().toISOString(), authorized_ip_hash: null }).eq("id", matchId).eq("status", "ready").select("id").maybeSingle();
     if (holdError) throw new Error(holdError.message);
     if (held) {
-      await enqueueTask("match", `replace-blocked:${order.id}:${Math.floor(Date.now() / 300000)}`, order.id);
+      await replaceUnsentMatch(order.id, matchId);
       if (!prohibitsAnswerDrafting(reason) && draftableQuestions([reason]).length) await enqueueTask("draft_answers", `answer-drafts:${matchId}:${latestCv.id}`, order.id, { matchId });
     }
     return;
@@ -173,7 +181,7 @@ async function submitMatch(matchId: string) {
   const { data: latestCv } = await db.from("job_desk_documents").select("id,status").eq("order_id", match.order_id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
   if (latestCv?.status !== "approved") {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
-    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: match.order_id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "A newer CV is awaiting approval. Recheck the application before submission." }, { onConflict: "match_id" });
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: match.order_id, method: vacancy?.application_method ?? "portal", status: "needs_human", provider_response: { clicked: false }, error_message: "A newer CV is awaiting approval. Recheck the application before submission." }, { onConflict: "match_id" });
     await queueUpdateWithoutChangingSubmission(match.order_id, "application_needs_action", matchId);
     return;
   }
@@ -186,7 +194,8 @@ async function submitMatch(matchId: string) {
     const outside = scope && vacancy ? applicationScopeHold(scope, vacancy) : "Scoped application authorization is missing.";
     if (outside || !scope || scoreVacancy(vacancy, profile, scope).score < 25 || !Array.isArray(match.reasons) || !match.reasons.some((reason: string) => reason.startsWith("Suitability review:"))) {
       await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
-      await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: outside || "Vacancy no longer meets the automatic suitability threshold." }, { onConflict: "match_id" });
+      await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", provider_response: { clicked: false }, error_message: outside || "Vacancy no longer meets the automatic suitability threshold." }, { onConflict: "match_id" });
+      await replaceUnsentMatch(order.id, matchId);
       await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
       return;
     }
@@ -203,13 +212,15 @@ async function submitMatch(matchId: string) {
   const pauseReason = submissionHoldReason(vacancy?.application_method === "portal" ? "" : String(vacancy?.description ?? ""), client.email ?? null, cvPlain.length);
   if (pauseReason) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
-    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: pauseReason }, { onConflict: "match_id" });
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", provider_response: { clicked: false }, error_message: pauseReason }, { onConflict: "match_id" });
+    await replaceUnsentMatch(order.id, matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
   if (!vacancy || vacancy.status !== "open" || vacancy.review_status !== "approved" || vacancy.duplicate_of || Date.now() - new Date(vacancy.last_seen_at).getTime() > 72 * 3600000 || scoreVacancy(vacancy, profile, order.application_authorized ? readApplicationScope(order.service_details) : null).score < 25 || !(match.reasons as string[]).some((reason) => reason.startsWith("Suitability review:"))) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
-    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", error_message: "Vacancy is stale or no longer suitable." }, { onConflict: "match_id" });
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy?.application_method ?? "portal", status: "needs_human", provider_response: { clicked: false }, error_message: "Vacancy is stale or no longer suitable." }, { onConflict: "match_id" });
+    await replaceUnsentMatch(order.id, matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
@@ -217,7 +228,8 @@ async function submitMatch(matchId: string) {
     if (!(await verifyVacancyStillOpen(vacancy))) throw new Error("Vacancy is no longer listed by its official source.");
   } catch (cause) {
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
-    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", error_message: cause instanceof Error ? cause.message : "Official vacancy source could not be checked." }, { onConflict: "match_id" });
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", provider_response: { clicked: false }, error_message: cause instanceof Error ? cause.message : "Official vacancy source could not be checked." }, { onConflict: "match_id" });
+    await replaceUnsentMatch(order.id, matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
   }
@@ -232,8 +244,9 @@ async function submitMatch(matchId: string) {
     const { data: source } = vacancy.source_id ? await db.from("job_desk_sources").select("provider,site_token,active").eq("id", vacancy.source_id).maybeSingle() : { data: null };
     const supported = source?.active && canAutomatePortal(source.provider, source.site_token, vacancy.apply_url);
     if (!supported) {
-      await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "portal", status: "needs_human", error_message: "This employer portal does not yet have a tested browser adapter." }, { onConflict: "match_id" });
+      await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "portal", status: "needs_human", provider_response: { clicked: false }, error_message: "This employer portal does not yet have a tested browser adapter." }, { onConflict: "match_id" });
       await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+      await replaceUnsentMatch(order.id, matchId);
       await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
       return;
     }
@@ -253,7 +266,7 @@ async function submitMatch(matchId: string) {
         return;
       }
       await db.from("job_desk_applications").update({ status: "needs_human", provider_response: { clicked: result.clicked ?? true, finalUrl: result.finalUrl }, error_message: result.reason ?? "Portal submission needs review." }).eq("match_id", matchId);
-      if (result.clicked === false) await enqueueTask("match", `replace-blocked:${order.id}:${Math.floor(Date.now() / 300000)}`, order.id);
+      if (result.clicked === false) await replaceUnsentMatch(order.id, matchId);
     } catch (cause) {
       if (portalConfirmation) {
         const { error: recoveryError } = await db.from("job_desk_applications").update({ status: "submitted", provider_response: { ...portalConfirmation, clicked: true, verification_type: "portal_confirmation" }, submitted_at: new Date().toISOString(), error_message: "Portal confirmed; local confirmation required recovery." }).eq("match_id", matchId);
@@ -272,7 +285,8 @@ async function submitMatch(matchId: string) {
     return;
   }
   if (vacancy.application_method !== "email" || !vacancy.email_verified || !vacancy.application_email || !process.env.RESEND_API_KEY || !(process.env.JOB_DESK_FROM_EMAIL ?? process.env.FROM_EMAIL)) {
-    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "email", status: "needs_human", error_message: "Verified email provider is not configured." }, { onConflict: "match_id" });
+    await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: "email", status: "needs_human", provider_response: { clicked: false }, error_message: "Verified email provider is not configured." }, { onConflict: "match_id" });
+    await replaceUnsentMatch(order.id, matchId);
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
     return;
@@ -309,6 +323,7 @@ async function submitMatch(matchId: string) {
     // Provider outcome may be uncertain after a timeout. Never retry without review.
     await db.from("job_desk_applications").update({ status: "needs_human", error_message: cause instanceof Error ? cause.message : "Submission outcome unknown", ...(cause instanceof ApplicationEmailError && cause.rejected ? { provider_response: { clicked: false, verification_type: "provider_rejected" } } : {}) }).eq("match_id", matchId);
     await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId);
+    if (cause instanceof ApplicationEmailError && cause.rejected) await replaceUnsentMatch(order.id, matchId);
     await queueUpdateWithoutChangingSubmission(order.id, "application_needs_action", matchId);
   }
 }
