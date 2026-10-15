@@ -27,6 +27,11 @@ export function plainText(html: string) {
 export async function enqueueTask(taskType: string, key: string, orderId: string | null, payload: Record<string, unknown> = {}) {
   const db = createSupabaseAdminClient();
   const { data, error } = await db.from("job_desk_tasks").upsert({ task_type: taskType, deduplication_key: key, order_id: orderId, payload }, { onConflict: "deduplication_key", ignoreDuplicates: true }).select("id").maybeSingle();
+  if (taskType === "match" && orderId && error?.code === "23505" && error.message.includes("job_desk_tasks_one_active_match_per_order_idx")) {
+    const { data: active, error: lookupError } = await db.from("job_desk_tasks").select("id").eq("order_id", orderId).eq("task_type", "match").in("status", ["queued", "running"]).limit(1).maybeSingle();
+    if (lookupError) throw new Error(lookupError.message);
+    return active?.id;
+  }
   if (error) throw new Error(error.message);
   return data?.id;
 }
