@@ -10,6 +10,7 @@ import { expiredDeadline } from "@/lib/job-desk/matching";
 import { queueClientUpdate } from "@/lib/job-desk/client-updates";
 import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
 import { recommendedSources } from "@/lib/job-desk/vacancy-feeds";
+import { queueApprovedVacancyMatches } from "@/lib/job-desk/approved-vacancies";
 import { recoverUnderfilledSearches } from "@/lib/job-desk/search-recovery";
 import { reconcileJobDeskPipeline } from "@/lib/job-desk/reconcile";
 import { buildApplicationReport, loadReportMatches } from "@/lib/job-desk/application-report";
@@ -30,6 +31,7 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("run_queue") }),
   z.object({ action: z.literal("refresh_all") }),
   z.object({ action: z.literal("connect_catalogue") }),
+  z.object({ action: z.literal("use_approved_pool") }),
   z.object({ action: z.literal("review_vacancy"), vacancyId: z.string().uuid(), decision: z.enum(["approve", "reject"]) }),
   z.object({ action: z.literal("add_vacancy"), companyName: z.string().min(2).max(150), title: z.string().min(3).max(250), location: z.string().max(200), description: z.string().min(100).max(18000), applyUrl: z.string().url().max(1000), applicationMethod: z.enum(["portal", "email"]), applicationEmail: z.string().email().optional(), emailVerified: z.boolean().default(false) })
 ]);
@@ -117,6 +119,9 @@ export async function POST(request: Request) {
         count += 1;
       }
       result = { queued: count };
+      queued = true;
+    } else if (input.action === "use_approved_pool") {
+      result = await queueApprovedVacancyMatches();
       queued = true;
     } else if (input.action === "refresh_all") {
       await enqueueTask("discover_email", `email-refresh:${Date.now()}`, null);
