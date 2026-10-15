@@ -1,5 +1,6 @@
 import mammoth from "mammoth";
 import pdf from "pdf-parse/lib/pdf-parse.js";
+import { databaseText } from "@/lib/database-text";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { hostAfricaPrivateOwner, isHostAfricaPrivatePath, readPrivateFile } from "@/lib/hostafrica-private-storage";
 
@@ -15,7 +16,7 @@ function extensionFromName(name: string) {
 }
 
 function normalizeExtractedText(value: string) {
-  return value.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_EXTRACTED_CV_CHARS);
+  return databaseText(value.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_EXTRACTED_CV_CHARS));
 }
 
 export async function extractTextFromCvFile(fileName: string, contentType: string, bytes: ArrayBuffer | Buffer): Promise<CvExtractionResult> {

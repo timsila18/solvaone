@@ -19,7 +19,7 @@ export function JobDeskIntakeForm() {
   const [error, setError] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("paid");
   const [serviceType, setServiceType] = useState("job_search_full");
-  const [kenyaEligibility, setKenyaEligibility] = useState("yes");
+  const [kenyaEligibility, setKenyaEligibility] = useState("not_provided");
   const submitting = useRef(false);
   const needsPaymentProof = paymentStatus === "paid" || paymentStatus === "partially_paid";
 
@@ -79,8 +79,8 @@ export function JobDeskIntakeForm() {
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label="Original CV"><Input name="cvFile" type="file" required accept=".pdf,.doc,.docx,.txt" className="py-2" disabled={busy} onChange={(event) => { if (event.target.files?.length) void prefill(); }} /></Field>
-          <Field label="Pasted CV text"><Textarea name="pastedCvText" placeholder="Use for a scanned PDF or DOC." /></Field>
         </div>
+        <details className="mt-3"><summary className="cursor-pointer text-sm font-bold text-brand-blue">Scanned CV? Add its text</summary><div className="mt-3"><Field label="CV text"><Textarea name="pastedCvText" placeholder="Only needed if the CV cannot be read." /></Field></div></details>
         <button type="button" onClick={prefill} disabled={reading || busy} className="mt-4 inline-flex items-center gap-2 rounded border border-brand-blue px-4 py-2 text-sm font-bold text-brand-blue disabled:opacity-50">{reading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanText className="h-4 w-4" />}{reading ? "Reading CV..." : "Fill from CV"}</button>
         {previewMessage ? <p role="status" className="mt-2 text-sm text-brand-blue">{previewMessage}</p> : null}
         {prefilledFields.length ? <p className="mt-1 text-xs text-black/55 dark:text-white/55">Filled from CV: {prefilledFields.map((field) => ({ fullName: "name", email: "email", whatsappPhone: "phone", targetJobTitles: "target roles", preferredIndustries: "industries", preferredLocations: "location", experienceLevel: "experience", remotePreference: "work arrangement", currentCity: "city", currentCountry: "country", noticePeriod: "availability", applicantLinkedinUrl: "LinkedIn", portfolioUrl: "portfolio" }[field] ?? field)).join(", ")}.</p> : null}
@@ -120,8 +120,8 @@ export function JobDeskIntakeForm() {
         <details className="mt-4 border-t border-black/10 pt-4 dark:border-white/10"><summary className="cursor-pointer text-sm font-bold text-brand-blue">Additional job preferences</summary><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Preferred industries"><Textarea name="preferredIndustries" placeholder="NGO, banking, technology..." /></Field><Field label="Employment types"><Input name="employmentTypes" placeholder="Full-time, contract, internship..." /></Field><Field label="Salary expectation"><Input name="salaryExpectation" placeholder="Optional" /></Field><Field label="Employers to exclude"><Textarea name="excludedEmployers" placeholder="One name per line or comma-separated" /></Field><Field label="Roles to exclude"><Textarea name="excludedRoles" placeholder="One title per line or comma-separated" /></Field><Field label="Other exclusions"><Textarea name="excludedKeywords" placeholder="Sectors or conditions the client ruled out" /></Field></div><div className="mt-4"><Field label="Client instructions"><Textarea name="instructions" className="min-h-32" placeholder="Role priorities, industries to avoid, deadlines, tone, or other instructions" /></Field></div></details>
       </section>
 
-      {serviceType === "job_search_full" ? <BroaderRoleFields /> : null}
-      {serviceType === "job_search_full" ? <section>
+      {serviceType === "job_search_full" ? <details className="border-t border-black/10 pt-4 dark:border-white/10"><summary className="cursor-pointer text-sm font-bold text-brand-blue">Broader job preferences</summary><div className="mt-4"><BroaderRoleFields /></div></details> : null}
+      {serviceType === "job_search_full" ? <details className="border-t border-black/10 pt-4 dark:border-white/10"><summary className="cursor-pointer text-sm font-bold text-brand-blue">More application details</summary><section className="mt-4">
         <h2 className="border-b border-black/10 pb-4 text-lg font-black dark:border-white/10">Reusable application details</h2>
         <p className="mt-3 text-sm">Ask the client to confirm these answers once. Do not guess eligibility or upload identity documents here.</p>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -132,7 +132,7 @@ export function JobDeskIntakeForm() {
         </div>
         <details className="mt-4 border-t border-black/10 pt-4 dark:border-white/10"><summary className="cursor-pointer text-sm font-bold text-brand-blue">Legal and eligibility details</summary><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Current country"><Input name="currentCountry" maxLength={120} placeholder="e.g. Kenya" /></Field><Field label="Eligible to work in Kenya"><select name="kenyaWorkEligibility" value={kenyaEligibility} onChange={(event) => setKenyaEligibility(event.target.value)} className={selectClass}><option value="not_provided">Not confirmed</option><option value="yes">Yes, confirmed by client</option><option value="no">No</option><option value="unsure">Unsure</option></select></Field><Field label="Needs employer visa sponsorship"><select name="sponsorshipNeeded" defaultValue="not_provided" className={selectClass}><option value="not_provided">Not confirmed</option><option value="yes">Yes</option><option value="no">No</option><option value="unsure">Unsure</option></select></Field></div></details>
         {kenyaEligibility === "yes" ? <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" name="kenyaEligibilityConfirmed" value="true" required={serviceType === "job_search_full"} className="mt-1" />I confirm the client has explicitly stated they are eligible to work in Kenya.</label> : null}
-      </section> : null}
+      </section></details> : null}
 
       <section>
         <h2 className="border-b border-black/10 pb-4 text-lg font-black dark:border-white/10">Manual payment record</h2>
