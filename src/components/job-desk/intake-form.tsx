@@ -19,7 +19,7 @@ export function JobDeskIntakeForm() {
   const [error, setError] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("paid");
   const [serviceType, setServiceType] = useState("job_search_full");
-  const [kenyaEligibility, setKenyaEligibility] = useState("not_provided");
+  const [kenyaEligibility, setKenyaEligibility] = useState("yes");
   const submitting = useRef(false);
   const needsPaymentProof = paymentStatus === "paid" || paymentStatus === "partially_paid";
 
@@ -116,7 +116,12 @@ export function JobDeskIntakeForm() {
               <option value="flexible">Flexible</option><option value="onsite">On-site</option><option value="hybrid">Hybrid</option><option value="remote">Remote</option>
             </select>
           </Field>
+          {serviceType === "job_search_full" ? <>
+            <Field label="LinkedIn profile"><Input name="applicantLinkedinUrl" type="text" inputMode="url" autoCapitalize="none" spellCheck={false} maxLength={4000} placeholder="https://www.linkedin.com/in/..." /></Field>
+            <Field label="Eligible to work in Kenya"><select name="kenyaWorkEligibility" value={kenyaEligibility} onChange={(event) => setKenyaEligibility(event.target.value)} className={selectClass}><option value="yes">Yes, confirmed by client</option><option value="not_provided">Not confirmed</option><option value="no">No</option><option value="unsure">Unsure</option></select></Field>
+          </> : null}
         </div>
+        {serviceType === "job_search_full" && kenyaEligibility === "yes" ? <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" name="kenyaEligibilityConfirmed" value="true" required className="mt-1" />I confirm the client has explicitly stated they are eligible to work in Kenya.</label> : null}
         <details className="mt-4 border-t border-black/10 pt-4 dark:border-white/10"><summary className="cursor-pointer text-sm font-bold text-brand-blue">Additional job preferences</summary><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Preferred industries"><Textarea name="preferredIndustries" placeholder="NGO, banking, technology..." /></Field><Field label="Employment types"><Input name="employmentTypes" placeholder="Full-time, contract, internship..." /></Field><Field label="Salary expectation"><Input name="salaryExpectation" placeholder="Optional" /></Field><Field label="Employers to exclude"><Textarea name="excludedEmployers" placeholder="One name per line or comma-separated" /></Field><Field label="Roles to exclude"><Textarea name="excludedRoles" placeholder="One title per line or comma-separated" /></Field><Field label="Other exclusions"><Textarea name="excludedKeywords" placeholder="Sectors or conditions the client ruled out" /></Field></div><div className="mt-4"><Field label="Client instructions"><Textarea name="instructions" className="min-h-32" placeholder="Role priorities, industries to avoid, deadlines, tone, or other instructions" /></Field></div></details>
       </section>
 
@@ -127,11 +132,9 @@ export function JobDeskIntakeForm() {
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <Field label="Current city"><Input name="currentCity" maxLength={120} placeholder="e.g. Nairobi" /></Field>
           <Field label="Notice period or earliest start"><Input name="noticePeriod" maxLength={120} placeholder="e.g. Immediately, 30 days" /></Field>
-          <Field label="LinkedIn profile"><Input name="applicantLinkedinUrl" type="text" inputMode="url" autoCapitalize="none" spellCheck={false} maxLength={4000} placeholder="https://www.linkedin.com/in/..." /></Field>
           <Field label="Portfolio or professional site"><Input name="portfolioUrl" type="url" maxLength={500} placeholder="https://..." /></Field>
         </div>
-        <details className="mt-4 border-t border-black/10 pt-4 dark:border-white/10"><summary className="cursor-pointer text-sm font-bold text-brand-blue">Legal and eligibility details</summary><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Current country"><Input name="currentCountry" maxLength={120} placeholder="e.g. Kenya" /></Field><Field label="Eligible to work in Kenya"><select name="kenyaWorkEligibility" value={kenyaEligibility} onChange={(event) => setKenyaEligibility(event.target.value)} className={selectClass}><option value="not_provided">Not confirmed</option><option value="yes">Yes, confirmed by client</option><option value="no">No</option><option value="unsure">Unsure</option></select></Field><Field label="Needs employer visa sponsorship"><select name="sponsorshipNeeded" defaultValue="not_provided" className={selectClass}><option value="not_provided">Not confirmed</option><option value="yes">Yes</option><option value="no">No</option><option value="unsure">Unsure</option></select></Field></div></details>
-        {kenyaEligibility === "yes" ? <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" name="kenyaEligibilityConfirmed" value="true" required={serviceType === "job_search_full"} className="mt-1" />I confirm the client has explicitly stated they are eligible to work in Kenya.</label> : null}
+        <details className="mt-4 border-t border-black/10 pt-4 dark:border-white/10"><summary className="cursor-pointer text-sm font-bold text-brand-blue">Legal and eligibility details</summary><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Current country"><Input name="currentCountry" maxLength={120} placeholder="e.g. Kenya" /></Field><Field label="Needs employer visa sponsorship"><select name="sponsorshipNeeded" defaultValue="not_provided" className={selectClass}><option value="not_provided">Not confirmed</option><option value="yes">Yes</option><option value="no">No</option><option value="unsure">Unsure</option></select></Field></div></details>
       </section></details> : null}
 
       <section>
