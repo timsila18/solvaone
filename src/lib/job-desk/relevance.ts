@@ -62,7 +62,13 @@ export async function reviewCandidateMatches(orderId: string, profile: Record<st
         decisions = parsed.decisions;
         await db.from("job_desk_ai_runs").update({ status: "succeeded", output_payload: parsed, token_input: inputTokens, token_output: outputTokens, total_tokens: inputTokens + outputTokens, estimated_cost: estimateCost(model, inputTokens, outputTokens), completed_at: new Date().toISOString() }).eq("id", run.id);
       } catch (cause) {
-        await db.from("job_desk_ai_runs").update({ status: "failed", token_input: inputTokens, token_output: outputTokens, total_tokens: inputTokens + outputTokens, estimated_cost: estimateCost(model, inputTokens, outputTokens), error_message: cause instanceof Error ? cause.message : "Matching review failed", completed_at: new Date().toISOString() }).eq("id", run.id);
+        const message = cause instanceof Error ? cause.message : "Matching review failed";
+        await db.from("job_desk_ai_runs").update({ status: "failed", token_input: inputTokens, token_output: outputTokens, total_tokens: inputTokens + outputTokens, estimated_cost: estimateCost(model, inputTokens, outputTokens), error_message: message, completed_at: new Date().toISOString() }).eq("id", run.id);
+        if (/\b429\b|insufficient_quota|no credits remaining/i.test(message)) {
+          for (const vacancy of batch) result.set(vacancy.id, { suitable: false, reason: "Review temporarily unavailable: AI quota exhausted. No application was submitted." });
+          for (const vacancy of vacancies.slice(start + batch.length)) result.set(vacancy.id, { suitable: false, reason: "Review temporarily unavailable: AI quota exhausted. No application was submitted." });
+          return result;
+        }
         // Salvage independently verified listings rather than discarding the entire search.
         if (batch.length > 1) {
           for (const vacancy of batch) {

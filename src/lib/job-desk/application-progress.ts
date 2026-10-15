@@ -15,6 +15,7 @@ export function deliveryStage(application?: DeliveryApplication | null) {
   if (application?.status === "submitted" && event === "email.delivered") return "delivered";
   if (application?.status === "submitted" && application.method !== "email" && !application.provider_message_id && evidence?.confirmation?.trim()) return "confirmed";
   if (application?.status === "submitted" && application.provider_message_id) return "accepted";
+  if (application?.status === "submitted" && application.method === "email" && evidence?.confirmation?.trim()) return "accepted";
   if (application?.status === "sending" || application?.status === "submitted") return "processing";
   if (["needs_human", "failed"].includes(application?.status ?? "")) return "blocked";
   return "none";
@@ -26,6 +27,21 @@ export function successfulDelivery(application?: DeliveryApplication | null) {
 
 export function distinctSuccessfulDeliveries(applications: DeliveryApplication[]) {
   return new Set(applications.filter(successfulDelivery).filter(application => application.match_id).map(application => application.match_id)).size;
+}
+
+export function submissionOriginCounts(applications: DeliveryApplication[]) {
+  const counts = { agentEmail: 0, agentPortal: 0, adminRecorded: 0, unattributed: 0 };
+  const seen = new Set<string>();
+  for (const application of applications) {
+    if (!application.match_id || seen.has(application.match_id) || !successfulDelivery(application)) continue;
+    seen.add(application.match_id);
+    const evidence = application.provider_response as { verification_type?: string; recorded_by?: string } | null;
+    if (evidence?.recorded_by || ["gmail_message_id", "employer_reference"].includes(evidence?.verification_type ?? "")) counts.adminRecorded++;
+    else if (evidence?.verification_type === "email_provider_accepted") counts.agentEmail++;
+    else if (evidence?.verification_type === "portal_confirmation") counts.agentPortal++;
+    else counts.unattributed++;
+  }
+  return counts;
 }
 
 export function applicationDeliveryCounts(applications: DeliveryApplication[]) {
