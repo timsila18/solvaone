@@ -21,7 +21,7 @@ export function deliveryStage(application?: DeliveryApplication | null) {
 }
 
 export function successfulDelivery(application?: DeliveryApplication | null) {
-  return ["delivered", "confirmed"].includes(deliveryStage(application));
+  return ["accepted", "delivered", "confirmed"].includes(deliveryStage(application));
 }
 
 export function distinctSuccessfulDeliveries(applications: DeliveryApplication[]) {
@@ -77,7 +77,7 @@ export function reportEvidence(application: DeliveryApplication | null | undefin
   const stage = deliveryStage(application);
   const evidence = application?.provider_response as { confirmation?: string; delivery?: { event?: string; at?: string; observedAt?: string } } | null;
   return {
-    status: stage === "delivered" ? "Delivered to employer mail server (not employer review)" : stage === "confirmed" ? "Confirmed portal submission" : stage === "accepted" ? "Email provider accepted; delivery not confirmed" : stage === "processing" ? "Attempt awaiting confirmation" : stage === "blocked" ? "Blocked; not confirmed submitted" : "Prepared or shortlisted; not submitted",
+    status: stage === "delivered" ? "Delivered to employer mail server (not employer review)" : stage === "confirmed" ? "Confirmed portal submission" : stage === "accepted" ? "Submitted by email; delivery not confirmed" : stage === "processing" ? "Attempt awaiting confirmation" : stage === "blocked" ? "Blocked; not confirmed submitted" : "Prepared or shortlisted; not submitted",
     attemptedAt: submittedAt ?? null,
     deliveryAt: stage === "delivered" ? evidence?.delivery?.at ?? null : null,
     confirmation: stage === "confirmed" ? evidence?.confirmation ?? null : null,

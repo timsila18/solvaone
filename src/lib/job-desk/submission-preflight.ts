@@ -73,7 +73,7 @@ export function applicationOutcome(application: { status?: string; method?: stri
   if (evidence?.delivery?.event === "email.delivery_delayed") return "Email delivery delayed";
   if (application?.status === "submitted" && evidence?.confirmation && application.method !== "email" && !application.provider_message_id) return "Confirmed submitted";
   if (application?.status === "submitted" && evidence?.confirmation && application.method === "email") return "Email send recorded by administrator; delivery not confirmed";
-  if (application?.status === "submitted" && application?.provider_message_id) return "Email accepted by provider; employer receipt not confirmed";
+  if (application?.status === "submitted" && application?.provider_message_id) return "Submitted by email; employer delivery not confirmed";
   if (application?.status === "submitted") return "Awaiting submission evidence";
   if (application?.status === "sending") return "Awaiting employer confirmation";
   return "Needs admin action";

@@ -26,3 +26,12 @@ test('duplicate attempts for one match do not inflate progress', () => {
   const application = { match_id: 'same-match', status: 'submitted', method: 'portal', provider_response: { confirmation: 'receipt' } };
   assert.equal(mod.exports.applicationDeliveryCounts([application, application]).confirmed, 1);
 });
+
+test('provider-accepted email is submitted while failed delivery is not', () => {
+  const sent = { match_id: 'sent', status: 'submitted', method: 'email', provider_message_id: 'provider-1' };
+  const bounced = { ...sent, match_id: 'bounced', provider_response: { delivery: { event: 'email.bounced' } } };
+  assert.equal(mod.exports.successfulDelivery(sent), true);
+  assert.equal(mod.exports.distinctSuccessfulDeliveries([sent, sent, bounced]), 1);
+  assert.equal(mod.exports.applicationDeliveryCounts([sent, bounced]).accepted, 1);
+  assert.equal(mod.exports.reportEvidence(sent).status, 'Submitted by email; delivery not confirmed');
+});
