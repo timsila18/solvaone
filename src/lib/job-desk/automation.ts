@@ -151,7 +151,7 @@ export async function matchOrder(orderId: string) {
   const { data: handled, error: handledError } = await db.from("job_desk_matches").select("id,vacancy_id,status,application:job_desk_applications(id,status,provider_message_id,provider_response)").eq("order_id", orderId);
   if (handledError) throw new Error(handledError.message);
   // Existing outcomes belong to the guarded retry workflow, not a new application search.
-  const handledIds = new Set((handled ?? []).filter(item => Array.isArray(item.application) ? item.application.length > 0 : Boolean(item.application)).map(item => item.vacancy_id));
+  const handledIds = new Set((handled ?? []).filter(item => item.status === "rejected" || (Array.isArray(item.application) ? item.application.length > 0 : Boolean(item.application))).map(item => item.vacancy_id));
   const { data: queuedPreparation, error: preparationError } = await db.from("job_desk_tasks").select("payload").eq("order_id", orderId).eq("task_type", "prepare").in("status", ["queued", "running"]);
   if (preparationError) throw new Error(preparationError.message);
   const preparingIds = new Set((queuedPreparation ?? []).map(item => (item.payload as { matchId?: string })?.matchId));

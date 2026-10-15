@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { underTargetDeliveryReview } from "@/lib/job-desk/delivery-review";
+import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
 
 export default async function JobDeskReviewPage() {
   const user = await getCurrentUser();
@@ -14,7 +15,7 @@ export default async function JobDeskReviewPage() {
   const [ordersResult, tasksResult, matchesResult, vacanciesResult] = await Promise.all([
     db.from("job_desk_orders").select("id,status,created_at,client:job_desk_clients(full_name)", { count: "exact" }).in("status", ["cv_review", "awaiting_information", "failed"]).order("created_at", { ascending: false }).limit(50),
     db.from("job_desk_tasks").select("id,order_id,task_type,last_error,created_at", { count: "exact" }).eq("status", "failed").order("created_at", { ascending: false }).limit(50),
-    db.from("job_desk_matches").select("id,order_id,score,vacancy:job_desk_vacancies(title,company_name),application:job_desk_applications(error_message)", { count: "exact" }).eq("status", "needs_human").order("created_at", { ascending: false }).limit(50),
+    db.from("job_desk_matches").select("id,order_id,score,vacancy:job_desk_vacancies(title,company_name,apply_url),application:job_desk_applications(status,error_message,provider_response)", { count: "exact" }).eq("status", "needs_human").order("created_at", { ascending: false }).limit(50),
     db.from("job_desk_vacancies").select("id", { count: "exact", head: true }).eq("status", "open").eq("review_status", "needs_review")
   ]);
   const error = ordersResult.error || tasksResult.error || matchesResult.error || vacanciesResult.error;
@@ -54,7 +55,7 @@ export default async function JobDeskReviewPage() {
         {orders.map((order) => <ReviewRow key={order.id} title={nameByOrder.get(order.id) || "Client order"} description={order.status === "cv_review" ? "Review and approve the prepared CV." : order.status === "awaiting_information" ? "Record the client's missing answers." : "Processing failed; inspect the order."} href={`/dashboard/admin/job-desk/${order.id}`} action="Open order" />)}
       </ReviewSection>
       <ReviewSection title="Applications needing a person" count={matchesResult.count ?? 0} empty="No applications currently paused for you.">
-        {matches.map((match) => { const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy; const application = Array.isArray(match.application) ? match.application[0] : match.application; return <ReviewRow key={match.id} title={`${vacancy?.title ?? "Application"} · ${vacancy?.company_name ?? "Employer"}`} description={application?.error_message || "Open the application packet and complete the supported human step."} href={`/dashboard/admin/job-desk/${match.order_id}#applications`} action="Open application" />; })}
+        {matches.map((match) => { const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy; const application = Array.isArray(match.application) ? match.application[0] : match.application; const safeToResume = canRetrySubmission(application); return <ReviewRow key={match.id} title={`${vacancy?.title ?? "Application"} · ${vacancy?.company_name ?? "Employer"}`} description={`${safeToResume ? "Not submitted: complete the required step. " : "Outcome uncertain: check the employer receipt before any retry. "}${application?.error_message || "Open the saved application packet."}`} href={`/dashboard/admin/job-desk/${match.order_id}#applications`} action={safeToResume ? "Complete step" : "Check receipt"} externalHref={vacancy?.apply_url} />; })}
       </ReviewSection>
       <ReviewSection title="Vacancies needing review" count={vacancyCount} empty="No vacancies awaiting review.">
         {vacancyCount ? <ReviewRow title={`${vacancyCount} listings need verification`} description="Review source, eligibility, closing date and duplicate warnings before matching." href="/dashboard/admin/job-desk/vacancies" action="Review vacancies" /> : null}
@@ -67,6 +68,6 @@ function ReviewSection({ title, count, empty, children }: { title: string; count
   return <section><div className="flex items-baseline justify-between border-b border-black/15 pb-2 dark:border-white/15"><h2 className="text-lg font-black">{title}</h2><span className="text-sm font-bold text-brand-blue">{count}</span></div><div className="divide-y divide-black/10 dark:divide-white/10">{count ? children : <p className="py-4 text-sm text-black/55 dark:text-white/55">{empty}</p>}</div></section>;
 }
 
-function ReviewRow({ title, description, href, action }: { title: string; description: string; href: string; action: string }) {
-  return <div className="flex flex-wrap items-start justify-between gap-3 py-4"><div className="min-w-0 flex-1"><h3 className="font-bold">{title}</h3><p className="mt-1 break-words text-sm text-black/60 dark:text-white/60">{description}</p></div><Link href={href} className="border border-brand-blue px-3 py-2 text-xs font-bold text-brand-blue">{action}</Link></div>;
+function ReviewRow({ title, description, href, action, externalHref }: { title: string; description: string; href: string; action: string; externalHref?: string | null }) {
+  return <div className="flex flex-wrap items-start justify-between gap-3 py-4"><div className="min-w-0 flex-1"><h3 className="font-bold">{title}</h3><p className="mt-1 break-words text-sm text-black/60 dark:text-white/60">{description}</p>{externalHref ? <a href={externalHref} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs font-semibold text-brand-blue">Employer form</a> : null}</div><Link href={href} className="border border-brand-blue px-3 py-2 text-xs font-bold text-brand-blue">{action}</Link></div>;
 }
