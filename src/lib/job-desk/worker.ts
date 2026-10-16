@@ -44,14 +44,25 @@ async function checkSubmissionRequirements(matchId: string, order: any, client: 
   const { data: approvedCv, error: cvError } = await db.from("job_desk_documents").select("id,html,status").eq("order_id", order.id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
   if (cvError) throw new Error(cvError.message);
   if (approvedCv?.status !== "approved") return null;
-  const preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.active ? source.provider : undefined, siteToken: source?.site_token, url: vacancy.apply_url, answers: answersForMatch(order.service_details, matchId, details?.portalAnswers ?? "", approvedCv.id), known: buildApplicantKnown(client, details, approvedCv.html ?? "") });
+  let preflight;
+  try {
+  preflight = await submissionPreflight({ method: vacancy.application_method, emailVerified: vacancy.email_verified, applicationEmail: vacancy.application_email, provider: source?.active ? source.provider : undefined, siteToken: source?.site_token, url: vacancy.apply_url, answers: answersForMatch(order.service_details, matchId, details?.portalAnswers ?? "", approvedCv.id), known: buildApplicantKnown(client, details, approvedCv.html ?? "") });
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : "";
+    if (!/(?:official.*(?:404|410)|question label is missing|valid application requirements schema|cannot verify the official.*job id)/i.test(reason)) throw cause;
+    preflight = { ready: false, blockers: [reason], checkedAt: new Date().toISOString() };
+  }
   if (!preflight.ready) {
-    const { data: existing, error: readError } = await db.from("job_desk_applications").select("status,provider_response").eq("match_id", matchId).maybeSingle();
+    const { data: existing, error: readError } = await db.from("job_desk_applications").select("status,provider_response,updated_at").eq("match_id", matchId).maybeSingle();
     if (readError) throw new Error(readError.message);
     if (["sending", "submitted"].includes(existing?.status ?? "")) return null;
     if (existing?.status === "needs_human" && !canRetrySubmission(existing)) return null;
-    const { error: saveError } = await db.from("job_desk_applications").upsert({ match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", error_message: `Preflight: ${preflight.blockers.join("; ")}`.slice(0, 4000), provider_response: { clicked: false, preflight } }, { onConflict: "match_id" });
-    if (saveError) throw new Error(saveError.message);
+    const hold = { match_id: matchId, order_id: order.id, method: vacancy.application_method, status: "needs_human", error_message: `Preflight: ${preflight.blockers.join("; ")}`.slice(0, 4000), provider_response: { ...(existing?.provider_response as object ?? {}), clicked: false, preflight } };
+    const saved = existing
+      ? await db.from("job_desk_applications").update(hold).eq("match_id", matchId).eq("status", existing.status).eq("updated_at", existing.updated_at).select("match_id").maybeSingle()
+      : await db.from("job_desk_applications").upsert(hold, { onConflict: "match_id", ignoreDuplicates: true }).select("match_id").maybeSingle();
+    if (saved.error) throw new Error(saved.error.message);
+    if (!saved.data) return null;
     const { error: matchError } = await db.from("job_desk_matches").update({ status: "needs_human" }).eq("id", matchId).in("status", ["suggested", "preparing", "authorized"]);
     if (matchError) throw new Error(matchError.message);
     await replaceUnsentMatch(order.id, matchId);

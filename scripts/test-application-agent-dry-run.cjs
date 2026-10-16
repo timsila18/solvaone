@@ -29,8 +29,9 @@ assert.ok(!calls.some(args => args.includes('click')));
 console.log('Dry-run fills and attaches documents without clicking submission. No browser or employer contacted.');
 
 data.dryRun = false;
+data.handoffOnly = true;
 data.applicationId = '11111111-1111-4111-8111-111111111111';
-page.challenge = true;
+page.challenge = false;
 const retainedCalls = [], files = new Map(), retainedLogs = [];
 vm.runInNewContext(runner, { URL, Date, process: { env: { APPLICATION_AGENT_HANDOFF_ENABLED: '1' } }, console: { log: value => retainedLogs.push(JSON.parse(value)) }, require: name => {
   if (name === 'node:path') return require('node:path');
@@ -45,4 +46,4 @@ assert.equal(retainedLogs.at(-1).clicked, false);
 assert.ok([...files.keys()].some(file => file.endsWith('/handoff.json')));
 assert.ok(!retainedCalls.some(args => args[0] === 'close'));
 assert.ok(!retainedCalls.some(args => args.includes('click')));
-console.log('Human-required session retained without submitting. No browser or employer contacted.');
+console.log('Explicit handoff-only form retained without submitting even when all fields are complete. No browser or employer contacted.');

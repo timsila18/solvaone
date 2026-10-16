@@ -62,8 +62,8 @@ export function missingPortalRequirements(questions: PortalQuestion[], answersTe
 }
 
 export function canRetrySubmission(application: { status?: string; provider_response?: unknown } | null) {
-  const evidence = application?.provider_response as { clicked?: boolean } | null;
-  return application?.status === "needs_human" && evidence?.clicked === false;
+  const evidence = application?.provider_response as { clicked?: boolean; handoffAttemptId?: unknown } | null;
+  return application?.status === "needs_human" && evidence?.clicked === false && !evidence.handoffAttemptId;
 }
 
 export function applicationOutcome(application: { status?: string; method?: string; provider_message_id?: string | null; provider_response?: unknown } | null) {

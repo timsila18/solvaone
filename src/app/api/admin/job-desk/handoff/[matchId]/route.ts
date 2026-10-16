@@ -43,10 +43,13 @@ async function handle(request: Request, context: { params: Promise<{ matchId: st
     const base = new URL(process.env.APPLICATION_AGENT_URL ?? "");
     const token = process.env.APPLICATION_AGENT_TOKEN;
     if (base.protocol !== "https:" || base.username || base.password || !token) throw new Error("Agent unavailable");
-    const endpoint = new URL(`/applications/${matchId}/handoff`, base);
+    const stored = (application.provider_response ?? {}) as Record<string, unknown>;
+    const attemptId = typeof stored.handoffAttemptId === "string" && z.string().uuid().safeParse(stored.handoffAttemptId).success ? stored.handoffAttemptId : matchId;
+    const endpoint = new URL(`/applications/${attemptId}/handoff`, base);
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
     const metadata = await fetch(endpoint, { headers: { ...headers, "x-handoff-metadata": "1" }, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(20000) });
     const initial = await metadata.json();
+    if (metadata.status === 409 && request.method === "GET" && initial.error === "Browser is busy. Try again shortly.") return NextResponse.json({ preparing: true }, { status: 202 });
     if (!metadata.ok) return NextResponse.json({ error: initial.error ?? "Session unavailable." }, { status: metadata.status });
     let result = initial;
     if (!initial.receipt && action?.action !== "close") {
