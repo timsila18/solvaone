@@ -1,0 +1,25 @@
+services:
+  agent:
+    environment:
+      SOLVAONE_WORKER_URL: ''
+  scheduler:
+    image: solvaone-application-agent:latest
+    entrypoint: [node, /app/scheduler.mjs]
+    command: []
+    user: node
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      JOB_DESK_WORKER_URL: https://solvaone.co.ke/api/job-desk/worker/pilot
+      JOB_DESK_WORKER_SECRET_FILE: /run/secrets/worker_secret
+    volumes:
+      - ./scheduler.mjs:/app/scheduler.mjs:ro
+      - /opt/solvaone-agent/worker-secret:/run/secrets/worker_secret:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

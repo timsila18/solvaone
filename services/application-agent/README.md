@@ -130,6 +130,25 @@ this is not a distributed scheduler lease. The daily Vercel recovery cron remain
 Persistent admin browser handoff is still separate work. The allowlist limits this
 pilot endpoint only; it does not disable existing admin actions or the daily cron.
 
+### Existing server migration
+
+`continuous.compose.yaml` is an override for an already installed legacy agent
+stack that polls `SOLVAONE_WORKER_URL` using the browser token. It disables that
+old poller and adds the separate scheduler without rebuilding the browser image.
+Use only after confirming the application ledger contains no queued/running jobs.
+It expects `/opt/solvaone-agent/worker-secret`, owned by UID 1000, mode 0400,
+containing the dedicated worker secret. Never print that file in diagnostics.
+Keep the override in subsequent deployment commands; omitting it reenables the
+legacy poller. Do not use this override with the newer base scheduler profile;
+that base supports secret-file configuration directly.
+
+```sh
+docker compose --env-file /opt/solvaone-agent/.env \
+  -f /opt/solvaone-agent/services/application-agent/compose.yaml \
+  -f /opt/solvaone-agent/services/application-agent/continuous.compose.yaml \
+  up -d --no-build agent scheduler
+```
+
 Fixture tests (no employer calls):
 
 ```sh
