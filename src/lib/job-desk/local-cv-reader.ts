@@ -6,12 +6,12 @@ const countries = "Kenya|South Africa|Cameroon|Uganda|Tanzania|Rwanda|Nigeria|Gh
 
 function sectionKind(value: string): SectionKind | null {
   const title = value.replace(/\s+/g, " ").trim();
-  if (/^(?:(?:professional|executive|personal|career)\s+)?(?:profile|summary|objective)$|^about me$/i.test(title)) return "summary";
+  if (/^(?:(?:professional|executive|personal|career)\s+)?(?:profile|summary|objectives?)$|^about me$/i.test(title)) return "summary";
   if (/^(?:(?:core|key|technical|professional|relevant)\s+)?(?:skills|competencies|expertise)(?:\s+(?:and|&)\s+(?:skills|competencies|tools))?$|^areas of expertise$|^technical proficiencies$|^(?:systems and digital skills|financial and commercial capabilities|computer skills|digital skills|computer literacy)$/i.test(title)) return "skills";
   if (/^(?:(?:professional|work|employment|clinical|volunteer|relevant)\s+)?(?:experience|history)(?:\s+continued)?$|^career history$/i.test(title)) return "experience";
-  if (/^(?:education|educational background|educational qualifications|academic qualifications|academic background)(?:\s+(?:and|&)\s+(?:professional\s+)?(?:training|qualifications|certifications|credentials|development))?$|^(?:professional\s+)?(?:certifications|qualifications|training)$/i.test(title)) return "education";
+  if (/^(?:education|educational background|educational qualifications|academic qualifications|academic background)(?:\s+(?:and|&)\s+(?:professional\s+)?(?:training|qualifications|certifications|credentials|development))?$|^(?:(?:professional|other)\s+)?(?:certifications|certificates|qualifications|training)$/i.test(title)) return "education";
   if (/^(?:professional\s+)?(?:references|referees)(?:\s+available upon request)?$/i.test(title)) return "references";
-  if (/^(?:languages|projects|publications|awards|achievements|career value|professional strengths|professional memberships?|professional affiliations|memberships?|interests|relevant academic areas|additional information|contact (?:information|details)|personal details)$/i.test(title)) return "additional";
+  if (/^(?:languages|projects|publications|awards|achievements|career value|professional strengths|professional memberships?|professional affiliations|memberships?|interests|relevant academic areas|additional information|contact(?: (?:information|details))?|personal details)$/i.test(title)) return "additional";
   return null;
 }
 
@@ -24,7 +24,13 @@ function parseSections(text: string): Section[] {
     const heading = separator >= 0 ? line.slice(0, separator) : line;
     const kind = heading.length <= 65 ? sectionKind(heading) : null;
     if (kind) sections.push({ kind, title: heading, lines: separator >= 0 && line.slice(separator + 1).trim() ? [line.slice(separator + 1).trim()] : [] });
-    else sections[sections.length - 1].lines.push(line);
+    else {
+      const previous = sections[sections.length - 1];
+      // Sidebar references can appear between work-history blocks in PDF order.
+      if (/^\d{1,3}%$/.test(line) && sections.some(section => section.kind === "skills" && !section.lines.length) && previous.kind !== "skills") sections.push({ kind: "skills", title: "Skills", lines: [line] });
+      else if ((previous.kind === "references" || /achievements/i.test(previous.title)) && /(?:limited|ltd|group|company|technologies)\b.*[-\u2013\u2014].*\b(?:manager|consultant|teller|officer|assistant)\b/i.test(line)) sections.push({ kind: "experience", title: "Work Experience", lines: [line] });
+      else previous.lines.push(line);
+    }
   }
   return sections;
 }
@@ -42,7 +48,10 @@ export function readLocalCvSections(text: string): LocalCvSections {
 
 function cleanRole(line: string) {
   // Word tables sometimes join the bold role and the employer without a space.
-  const title = line.replace(/([A-Z]{3,})([A-Z][a-z])/g, "$1 | $2").split(/\s*[|\t]\s*|\s+at\s+/i)[0].replace(/^[\u2022\-\s]+/, "").trim();
+  const separated = line.replace(/([A-Z]{3,})([A-Z][a-z])/g, "$1 | $2");
+  const employerFirst = separated.match(/^(.*?)\s*[-\u2013\u2014]\s*(.+)$/);
+  const role = employerFirst && /\b(?:limited|ltd|group|company|technologies)\b/i.test(employerFirst[1]) ? employerFirst[2] : separated;
+  const title = role.split(/\s*[|\t]\s*|\s+at\s+/i)[0].replace(/^[\u2022\-\s]+/, "").trim();
   if (title.length < 4 || title.length > 100 || /[.!?]$/.test(title) || !roleWord.test(title)) return "";
   if (/^(?:supported|assisted|managed|coordinated|prepared|worked|provided|maintained|developed|handled|ensured|responsible|led|conducted|trained|monitored|participated)\b/i.test(title)) return "";
   return title;
@@ -58,15 +67,15 @@ function possibleName(line: string) {
 
 export function readLocalCvFields(text: string) {
   const sections = parseSections(text);
-  const referenceIndex = sections.findIndex(section => section.kind === "references");
-  const candidateSections = referenceIndex >= 0 ? sections.slice(0, referenceIndex) : sections;
+  const candidateSections = sections.filter(section => section.kind !== "references");
   const contactText = candidateSections.map(section => section.lines.join("\n")).join("\n");
   const header = [...sections[0].lines, ...candidateSections.filter(section => /contact|personal details/i.test(section.title)).flatMap(section => section.lines)];
   const contactHeader = header.join("\n");
-  const phoneCandidates = contactHeader.match(/\+\d[\d ().-]{7,24}\d|\b(?:0|254|27|237)\d[\d ().-]{6,20}\d\b/g) ?? [];
+  const phoneCandidates = contactHeader.match(/\+\d[\d ().-]{7,24}\d|\b(?:0|254|27|237)[\s().-]*\d[\d ().-]{6,20}\d\b/g) ?? [];
   const phone = phoneCandidates.find(value => { const digits = value.replace(/\D/g, ""); return digits.length >= 10 && digits.length <= 15; });
   const linkedIn = contactText.match(/(?:^|[\s(<])((?:https?:\/\/)?(?:www\.|[a-z]{2}\.)?linkedin\.com\/in\/[a-z0-9_%.-]+)/i)?.[1] ?? "";
-  const name = contactText.match(/^(?:full\s*name|name)\s*:\s*([^\n\r|]+)/im)?.[1]?.trim() || header.slice(0, 5).map(possibleName).find(Boolean) || "";
+  const stackedName = sections[0].lines.slice(0, 5).filter(line => /^[\p{L}\p{M}'\u2019-]{2,30}$/u.test(line) && !sectionKind(line) && !roleWord.test(line));
+  const name = contactText.match(/^(?:full\s*name|name)\s*:\s*([^\n\r|]+)/im)?.[1]?.trim() || (stackedName.length >= 2 ? possibleName(stackedName.join(" ")) : "") || header.slice(0, 5).map(possibleName).find(Boolean) || "";
   const country = contactHeader.match(new RegExp(`(?:^|[,|\\s])(${countries})(?=$|[,|\\s])`, "i"))?.[1] ?? contactHeader.match(/(?:^|\n)(?:current\s+)?country\s*:\s*([^\n|]+)/i)?.[1]?.trim() ?? "";
   const locationLine = header.find(line => new RegExp(`[,|]\\s*(?:${countries})(?:$|\\s*[|])`, "i").test(line));
   const labelledCity = contactHeader.match(/(?:^|\n)(?:current\s+city|city|location|address|based in)\s*:\s*([^\n|]+)/i)?.[1]?.trim();
