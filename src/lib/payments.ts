@@ -74,7 +74,8 @@ async function getAccessToken() {
   const { consumerKey, consumerSecret } = getDarajaConfig();
   const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
   const response = await fetch(`${getDarajaBaseUrl()}/oauth/v1/generate?grant_type=client_credentials`, {
-    headers: { Authorization: `Basic ${auth}` }
+    headers: { Authorization: `Basic ${auth}` },
+    signal: AbortSignal.timeout(15000)
   });
   if (!response.ok) throw new Error("Unable to authenticate with M-Pesa Daraja.");
   const payload = (await response.json()) as { access_token: string };

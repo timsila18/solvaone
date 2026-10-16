@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { JobDeskIntakeForm } from "@/components/job-desk/intake-form";
@@ -14,6 +14,7 @@ import { applicationDeliveryCounts, applicationProgress, type DeliveryApplicatio
 import { AgentOperationsPanel } from "@/components/job-desk/agent-operations-panel";
 import { orderPagination, prioritizeOrders } from "@/lib/job-desk/order-pagination";
 import { sameOrderIdentity } from "@/lib/job-desk/related-orders";
+import { OrderSearch } from "@/components/job-desk/order-search";
 
 type QueueOrder = {
   id: string; status: string; payment_status: string; amount: number; payment_reference: string | null;
@@ -113,6 +114,7 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
         <div className="flex flex-wrap items-center gap-4 text-sm font-bold text-brand-blue"><AutomationControls action="run_queue" label="Run agent queue" /><AutomationControls action="refresh_all" label="Refresh vacancy sources" /><Link href="/dashboard/admin/job-desk/review">Needs your attention</Link><Link href="/dashboard/admin/job-desk/vacancies">Vacancies and sources</Link><Link href="/dashboard/admin">Admin dashboard</Link></div>
       </div>
 
+      <OrderSearch query={query} origin={origin} showOrigin />
       <div className="flex flex-col justify-between gap-3 border-b border-black/10 py-5 dark:border-white/10 sm:flex-row sm:items-center">
         <div><h2 className="font-black">Client submission link</h2><p className="mt-1 break-all text-sm text-black/55 dark:text-white/55">https://solvaone.co.ke/job-desk</p></div>
         <div className="flex flex-wrap items-center gap-2"><ShareIntakeLink /><Link href="/job-desk" target="_blank" className="inline-flex h-10 items-center justify-center bg-brand-blue px-4 text-sm font-bold text-white">View client form</Link></div>
@@ -137,18 +139,6 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
 
       <div className="grid items-start gap-6 py-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
         <section className="min-w-0"><h2 className="text-xl font-black">All orders</h2><p className="mt-1 text-sm text-black/50 dark:text-white/50">{totalOrders} orders · Unhandled paid orders first. Unpaid orders are visible but do not enter the service queue.</p>
-          <form key={`${query}:${origin}`} action="/dashboard/admin/job-desk" method="get" role="search" className="mt-4 flex flex-wrap items-end gap-2 text-sm">
-            <label className="min-w-48 flex-1 font-semibold">Find an order
-              <input type="search" name="q" defaultValue={query} placeholder="Client name, phone or order ID" className="mt-1 h-10 w-full border border-black/15 bg-white px-3 font-normal text-black dark:border-white/20 dark:bg-black dark:text-white" />
-            </label>
-            <label className="font-semibold">Created through
-              <select name="origin" defaultValue={origin} className="mt-1 block h-10 border border-black/15 bg-white px-3 font-normal text-black dark:border-white/20 dark:bg-black dark:text-white">
-                <option value="all">All orders</option><option value="admin">Admin form</option><option value="website">Client website</option>
-              </select>
-            </label>
-            <button type="submit" className="inline-flex h-10 w-10 items-center justify-center bg-brand-blue text-white" aria-label="Find orders" title="Find orders"><Search size={18} /></button>
-            {(query || origin !== "all") && <Link href="/dashboard/admin/job-desk" className="inline-flex h-10 items-center px-2 font-semibold text-brand-blue">Clear</Link>}
-          </form>
           <OrderPagination {...pagination} total={filteredOrders.length} shown={orders.length} query={query} origin={origin} />
           {orders.some(order => (relatedCounts.get(order.id) ?? 0) > 0) ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm" aria-label="Linked order histories">{orders.filter(order => (relatedCounts.get(order.id) ?? 0) > 0).map(order => {
             const client = Array.isArray(order.client) ? order.client[0] : order.client;
