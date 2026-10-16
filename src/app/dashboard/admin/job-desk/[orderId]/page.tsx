@@ -143,7 +143,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
             const application = Array.isArray(match.application) ? match.application[0] : match.application;
             return match.status === "needs_human" && canRetrySubmission(application);
           }).length} /> : null}
-          {isJobSearch ? <ApplicationLanes items={matches.map(match => {
+          {isJobSearch ? <ApplicationLanes key={orderId} items={matches.map(match => {
             const vacancy = Array.isArray(match.vacancy) ? match.vacancy[0] : match.vacancy;
             const application = Array.isArray(match.application) ? match.application[0] : match.application;
             return { id: match.id, title: vacancy.title, company: vacancy.company_name, status: match.status, application, outcome: application ? applicationOutcome(application) : match.status.replaceAll("_", " "), reason: application?.error_message };

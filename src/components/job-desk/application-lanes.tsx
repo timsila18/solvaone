@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { applicationLane, type ApplicationLane } from "@/lib/job-desk/application-lane";
+import { applicationLane, initialApplicationLane, type ApplicationLane } from "@/lib/job-desk/application-lane";
 import { blockerAction } from "@/lib/job-desk/application-progress";
 
 type Item = { id: string; title: string; company: string; status: string; outcome: string; reason?: string | null; application?: { status?: string; provider_response?: unknown } | null };
 const labels: Record<ApplicationLane, string> = { automatic: "Automatic processing", review: "Admin answer review", assisted: "Human-only exceptions", confirmation: "Submission outcomes" };
 
 export function ApplicationLanes({ items }: { items: Item[] }) {
-  const [lane, setLane] = useState<ApplicationLane>("automatic");
+  const [lane, setLane] = useState<ApplicationLane>(() => initialApplicationLane(items.map(applicationLane)));
   const selected = items.filter(item => applicationLane(item) === lane);
   return <section className="border-b border-black/10 pb-6 dark:border-white/10">
     <h2 className="text-xl font-black">Application pipeline</h2>
