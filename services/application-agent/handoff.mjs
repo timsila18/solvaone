@@ -70,7 +70,7 @@ export function createHandoffHandler({ jobs, directory, save, browserCommand }) 
     const job = jobs.get(id);
     if (!job) return reply(404, { error: 'No saved application attempt.' });
     if (job.result?.status === 'submitted') return reply(200, { receipt: job.result });
-    if (job.status === 'running' || locked.has(id)) return reply(409, { error: 'Browser is busy. Try again shortly.' });
+    if (['queued', 'running'].includes(job.status) || locked.has(id)) return reply(409, { error: 'Browser is busy. Try again shortly.' });
     locked.add(id);
     try {
       const dir = directory(id);

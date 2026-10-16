@@ -47,6 +47,9 @@ test('human actions become non-retryable before browser input, and only an emplo
     return result;
   }
   try {
+    job.status = 'queued';
+    assert.equal((await call('GET')).status, 409);
+    job.status = 'finished';
     assert.equal((await call('GET')).approvedCvId, 'cv-fixture');
     assert.equal((await call('POST', { action: 'type', text: 'fixture text' })).status, 200);
     assert.equal(job.result.status, 'needs_human');
