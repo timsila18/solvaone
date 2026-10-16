@@ -1,0 +1,13 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const ts = require("typescript");
+const mod = { exports: {} };
+const source = fs.readFileSync("src/lib/job-desk/application-lane.ts", "utf8");
+new Function("exports", "require", "module", ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(mod.exports, () => ({}), mod);
+const { initialApplicationLane } = mod.exports;
+assert.equal(initialApplicationLane(["review", "assisted", "confirmation", "confirmation", "confirmation"]), "confirmation");
+assert.equal(initialApplicationLane(["automatic", "confirmation"]), "automatic");
+assert.equal(initialApplicationLane(["review", "assisted"]), "review");
+assert.equal(initialApplicationLane(["assisted"]), "assisted");
+assert.equal(initialApplicationLane([]), "automatic");
+console.log("Default-lane tests passed: existing receipts are visible instead of an empty automatic lane.");

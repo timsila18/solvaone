@@ -1,6 +1,14 @@
 import { draftableQuestions, prohibitsAnswerDrafting } from "./question-policy";
 export type ApplicationLane = "automatic" | "review" | "assisted" | "confirmation";
 
+export function initialApplicationLane(lanes: ApplicationLane[]): ApplicationLane {
+  if (lanes.includes("automatic")) return "automatic";
+  if (lanes.includes("confirmation")) return "confirmation";
+  if (lanes.includes("review")) return "review";
+  if (lanes.includes("assisted")) return "assisted";
+  return "automatic";
+}
+
 type Application = { status?: string; provider_response?: unknown };
 export function applicationLane(match: { status: string; application?: Application | null }): ApplicationLane {
   const application = match.application;
