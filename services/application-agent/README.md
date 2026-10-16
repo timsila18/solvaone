@@ -96,3 +96,42 @@ Health checks prove the HTTP process responds, not successful applications.
 No Docker socket, database credentials or Resend credentials are mounted in the
 agent. Restrict server administration and establish backup and retention policy
 before processing client documents. A local deployment is for testing only.
+
+## Continuous scheduler (opt-in)
+
+The `continuous-worker` Compose profile runs a separate, serial scheduler.
+It calls the authenticated `/api/job-desk/worker/pilot` endpoint, waits for completion,
+then waits at least one minute. Failed requests back off to at most one hour.
+It does not enable paid AI, create permissions, bypass application checks or
+guarantee that a suitable vacancy exists. Human-required application notifications
+are admin-only; review them in the Job Desk review queue, not the client's inbox.
+
+Before enabling, configure a dedicated `JOB_DESK_WORKER_SECRET` (at least 32
+characters) in both the server environment and the SolvaOne web deployment.
+Do not reuse the browser-agent token. The scheduler receives only this narrow
+credential; it receives no database, mail or OpenAI credentials. Its logs contain
+HTTP status codes, never worker response bodies or candidate information.
+
+```sh
+docker compose -f services/application-agent/compose.yaml --profile continuous-worker up -d --build
+docker compose -f services/application-agent/compose.yaml logs --tail 20 scheduler
+```
+
+Keep this profile disabled until the host supports Docker, secrets are configured,
+and a controlled paid/approved-order pilot has passed. Configure a comma-separated
+`JOB_DESK_WORKER_PILOT_ORDER_IDS` allowlist in the web deployment (at most five order
+UUIDs). Empty or invalid configuration never falls back to unrestricted processing.
+The endpoint checks payment, authorization, active status and the latest approved
+CV, prioritizes lower submission counts, and skips orders at ten submissions.
+It claims one existing order task per tick. It does not automatically prepare
+new applications while AI is disabled. Only run one scheduler
+replica. Existing task/application claims remain the duplicate-send safeguards;
+this is not a distributed scheduler lease. The daily Vercel recovery cron remains.
+Persistent admin browser handoff is still separate work. The allowlist limits this
+pilot endpoint only; it does not disable existing admin actions or the daily cron.
+
+Fixture tests (no employer calls):
+
+```sh
+node --test services/application-agent/scheduler.test.mjs
+```

@@ -7,6 +7,7 @@ export type ClientUpdate = "cv_review" | "cv_approved" | "matches_ready" | "appl
 const clientUpdateEvents = new Set<ClientUpdate>(["cv_review", "cv_approved", "matches_ready", "application_submitted", "application_needs_action", "application_delivered", "application_delivery_failed", "application_report"]);
 
 export async function queueClientUpdate(orderId: string, event: ClientUpdate, reference: string) {
+  if (event === "application_needs_action") return;
   return enqueueTask("notify_client", `client-update:${event}:${reference}`, orderId, { event, reference });
 }
 
@@ -34,6 +35,7 @@ export function clientUpdateContent(event: ClientUpdate, name: string, role?: st
 
 export async function sendClientUpdate(orderId: string, event: ClientUpdate, reference: string) {
   if (!clientUpdateEvents.has(event)) throw new Error("Unknown Job Desk client update event.");
+  if (event === "application_needs_action") return { skipped: true, event, reason: "Human-required application steps are handled by the administrator in Job Desk." };
   const db = createSupabaseAdminClient();
   if (event === "cv_review" || event === "cv_approved") {
     const { data: latest, error: cvError } = await db.from("job_desk_documents").select("id,status").eq("order_id", orderId).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();

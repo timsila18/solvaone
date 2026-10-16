@@ -1,5 +1,28 @@
 name: solvaone-application-agent
 services:
+  scheduler:
+    image: node:24-bookworm-slim
+    profiles: [continuous-worker]
+    restart: unless-stopped
+    user: node
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, /app/scheduler.mjs]
+    environment:
+      JOB_DESK_WORKER_URL: ${JOB_DESK_WORKER_URL:-https://solvaone.co.ke/api/job-desk/worker/pilot}
+      JOB_DESK_WORKER_SECRET_FILE: /run/secrets/worker_secret
+      JOB_DESK_WORKER_INTERVAL_MS: '60000'
+    secrets:
+      - worker_secret
+    volumes:
+      - ./scheduler.mjs:/app/scheduler.mjs:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
   agent:
     image: solvaone-application-agent:latest
     build:
@@ -40,6 +63,8 @@ services:
       agent:
         condition: service_healthy
 secrets:
+  worker_secret:
+    environment: JOB_DESK_WORKER_SECRET
   agent_token:
     environment: APPLICATION_AGENT_TOKEN
 volumes:
