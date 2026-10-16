@@ -18,6 +18,7 @@ import { careerCatalogueUrls } from "./career-discovery";
 import { adjacentRoleTitles, searchLane, searchLanePlan } from "./search-lanes";
 import { poolRank, refreshReadyPool, type Readiness } from "./ready-pool";
 import { AI_DEPENDENT_TASKS, jobDeskAiEnabled } from "./ai-policy";
+import { localPilotTask } from "./worker-pilot";
 
 export type Vacancy = { id: string; source_id?: string; application_readiness?: Readiness; provider?: string; title: string; company_name: string; location: string; workplace_type: string; description: string; status: string; application_method: string; application_email: string | null; email_verified: boolean; apply_url: string };
 
@@ -26,7 +27,7 @@ export function plainText(html: string) {
 }
 
 export async function enqueueTask(taskType: string, key: string, orderId: string | null, payload: Record<string, unknown> = {}) {
-  if (!jobDeskAiEnabled() && AI_DEPENDENT_TASKS.has(taskType)) return undefined;
+  if (!jobDeskAiEnabled() && AI_DEPENDENT_TASKS.has(taskType) && !localPilotTask(taskType, orderId)) return undefined;
   const db = createSupabaseAdminClient();
   const { data, error } = await db.from("job_desk_tasks").upsert({ task_type: taskType, deduplication_key: key, order_id: orderId, payload }, { onConflict: "deduplication_key", ignoreDuplicates: true }).select("id").maybeSingle();
   if (taskType === "match" && orderId && error?.code === "23505" && error.message.includes("job_desk_tasks_one_active_match_per_order_idx")) {

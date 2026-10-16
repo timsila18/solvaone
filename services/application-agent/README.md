@@ -123,8 +123,13 @@ and a controlled paid/approved-order pilot has passed. Configure a comma-separat
 UUIDs). Empty or invalid configuration never falls back to unrestricted processing.
 The endpoint checks payment, authorization, active status and the latest approved
 CV, prioritizes lower submission counts, and skips orders at ten submissions.
-It claims one existing order task per tick. It does not automatically prepare
-new applications while AI is disabled. Only run one scheduler
+It claims one existing order task per tick. For allowlisted orders it can prepare
+a fixed factual letter for previously suitability-reviewed matches without AI.
+The letter makes no inferred skills/experience claims and its audit marker binds
+it to the current CV ID and content. Sending recomputes that marker and checks
+the exact letter before accepting it in place of the AI-review record. A changed
+CV invalidates the letter. AI matching, CV generation and answer drafting remain
+disabled. Only run one scheduler
 replica. Existing task/application claims remain the duplicate-send safeguards;
 this is not a distributed scheduler lease. The daily Vercel recovery cron remains.
 Persistent admin browser handoff is still separate work. The allowlist limits this
