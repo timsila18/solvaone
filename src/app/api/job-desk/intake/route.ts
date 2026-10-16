@@ -102,7 +102,7 @@ export async function POST(request: Request) {
   const hasCv = cv instanceof File && cv.size > 0;
   const files = [...(hasCv ? [{ file: cv, kind: "cv" as const }] : []), ...supportingFiles.map((file) => ({ file, kind: "supporting" as const }))];
   if (supportingFiles.length > 2 || files.some(({ file }) => file.size > MAX_INTAKE_FILE_SIZE) || files.reduce((sum, { file }) => sum + file.size, 0) > MAX_INTAKE_TOTAL_SIZE) {
-    return NextResponse.json({ error: "Upload one CV and up to two supporting files, each under 10MB and 20MB in total." }, { status: 400 });
+    return NextResponse.json({ error: "Upload one CV and up to two certificate files, each under 10MB and 20MB in total." }, { status: 400 });
   }
   let refs: IntakeUploadRef[] = [];
   if (parsed.data.uploadRefs) {
