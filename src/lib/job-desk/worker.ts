@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createOpenAIClient } from "@/lib/openai";
+import { AI_DEPENDENT_TASKS, isAiQuotaError, jobDeskAiEnabled } from "./ai-policy";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { logSystemEvent } from "@/lib/security";
@@ -414,13 +415,14 @@ export async function runJobDeskWorker({ maxTasks = 10, maxRunMs = 45000, orderI
       });
     }, 60_000);
     try {
-      const result = await processTask(task);
-      const { error: finishError } = await db.from("job_desk_tasks").update({ status: "succeeded", result, last_error: null, locked_at: null, lease_until: null, locked_by: null }).eq("id", task.id).eq("locked_by", workerId);
+      const paused = !jobDeskAiEnabled() && AI_DEPENDENT_TASKS.has(task.task_type);
+      const result = paused ? { outcome: "manual_review", reason: "Manual processing enabled; no OpenAI API call was made." } : await processTask(task);
+      const { error: finishError } = await db.from("job_desk_tasks").update({ status: paused ? "cancelled" : "succeeded", result, last_error: null, locked_at: null, lease_until: null, locked_by: null }).eq("id", task.id).eq("locked_by", workerId);
       if (finishError) throw new Error(finishError.message);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message.slice(0, 1000) : "Task failed";
       const permanentEmailFailure = task.task_type === "notify_client" && /client update \((?:400|401|403)\)/.test(message);
-      await db.from("job_desk_tasks").update({ status: permanentEmailFailure || task.attempts >= task.max_attempts ? "failed" : "queued", last_error: message, available_at: new Date(Date.now() + Math.min(3600000, 30000 * 2 ** task.attempts)).toISOString(), locked_at: null, lease_until: null, locked_by: null }).eq("id", task.id).eq("locked_by", workerId);
+      await db.from("job_desk_tasks").update({ status: permanentEmailFailure || isAiQuotaError(cause) || task.attempts >= task.max_attempts ? "failed" : "queued", last_error: message, available_at: new Date(Date.now() + Math.min(3600000, 30000 * 2 ** task.attempts)).toISOString(), locked_at: null, lease_until: null, locked_by: null }).eq("id", task.id).eq("locked_by", workerId);
     } finally {
       clearInterval(heartbeat);
     }

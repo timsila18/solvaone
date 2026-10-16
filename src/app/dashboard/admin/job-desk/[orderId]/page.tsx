@@ -30,6 +30,8 @@ import { ClientProgress } from "@/components/job-desk/client-progress";
 import { deliveryStage } from "@/lib/job-desk/application-progress";
 import { OrderRefresh } from "@/components/job-desk/order-refresh";
 import { AgentPhase } from "@/components/job-desk/agent-phase";
+import { jobDeskAiEnabled } from "@/lib/job-desk/ai-policy";
+import { ManualCvForm } from "@/components/job-desk/manual-cv-form";
 
 type Question = { id: string; category: string; question: string; reason: string; required?: boolean };
 
@@ -43,7 +45,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
 
   const [{ data: order, error: orderError }, { data: files }, { data: document }, { data: questionnaire }, { data: aiRun }, { data: rawMatches }, { data: tasks }, { data: openVacancies }, { data: recordedApplications, error: applicationError }] = await Promise.all([
     db.from("job_desk_orders").select("*, client:job_desk_clients(*)").eq("id", orderId).single(),
-    db.from("job_desk_intake_files").select("id,file_name,document_kind,extraction_status,extraction_warning,created_at").eq("order_id", orderId).order("created_at", { ascending: true }),
+    db.from("job_desk_intake_files").select("id,file_name,document_kind,extracted_text,extraction_status,extraction_warning,created_at").eq("order_id", orderId).order("created_at", { ascending: true }),
     db.from("job_desk_documents").select("id,title,html,status,version,structured_content,created_at").eq("order_id", orderId).eq("document_type", "revamped_cv").neq("status", "superseded").order("version", { ascending: false }).limit(1).maybeSingle(),
     db.from("job_desk_questionnaires").select("questions,status,responses").eq("order_id", orderId).maybeSingle(),
     db.from("job_desk_ai_runs").select("status,total_tokens,estimated_cost,error_message,output_payload,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -106,11 +108,13 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
       <OrderRefresh active={["intake", "cv_review", "approved", "active"].includes(order.status)} />
       <div className="flex flex-col justify-between gap-5 border-b border-black/10 pb-6 dark:border-white/10 lg:flex-row lg:items-end">
         <div><a href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Hunting / Orders</a><h1 className="mt-2 text-3xl font-black">{client?.full_name ?? "Client order"}</h1><p className="mt-2 text-sm text-black/55 dark:text-white/55">{order.service_type.replaceAll("_", " ")} · {client?.whatsapp_phone} · {order.status.replaceAll("_", " ")}</p></div>
-        <JobDeskOrderActions key={order.status} orderId={orderId} canProcess={isCvService && file?.extraction_status === "succeeded" && order.status !== "cv_processing"} canApprove={isCvService && document?.status === "review"} currentStatus={order.status} paymentStatus={order.payment_status} paymentNeedsReview={paymentNeedsReview} showCvActions={isCvService} />
+        <JobDeskOrderActions key={order.status} orderId={orderId} canProcess={isCvService && file?.extraction_status === "succeeded" && order.status !== "cv_processing"} canApprove={isCvService && document?.status === "review"} currentStatus={order.status} paymentStatus={order.payment_status} paymentNeedsReview={paymentNeedsReview} showCvActions={isCvService} manualFirst={!jobDeskAiEnabled()} />
       </div>
       {paymentNeedsReview ? <p role="alert" className="mt-5 border-l-4 border-brand-blue bg-brand-blue/5 p-4 text-sm font-semibold">This order is marked paid without a positive amount and receipt reference. Verify the payment record before treating it as confirmed.</p> : null}
       {isJobSearch && document?.status !== "approved" ? <p role="alert" className="mt-5 border-l-4 border-brand-blue bg-brand-blue/5 p-4 text-sm font-semibold">{document?.status === "review" ? "The CV is ready for your review. Check it below and click Approve CV to start job matching." : "No approved CV is attached to this order. Prepare the CV and profile first, then review and approve it. The order status alone does not approve the CV."}</p> : null}
-      {isJobSearch ? <AgentPhase tasks={tasks ?? []} eligible={document?.status === "approved" && !paymentNeedsReview && order.payment_status === "paid" && Boolean(applicationScope)} /> : null}
+      {!jobDeskAiEnabled() ? <p className="mt-4 text-sm font-semibold">Manual processing enabled. Automatic AI preparation, matching and drafting are paused.</p> : null}
+      {isCvService && document?.status !== "approved" ? <ManualCvForm orderId={orderId} sourceText={file?.extracted_text ?? ""} /> : null}
+      {isJobSearch && jobDeskAiEnabled() ? <AgentPhase tasks={tasks ?? []} eligible={document?.status === "approved" && !paymentNeedsReview && order.payment_status === "paid" && Boolean(applicationScope)} /> : null}
       {isJobSearch ? <ClientProgress matches={matches} shortlist={shortlist} applications={recordedApplications ?? []} /> : null}
 
       <div className="grid gap-6 py-7 xl:grid-cols-[340px_minmax(0,1fr)]">

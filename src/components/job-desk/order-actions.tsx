@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentStatus, paymentStatus, paymentNeedsReview = false, showCvActions = true }: { orderId: string; canProcess: boolean; canApprove: boolean; currentStatus: string; paymentStatus: string; paymentNeedsReview?: boolean; showCvActions?: boolean }) {
+export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentStatus, paymentStatus, paymentNeedsReview = false, showCvActions = true, manualFirst = false }: { orderId: string; canProcess: boolean; canApprove: boolean; currentStatus: string; paymentStatus: string; paymentNeedsReview?: boolean; showCvActions?: boolean; manualFirst?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"process" | "approve" | "status" | "payment" | null>(null);
   const [message, setMessage] = useState("");
@@ -74,7 +74,7 @@ export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentSt
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      {showCvActions ? <Button onClick={() => run("process")} disabled={!canProcess || busy !== null}>
+      {showCvActions && !manualFirst ? <Button onClick={() => run("process")} disabled={!canProcess || busy !== null}>
         {busy === "process" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Prepare CV and profile
       </Button> : null}

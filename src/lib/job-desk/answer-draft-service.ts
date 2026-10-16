@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createOpenAIClient } from "@/lib/openai";
+import { jobDeskAiEnabled } from "./ai-policy";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { hasVerifiedJobDeskPayment } from "./payment";
 import { applicationScopeHold, readApplicationScope } from "./application-scope";
@@ -49,6 +50,7 @@ export async function loadDraftContext(orderId: string, matchId: string) {
 }
 
 export async function processAnswerDrafts(orderId: string, matchId: string) {
+  if (!jobDeskAiEnabled()) throw new Error("Enter verified answers manually while automatic AI processing is paused.");
   const context = await loadDraftContext(orderId, matchId);
   const { db, cv, fingerprint, questions, facts, advert } = context;
   const { data: previous, error: previousError } = await db.from("job_desk_ai_runs").select("id,status,started_at,token_input,token_output,output_payload").eq("order_id", orderId).eq("operation", ANSWER_DRAFT_OPERATION).eq("input_payload->>purpose", ANSWER_DRAFT_PURPOSE).eq("input_fingerprint", fingerprint).maybeSingle();

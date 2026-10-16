@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { zodTextFormat } from "openai/helpers/zod";
 import { createOpenAIClient } from "@/lib/openai";
+import { isAiQuotaError, jobDeskAiEnabled } from "./ai-policy";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -10,6 +11,7 @@ type Candidate = { id: string; title: string; company_name: string; location: st
 
 export async function reviewCandidateMatches(orderId: string, profile: Record<string, unknown>, vacancies: Candidate[]) {
   if (!vacancies.length) return new Map<string, { suitable: boolean; reason: string }>();
+  if (!jobDeskAiEnabled()) throw new Error("Automatic suitability review is paused. Review jobs manually.");
   const db = createSupabaseAdminClient();
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
   const result = new Map<string, { suitable: boolean; reason: string }>();
@@ -70,6 +72,7 @@ export async function reviewCandidateMatches(orderId: string, profile: Record<st
           return result;
         }
         // Salvage independently verified listings rather than discarding the entire search.
+        if (isAiQuotaError(cause)) throw cause;
         if (batch.length > 1) {
           for (const vacancy of batch) {
             const isolated = await reviewCandidateMatches(orderId, profile, [vacancy]);
