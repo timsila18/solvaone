@@ -7,6 +7,7 @@ import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
 import { submissionOriginCounts, distinctSuccessfulDeliveries } from "@/lib/job-desk/application-progress";
 import { workerPilotOrders } from "@/lib/job-desk/worker-pilot";
 import { jobDeskAiEnabled } from "@/lib/job-desk/ai-policy";
+import { OrderSearch } from "@/components/job-desk/order-search";
 
 export default async function JobDeskReviewPage({ searchParams }: { searchParams: Promise<{ humanPage?: string }> }) {
   const user = await getCurrentUser();
@@ -53,6 +54,7 @@ export default async function JobDeskReviewPage({ searchParams }: { searchParams
     <Link href="/dashboard/admin/job-desk" className="text-sm font-bold text-brand-blue">Job Hunting</Link>
     <h1 className="mt-2 text-3xl font-black">Needs your attention</h1>
     <p className="mt-2 text-sm text-black/60 dark:text-white/60">Work from top to bottom. Automated processing continues for the rest of the queue.</p>
+    <OrderSearch />
     <div className="mt-7 space-y-8">
       <ReviewSection title="Low-cost worker pilot" count={pilotIds.length} empty="Pilot is not configured.">
         <p className="py-3 text-sm">Paid AI: {jobDeskAiEnabled() ? "Enabled" : "Disabled"}. Target: 10 submissions per order.</p>

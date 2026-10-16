@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, CreditCard, Loader2 } from "lucide-react";
+import { CheckCircle2, CreditCard, Loader2, Plus, RefreshCw } from "lucide-react";
 import { Input, Textarea } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { jobDeskServices, type PublicJobDeskService } from "@/lib/job-desk/services";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { BroaderRoleFields } from "./broader-role-fields";
+import { clearCheckoutSession, paymentPollDelay, paymentPollingFinished, readCheckoutSession, saveCheckoutSession } from "@/lib/job-desk/checkout-session";
 
 type PaymentState = "ready" | "initiating" | "processing" | "successful" | "failed" | "cancelled" | "timed_out" | "needs_review";
 const supportUrl = "https://wa.me/254721537597";
@@ -22,28 +23,33 @@ export function PublicJobDeskIntakeForm() {
   const [status, setStatus] = useState<PaymentState>("initiating");
   const [needsReadableCv, setNeedsReadableCv] = useState(false);
   const autoPromptStarted = useRef(false);
+  const checkoutTokenRef = useRef("");
+  const [pollVersion, setPollVersion] = useState(0);
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(sessionStorage.getItem("solva-job-desk-checkout") ?? "null");
-      if (typeof saved?.token === "string") { setToken(saved.token); if (typeof saved.reference === "string") setReference(saved.reference); }
-    } catch { sessionStorage.removeItem("solva-job-desk-checkout"); }
+      const saved = readCheckoutSession(sessionStorage);
+      if (saved) { checkoutTokenRef.current = saved.token; setToken(saved.token); if (saved.reference) setReference(saved.reference); }
+    } catch { /* Browser storage is optional. */ }
   }, []);
 
   useEffect(() => {
     if (!token) return;
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
     const poll = async () => {
+      let finished = false;
       try {
         const response = await fetch("/api/job-desk/payment-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }), cache: "no-store" });
         const result = await response.json();
-        if (active && response.ok) { setReference(result.reference); setStatus(result.paymentStatus); if (result.message) setError(result.message); }
+        if (active && response.ok) { setReference(result.reference); setStatus(result.paymentStatus); if (result.message) setError(result.message); finished = paymentPollingFinished(result.paymentStatus); }
       } catch { /* Retry on next poll. */ }
+      if (active && !finished && attempts < 60) timer = setTimeout(poll, paymentPollDelay(attempts++));
     };
     void poll();
-    const interval = setInterval(poll, 4000);
-    return () => { active = false; clearInterval(interval); };
-  }, [token]);
+    return () => { active = false; if (timer) clearTimeout(timer); };
+  }, [token, pollVersion]);
 
   useEffect(() => {
     if (!token || !reference || status !== "ready" || autoPromptStarted.current) return;
@@ -58,6 +64,7 @@ export function PublicJobDeskIntakeForm() {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error ?? "Could not send the M-Pesa prompt.");
       setStatus(result.status);
+      setPollVersion(value => value + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not send the M-Pesa prompt.");
       try {
@@ -73,10 +80,11 @@ export function PublicJobDeskIntakeForm() {
     let accessToken = "";
     try {
       let saved: { token?: string } | null = null;
-      try { saved = JSON.parse(sessionStorage.getItem("solva-job-desk-checkout") ?? "null"); } catch { /* Start a fresh checkout. */ }
-      accessToken = typeof saved?.token === "string" && /^[A-Za-z0-9_-]{40,80}$/.test(saved.token) ? saved.token : `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`;
+      try { saved = readCheckoutSession(sessionStorage); } catch { /* Use the in-memory reference. */ }
+      accessToken = checkoutTokenRef.current || saved?.token || `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "")}`;
+      checkoutTokenRef.current = accessToken;
       formData.set("checkoutToken", accessToken);
-      sessionStorage.setItem("solva-job-desk-checkout", JSON.stringify({ token: accessToken }));
+      try { saveCheckoutSession(sessionStorage, { token: accessToken }); } catch { /* Storage is optional. */ }
       const cv = formData.get("cvFile");
       const documents = [
         ...(cv instanceof File && cv.size ? [{ file: cv, kind: "cv" as const, index: 0 }] : []),
@@ -102,7 +110,7 @@ export function PublicJobDeskIntakeForm() {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error ?? (response.status === 413 ? "The documents are too large. Each must be under 10 MB, with no more than 20 MB total." : `We could not start your request (error ${response.status}). Please retry or contact support.`));
       if (!result.accessToken || !result.reference) throw new Error("The order service did not return a reference. Please contact support before trying again so we can check whether an order was created.");
-      sessionStorage.setItem("solva-job-desk-checkout", JSON.stringify({ token: result.accessToken, reference: result.reference }));
+      try { saveCheckoutSession(sessionStorage, { token: result.accessToken, reference: result.reference }); } catch { /* Storage is optional. */ }
       setToken(result.accessToken); setReference(result.reference); setStatus(result.paymentStatus);
       setNeedsReadableCv(Boolean(result.needsReadableCv));
     } catch (cause) {
@@ -112,7 +120,7 @@ export function PublicJobDeskIntakeForm() {
         const response = await fetch("/api/job-desk/payment-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: accessToken }) });
         if (response.ok) {
           const result = await response.json();
-          sessionStorage.setItem("solva-job-desk-checkout", JSON.stringify({ token: accessToken, reference: result.reference }));
+          try { saveCheckoutSession(sessionStorage, { token: accessToken, reference: result.reference }); } catch { /* Storage is optional. */ }
           setToken(accessToken); setReference(result.reference); setStatus(result.paymentStatus); setError("");
         }
       } catch { /* Keep the form and its values available for a safe retry. */ }
@@ -124,6 +132,14 @@ export function PublicJobDeskIntakeForm() {
     await startPayment(token);
   }
 
+  function startAnotherRequest() {
+    if (status !== "successful" || busy) return;
+    try { clearCheckoutSession(sessionStorage); } catch { /* Storage is optional. */ }
+    checkoutTokenRef.current = "";
+    autoPromptStarted.current = false;
+    setToken(""); setReference(""); setStatus("initiating"); setError(""); setNeedsReadableCv(false);
+  }
+
   if (reference) return <section className="border-t-4 border-brand-blue py-10" role="status">
     {status === "successful" ? <CheckCircle2 className="h-10 w-10 text-brand-blue" /> : <CreditCard className="h-10 w-10 text-brand-blue" />}
     <h2 className="mt-5 text-2xl font-black">{status === "successful" ? "Payment confirmed. Request received." : "Complete your M-Pesa payment"}</h2>
@@ -131,7 +147,11 @@ export function PublicJobDeskIntakeForm() {
     <p className="mt-2 max-w-xl text-sm leading-6 text-black/65 dark:text-white/65">{status === "successful" ? "Our admin will get back to you within 6 hours. We will work only within the application preferences you authorized." : status === "processing" ? "Check your phone for the STK prompt and enter your M-Pesa PIN. We will confirm payment here automatically." : status === "ready" ? "Your request is saved. We are sending the M-Pesa prompt now." : status === "initiating" ? "We are checking the M-Pesa prompt. Do not pay twice; contact us if it does not arrive." : status === "needs_review" ? "Your payment needs verification. Contact us with your M-Pesa receipt; do not pay again." : "Payment was not confirmed. You can retry the M-Pesa prompt below."}</p>
     {needsReadableCv ? <p className="mt-3 text-sm">Your old DOC file may need a readable DOCX or PDF copy. We will contact you if necessary.</p> : null}
     {error ? <p role="alert" className="mt-4 text-sm font-semibold text-brand-blue">{error}</p> : null}
-    <div className="mt-6 flex flex-wrap gap-3">{["ready", "failed", "cancelled", "timed_out"].includes(status) && !busy ? <Button type="button" onClick={retry}><CreditCard className="h-4 w-4" />Retry M-Pesa</Button> : null}<a className="inline-flex h-11 items-center rounded border border-brand-blue px-5 text-sm font-bold text-brand-blue" href={supportUrl} target="_blank" rel="noreferrer">WhatsApp 0721537597</a></div>
+    <div className="mt-6 flex flex-wrap gap-3">
+      {["ready", "failed", "cancelled", "timed_out"].includes(status) && !busy ? <Button type="button" onClick={retry}><CreditCard className="h-4 w-4" />Retry M-Pesa</Button> : null}
+      {status !== "successful" ? <Button type="button" variant="secondary" disabled={busy} onClick={() => setPollVersion(value => value + 1)}><RefreshCw className="h-4 w-4" />Check payment status</Button> : <Button type="button" onClick={startAnotherRequest}><Plus className="h-4 w-4" />Start another request</Button>}
+      <a className="inline-flex h-11 items-center rounded border border-brand-blue px-5 text-sm font-bold text-brand-blue" href={supportUrl} target="_blank" rel="noreferrer">WhatsApp 0721537597</a>
+    </div>
   </section>;
 
   return <form action={submit} className="space-y-9">

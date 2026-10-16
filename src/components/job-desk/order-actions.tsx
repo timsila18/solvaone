@@ -78,6 +78,10 @@ export function JobDeskOrderActions({ orderId, canProcess, canApprove, currentSt
         {busy === "process" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Prepare CV and profile
       </Button> : null}
+      {showCvActions && manualFirst ? <Button variant="secondary" disabled={!canProcess || busy !== null} onClick={() => {
+        const editor = document.getElementById("cv-preparation");
+        if (editor instanceof HTMLDetailsElement) { editor.open = true; editor.scrollIntoView({ behavior: "smooth", block: "start" }); }
+      }}><Sparkles className="h-4 w-4" />Prepare CV</Button> : null}
       {showCvActions ? <Button variant="secondary" onClick={() => run("approve")} disabled={!canApprove || busy !== null}>
         {busy === "approve" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
         Approve CV

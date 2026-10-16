@@ -26,8 +26,8 @@ export function ManualCvForm({ orderId, sourceText }: { orderId: string; sourceT
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Could not save CV."); }
     finally { setBusy(false); }
   }
-  return <details className="my-5 border-y border-black/10 py-4 dark:border-white/10">
-    <summary className="cursor-pointer font-bold">Prepare CV manually</summary>
+  return <details id="cv-preparation" open className="my-5 scroll-mt-24 border-y border-black/10 py-4 dark:border-white/10">
+    <summary className="cursor-pointer font-bold">Prepare CV</summary>
     {sourceText ? <details className="mt-4"><summary className="cursor-pointer text-sm font-semibold">Uploaded CV text</summary><pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm">{sourceText}</pre></details> : null}
     <form onSubmit={(event) => { event.preventDefault(); if (!busy) void save(new FormData(event.currentTarget)); }} className="mt-4 grid gap-4 md:grid-cols-2">
       {([ ["summary", "Professional summary"], ["skills", "Skills"], ["experience", "Experience and achievements"], ["education", "Education and certifications"], ["additional", "Additional CV information"] ] as const).map(([name, label]) => <label key={name} className="min-w-0 text-sm font-semibold">{label}<textarea name={name} defaultValue={sections[name]} required={name !== "additional"} minLength={20} maxLength={name === "experience" ? 30000 : name === "additional" ? 20000 : 10000} rows={6} className="mt-1 w-full rounded border border-black/20 bg-transparent p-3 font-normal dark:border-white/20" /></label>)}

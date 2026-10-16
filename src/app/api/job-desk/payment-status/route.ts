@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   const host = request.headers.get("host");
   if (origin && (!host || new URL(origin).host !== host)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const limited = checkRateLimit(`job-desk-status:${clientIpFromHeaders(request.headers)}`, 120, 60 * 60 * 1000);
+  const limited = checkRateLimit(`job-desk-status:${clientIpFromHeaders(request.headers)}`, 600, 60 * 60 * 1000);
   if (!limited.allowed) return rateLimitResponse(limited.resetAt);
   const body = await request.json().catch(() => ({}));
   const token = typeof body.token === "string" ? body.token : "";
