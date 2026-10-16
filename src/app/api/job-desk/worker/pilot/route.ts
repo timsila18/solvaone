@@ -39,17 +39,21 @@ export async function GET(request: Request) {
     // Rotate equal-progress clients by time so a difficult order cannot monopolize the pilot.
     const rotation = Math.floor(Date.now() / 60000) % Math.max(1, candidates.length);
     const rotated = [...candidates.slice(rotation), ...candidates.slice(0, rotation)].sort((a, b) => a.submitted - b.submitted);
-    const selected = rotated[0];
-    if (selected) {
+    let selected: { id: string; submitted: number } | undefined;
+    for (const candidate of rotated) {
       const { data: matches, error: matchError } = await db.from("job_desk_matches")
-        .select("id,status,reasons").eq("order_id", selected.id).in("status", ["suggested", "ready", "authorized"])
+        .select("id,status,reasons").eq("order_id", candidate.id).in("status", ["suggested", "ready", "authorized"])
         .order("created_at").limit(30);
       if (matchError) throw matchError;
       // Local preparation never invents suitability: only previously reviewed matches proceed.
       const reviewed = (matches ?? []).filter(match => Array.isArray(match.reasons) && match.reasons.some((reason: string) => reason.startsWith("Suitability review:")));
       for (const match of reviewed.slice(0, 3)) {
-        await enqueueTask(match.status === "authorized" ? "submit" : "prepare", `local-pilot:${match.id}:${Math.floor(Date.now() / 3600000)}`, selected.id, { matchId: match.id });
+        await enqueueTask(match.status === "authorized" ? "submit" : "prepare", `local-pilot:${match.id}:${Math.floor(Date.now() / 3600000)}`, candidate.id, { matchId: match.id });
       }
+      const { count, error: taskError } = await db.from("job_desk_tasks").select("id", { count: "exact", head: true })
+        .eq("order_id", candidate.id).eq("status", "queued").lte("available_at", new Date().toISOString());
+      if (taskError) throw taskError;
+      if (count) { selected = candidate; break; }
     }
     const processed = selected ? await runJobDeskWorker({ orderId: selected.id, maxTasks: 1, maxRunMs: 240000 }) : 0;
     return NextResponse.json({ processed, eligible: candidates.length, target: 10 });
