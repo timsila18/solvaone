@@ -33,14 +33,16 @@ export async function startJobDeskPayment(orderId: string) {
   if (order.status !== "awaiting_payment") throw new Error("This request is not awaiting payment.");
   const client = Array.isArray(order.client) ? order.client[0] : order.client;
   const phone = normalizeSafaricomPhone(client?.whatsapp_phone ?? "");
-  const { data: last } = await db.from("job_desk_payment_attempts").select("id,status,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: last, error: lastError } = await db.from("job_desk_payment_attempts").select("id,status,created_at").eq("order_id", orderId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (lastError) throw new Error("Payment status could not be checked. No new prompt was sent.");
   if (last?.status === "initiating" && Date.now() - Date.parse(last.created_at) > 120_000) {
     await db.from("job_desk_payment_attempts").update({ status: "needs_review", result_description: "Prompt outcome could not be confirmed. Verify before retrying." }).eq("id", last.id).eq("status", "initiating");
     return { status: "needs_review" as const };
   }
   if (last && ["initiating", "processing", "needs_review"].includes(last.status)) return { status: last.status as "initiating" | "processing" | "needs_review" };
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const { count } = await db.from("job_desk_payment_attempts").select("id", { count: "exact", head: true }).eq("order_id", orderId).gte("created_at", since);
+  const { count, error: countError } = await db.from("job_desk_payment_attempts").select("id", { count: "exact", head: true }).eq("order_id", orderId).gte("created_at", since);
+  if (countError) throw new Error("Payment attempts could not be checked. No new prompt was sent.");
   if ((count ?? 0) >= 5) throw new Error("Too many payment attempts. Contact support before trying again.");
   const { data: attempt, error: createError } = await db.from("job_desk_payment_attempts").insert({ order_id: orderId, amount: service.price, phone_number: phone, status: "initiating" }).select("id").single();
   if (createError?.code === "23505") return { status: "processing" as const };
@@ -54,6 +56,7 @@ export async function startJobDeskPayment(orderId: string) {
     await db.from("job_desk_payment_events").insert({ attempt_id: attempt.id, event_type: "stk_accepted", details: { checkout_request_id: stk.checkoutRequestId } });
     return { status: "processing" as const };
   } catch (cause) {
+    if (!promptSent && cause instanceof Error && /status is unknown/i.test(cause.message)) await db.from("job_desk_payment_attempts").update({ status: "needs_review", result_description: cause.message.slice(0, 300) }).eq("id", attempt.id).eq("status", "initiating");
     if (!promptSent && cause instanceof Error && /^(M-Pesa rejected|Daraja credentials are not configured|Unable to authenticate with M-Pesa Daraja)/.test(cause.message)) await db.from("job_desk_payment_attempts").update({ status: "failed", result_description: cause.message.slice(0, 300) }).eq("id", attempt.id).eq("status", "initiating");
     await db.from("job_desk_payment_events").insert({ attempt_id: attempt.id, event_type: promptSent ? "stk_tracking_error" : "stk_initiation_error" });
     throw cause;

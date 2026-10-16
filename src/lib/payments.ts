@@ -64,9 +64,10 @@ export async function requestJobDeskStkPush(input: { phone: string; amount: numb
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ BusinessShortCode: shortcode, Password: Buffer.from(`${shortcode}${passkey}${ts}`).toString("base64"), Timestamp: ts, TransactionType: "CustomerPayBillOnline", Amount: input.amount, PartyA: phone, PartyB: shortcode, PhoneNumber: phone, CallBackURL: callbackUrl, AccountReference: `JD-${input.orderId.slice(0, 8)}`, TransactionDesc: input.description.slice(0, 50) }),
     signal: AbortSignal.timeout(20000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.ResponseCode !== "0" || !data.CheckoutRequestID) throw new Error(`M-Pesa rejected the request: ${data.errorMessage ?? data.ResponseDescription ?? "Prompt could not be sent."}`);
+  }).catch(() => { throw new Error("M-Pesa request status is unknown. Check your phone and contact support before paying again."); });
+  const data = await response.json().catch(() => null);
+  if (!data || response.status >= 500 || (response.ok && data.ResponseCode == null) || (data.ResponseCode === "0" && !data.CheckoutRequestID)) throw new Error("M-Pesa request status is unknown. Check your phone and contact support before paying again.");
+  if (!response.ok || data.ResponseCode !== "0") throw new Error(`M-Pesa rejected the request: ${data.errorMessage ?? data.ResponseDescription ?? "Prompt could not be sent."}`);
   return { checkoutRequestId: String(data.CheckoutRequestID), merchantRequestId: String(data.MerchantRequestID ?? "") };
 }
 
@@ -75,10 +76,12 @@ async function getAccessToken() {
   const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
   const response = await fetch(`${getDarajaBaseUrl()}/oauth/v1/generate?grant_type=client_credentials`, {
     headers: { Authorization: `Basic ${auth}` },
-    signal: AbortSignal.timeout(15000)
-  });
+    signal: AbortSignal.timeout(15000),
+    cache: "no-store"
+  }).catch(() => { throw new Error("Unable to authenticate with M-Pesa Daraja. No payment prompt was sent; please retry shortly."); });
   if (!response.ok) throw new Error("Unable to authenticate with M-Pesa Daraja.");
-  const payload = (await response.json()) as { access_token: string };
+  const payload = (await response.json().catch(() => null)) as { access_token?: string } | null;
+  if (!payload?.access_token || typeof payload.access_token !== "string") throw new Error("Unable to authenticate with M-Pesa Daraja. No payment prompt was sent; please retry shortly.");
   return payload.access_token;
 }
 
