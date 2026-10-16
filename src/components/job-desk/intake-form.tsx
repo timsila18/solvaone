@@ -6,6 +6,7 @@ import { BriefcaseBusiness, Loader2, ScanText, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { BroaderRoleFields } from "./broader-role-fields";
+import type { LocalCvSections } from "@/lib/job-desk/local-cv-reader";
 
 const selectClass = "h-11 w-full rounded-lg border border-black/10 bg-white px-3 text-sm outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-white/15 dark:bg-white/10";
 
@@ -16,6 +17,9 @@ export function JobDeskIntakeForm() {
   const [reading, setReading] = useState(false);
   const [previewMessage, setPreviewMessage] = useState("");
   const [cvSourceText, setCvSourceText] = useState("");
+  const [cvSections, setCvSections] = useState<Partial<LocalCvSections>>({});
+  const autofilledValues = useRef<Record<string, string>>({});
+  const readSequence = useRef(0);
   const [prefilledFields, setPrefilledFields] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("paid");
@@ -32,26 +36,34 @@ export function JobDeskIntakeForm() {
       setError("Select a CV before filling the form.");
       return;
     }
-    setReading(true); setError(""); setPreviewMessage(""); setPrefilledFields([]); setCvSourceText("");
+    const sequence = ++readSequence.current;
+    for (const [name, previous] of Object.entries(autofilledValues.current)) {
+      const control = formRef.current.elements.namedItem(name);
+      if ((control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement) && control.value === previous) control.value = name === "remotePreference" ? "flexible" : "";
+    }
+    autofilledValues.current = {};
+    setReading(true); setError(""); setPreviewMessage(""); setPrefilledFields([]); setCvSourceText(""); setCvSections({});
     try {
       const response = await fetch("/api/admin/job-desk/intake-preview", { method: "POST", body: formData });
       const body = await response.json().catch(() => ({}));
+      if (sequence !== readSequence.current) return;
       if (!response.ok) throw new Error(body.error ?? "Could not read the CV.");
       if (!body.fields || typeof body.fields !== "object") throw new Error("The CV reader returned no details. Please try again.");
       setCvSourceText(typeof body.sourceText === "string" ? body.sourceText : "");
+      setCvSections(body.sections ?? {});
       const filled: string[] = [];
       for (const [name, raw] of Object.entries(body.fields as Record<string, unknown>)) {
         const control = formRef.current?.elements.namedItem(name);
         if (!(control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement)) continue;
         if ((name === "applicantLinkedinUrl" || name === "portfolioUrl") && raw && (typeof raw !== "string" || !raw.startsWith("https://"))) continue;
         if (name === "remotePreference") {
-          if (control.value === "flexible" && raw !== "flexible") { control.value = String(raw); filled.push(name); }
-        } else if (!control.value.trim() && raw && (!Array.isArray(raw) || raw.length > 0)) { control.value = Array.isArray(raw) ? raw.join(", ") : String(raw); filled.push(name); }
+          if (control.value === "flexible" && raw !== "flexible") { control.value = String(raw); filled.push(name); autofilledValues.current[name] = control.value; }
+        } else if (!control.value.trim() && raw && (!Array.isArray(raw) || raw.length > 0)) { control.value = Array.isArray(raw) ? raw.join(", ") : String(raw); filled.push(name); autofilledValues.current[name] = control.value; }
       }
       setPrefilledFields(filled);
       setPreviewMessage(filled.length ? `CV filled ${filled.length} field${filled.length === 1 ? "" : "s"}.` : "No additional explicit details were found in the CV.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not read the CV."); }
-    finally { setReading(false); }
+    } catch (cause) { if (sequence === readSequence.current) setError(cause instanceof Error ? cause.message : "Could not read the CV."); }
+    finally { if (sequence === readSequence.current) setReading(false); }
   }
 
   async function submit(formData: FormData) {
@@ -86,6 +98,7 @@ export function JobDeskIntakeForm() {
         <button type="button" onClick={prefill} disabled={reading || busy} className="mt-4 inline-flex items-center gap-2 rounded border border-brand-blue px-4 py-2 text-sm font-bold text-brand-blue disabled:opacity-50">{reading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanText className="h-4 w-4" />}{reading ? "Reading CV..." : "Fill from CV"}</button>
         {previewMessage ? <p role="status" className="mt-2 text-sm text-brand-blue">{previewMessage}</p> : null}
         {cvSourceText ? <details className="mt-3"><summary className="cursor-pointer text-sm font-bold">Read CV text</summary><pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm">{cvSourceText}</pre></details> : null}
+        {Object.values(cvSections).some(Boolean) ? <details className="mt-3"><summary className="cursor-pointer text-sm font-bold">Review extracted CV sections</summary><div className="mt-3 max-h-96 space-y-4 overflow-y-auto">{([["summary", "Professional summary"], ["skills", "Skills"], ["experience", "Experience and achievements"], ["education", "Education and certifications"], ["additional", "Additional CV information"]] as const).map(([name, label]) => cvSections[name] ? <section key={name}><h3 className="text-sm font-bold">{label}</h3><pre className="mt-1 whitespace-pre-wrap break-words text-sm">{cvSections[name]}</pre></section> : null)}</div></details> : null}
         {prefilledFields.length ? <p className="mt-1 text-xs text-black/55 dark:text-white/55">Filled from CV: {prefilledFields.map((field) => ({ fullName: "name", email: "email", whatsappPhone: "phone", targetJobTitles: "target roles", preferredIndustries: "industries", preferredLocations: "location", experienceLevel: "experience", remotePreference: "work arrangement", currentCity: "city", currentCountry: "country", noticePeriod: "availability", applicantLinkedinUrl: "LinkedIn", portfolioUrl: "portfolio" }[field] ?? field)).join(", ")}.</p> : null}
       </section>
       <section>

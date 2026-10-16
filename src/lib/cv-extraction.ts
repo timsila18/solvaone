@@ -1,4 +1,5 @@
 import mammoth from "mammoth";
+import { load } from "cheerio";
 import pdf from "pdf-parse/lib/pdf-parse.js";
 import { databaseText } from "@/lib/database-text";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -30,9 +31,18 @@ export async function extractTextFromCvFile(fileName: string, contentType: strin
   if (extension === "docx" || contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
     try {
       const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
-      const result = await mammoth.extractRawText({ buffer });
+      const result = await mammoth.convertToHtml({ buffer });
+      const $ = load(result.value);
+      // Keep Word hard breaks and table cells separate before reading plain text.
+      $("br").replaceWith("\n");
+      $("p,li,h1,h2,h3,h4,h5,h6").append("\n");
+      $("tr").each((_, row) => {
+        const cells = $(row).children("td,th").map((_, cell) => $(cell).text().trim()).get();
+        $(row).text(cells.join(" | ") + "\n");
+      });
+      $("table").append("\n");
       return {
-        text: normalizeExtractedText(result.value),
+        text: normalizeExtractedText($("body").text()),
         warning: result.messages.length ? "Some advanced Word formatting was ignored while reading the CV." : undefined
       };
     } catch {

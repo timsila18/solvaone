@@ -7,12 +7,14 @@ import { solvaOutputSchema } from "@/lib/solva-intelligence/types";
 import { sectionsToHtml } from "@/lib/solva-intelligence/safety";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { candidateProfileSchema } from "@/lib/job-desk/types";
+import { databaseText } from "@/lib/database-text";
 
 const inputSchema = z.object({
   summary: z.string().trim().min(20).max(10000),
   skills: z.string().trim().min(20).max(10000),
   experience: z.string().trim().min(20).max(30000),
   education: z.string().trim().min(20).max(10000),
+  additional: z.string().trim().max(20000).refine(value => !value || value.length >= 20).default(""),
   checked: z.literal(true)
 });
 
@@ -45,8 +47,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
     });
     const { error: profileError } = await db.from("job_desk_candidate_profiles").upsert({ client_id: order.client_id, structured_profile: profile, last_extracted_at: new Date().toISOString() }, { onConflict: "client_id" });
     if (profileError) throw profileError;
-    const sections = ([ ["summary", "Professional Summary"], ["skills", "Skills"], ["experience", "Experience"], ["education", "Education"] ] as const).map(([id, title]) => ({
-      id, title, html: parsed.data[id].split(/\n+/).map(line => `<p>${escapeHtml(line)}</p>`).join(""), improvementNotes: []
+    const sections = ([ ["summary", "Professional Summary"], ["skills", "Skills"], ["experience", "Experience"], ["education", "Education"], ["additional", "Additional Information"] ] as const).filter(([id]) => parsed.data[id]).map(([id, title]) => ({
+      id, title, html: databaseText(parsed.data[id]).split(/\n+/).map(line => `<p>${escapeHtml(line)}</p>`).join(""), improvementNotes: []
     }));
     const document = solvaOutputSchema.parse({
       title: `${client.full_name} CV`, executiveSummary: parsed.data.summary, sections,

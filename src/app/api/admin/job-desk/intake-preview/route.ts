@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractTextFromCvFile } from "@/lib/cv-extraction";
-import { readLocalCvFields } from "@/lib/job-desk/local-cv-reader";
+import { readLocalCvFields, readLocalCvSections } from "@/lib/job-desk/local-cv-reader";
 import { checkRateLimit, clientIpFromHeaders, logAdminAction, rateLimitResponse, requireAdmin } from "@/lib/security";
 import { getCurrentUser } from "@/lib/supabase/server";
 
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     if (text.length < 120) return NextResponse.json({ error: "This CV has too little selectable text. Paste its text in the field below the upload." }, { status: 422 });
     const fields = previewSchema.parse(readLocalCvFields(text));
     await logAdminAction({ adminId: user.id, action: "job_desk.cv_prefill", targetType: "job_desk_intake", targetId: user.id, details: { mode: "local", apiCalls: 0, estimatedCost: 0 } });
-    return NextResponse.json({ fields, sourceText: text.slice(0, 50000), mode: "local", apiCalls: 0 });
+    return NextResponse.json({ fields, sections: readLocalCvSections(text), sourceText: text.slice(0, 50000), mode: "local", apiCalls: 0 });
   } catch (cause) {
     return NextResponse.json({ error: cause instanceof Error ? cause.message : "Could not read the CV." }, { status: 500 });
   }
