@@ -60,6 +60,7 @@ function routeFixture({ admin = true, paid = true, approved = false } = {}) {
     "@/lib/solva-intelligence/types": load("src/lib/solva-intelligence/types.ts"),
     "@/lib/solva-intelligence/safety": { sectionsToHtml: sections => sections.map(s => s.html).join("") },
     "@/lib/job-desk/payment": load("src/lib/job-desk/payment.ts"),
+    "@/lib/database-text": load("src/lib/database-text.ts"),
     "@/lib/job-desk/types": { candidateProfileSchema: require("zod").z.object({}).passthrough() }
   });
   const input = { summary: "Verified administration and support experience.", skills: "Customer service and records management", experience: "Maintained accurate records for a clinic.", education: "Diploma in administration and office management", checked: true };
@@ -88,4 +89,13 @@ test("manual CV saves escaped review content without an AI run or approval", asy
   assert.ok(document.html.includes("&lt;script&gt;"));
   assert.equal(fixture.writes.some(w => w.table === "job_desk_ai_runs"), false);
   assert.equal(fixture.writes.find(w => w.table === "job_desk_orders").data.status, "cv_review");
+});
+
+test("manual CV keeps additional qualifications and referee details when supplied", async () => {
+  const fixture = routeFixture();
+  const additional = "Languages: English and Kiswahili. Referees available upon request.";
+  assert.equal((await fixture.run({ ...fixture.input, additional })).status, 200);
+  const document = fixture.writes.find(w => w.table === "job_desk_documents").data;
+  assert.equal(document.structured_content.sections.length, 5);
+  assert.ok(document.html.includes(additional));
 });
