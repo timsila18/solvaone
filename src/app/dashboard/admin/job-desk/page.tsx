@@ -13,6 +13,13 @@ import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { applicationDeliveryCounts, applicationProgress, type DeliveryApplication, type ProgressMatch } from "@/lib/job-desk/application-progress";
 import { AgentOperationsPanel } from "@/components/job-desk/agent-operations-panel";
 import { orderPagination, prioritizeOrders } from "@/lib/job-desk/order-pagination";
+import { sameOrderIdentity } from "@/lib/job-desk/related-orders";
+
+type QueueOrder = {
+  id: string; status: string; payment_status: string; amount: number; payment_reference: string | null;
+  service_type: string; source_channel: string; created_by: string | null; created_at: string;
+  client: { full_name: string; email: string | null; whatsapp_phone: string }[];
+};
 
 export default async function JobDeskPage({ searchParams }: { searchParams: Promise<{ page?: string | string[]; q?: string | string[]; origin?: string | string[] }> }) {
   const user = await getCurrentUser();
@@ -29,9 +36,9 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
   const origin = params.origin === "admin" || params.origin === "website" ? params.origin : "all";
 
   // Rank the whole queue before slicing pages, including older unhandled orders.
-  const allOrders = [];
+  const allOrders: QueueOrder[] = [];
   for (let from = 0; from < totalOrders; from += 500) {
-    const { data, error } = await db.from("job_desk_orders").select("id,status,payment_status,amount,payment_reference,service_type,source_channel,created_by,created_at,client:job_desk_clients(full_name,whatsapp_phone)").order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, from + 499);
+    const { data, error } = await db.from("job_desk_orders").select("id,status,payment_status,amount,payment_reference,service_type,source_channel,created_by,created_at,client:job_desk_clients(full_name,email,whatsapp_phone)").order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, from + 499);
     if (error) throw new Error("Orders could not be loaded. Please refresh.");
     allOrders.push(...(data ?? []));
   }
@@ -91,6 +98,13 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
     }
   }
   const priorityOrders = orders;
+  const relatedCounts = new Map(allOrders.map(order => {
+    const client = Array.isArray(order.client) ? order.client[0] : order.client;
+    return [order.id, client ? allOrders.filter(other => {
+      const otherClient = Array.isArray(other.client) ? other.client[0] : other.client;
+      return other.id !== order.id && otherClient && sameOrderIdentity(client, otherClient);
+    }).length : 0];
+  }));
 
   return (
     <AppShell email={user.email} isAdmin>
@@ -136,6 +150,10 @@ export default async function JobDeskPage({ searchParams }: { searchParams: Prom
             {(query || origin !== "all") && <Link href="/dashboard/admin/job-desk" className="inline-flex h-10 items-center px-2 font-semibold text-brand-blue">Clear</Link>}
           </form>
           <OrderPagination {...pagination} total={filteredOrders.length} shown={orders.length} query={query} origin={origin} />
+          {orders.some(order => (relatedCounts.get(order.id) ?? 0) > 0) ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm" aria-label="Linked order histories">{orders.filter(order => (relatedCounts.get(order.id) ?? 0) > 0).map(order => {
+            const client = Array.isArray(order.client) ? order.client[0] : order.client;
+            return <Link key={order.id} href={`/dashboard/admin/job-desk/${order.id}#related-order-history`} className="font-semibold text-brand-blue">{client?.full_name}: {relatedCounts.get(order.id)} other order(s)</Link>;
+          })}</div> : null}
           <div role="region" aria-label="Order queue" tabIndex={0} className="mt-5 max-h-[70dvh] min-h-60 overflow-auto overscroll-contain [scrollbar-gutter:stable] border-y border-black/10 dark:border-white/10">
             <table className="w-full min-w-[720px] text-left text-sm"><thead className="sticky top-0 z-[1] bg-gray-100 text-xs uppercase text-black/45 dark:bg-neutral-900 dark:text-white/45"><tr><th className="px-3 py-3">Client</th><th className="px-3 py-3">Service</th><th className="px-3 py-3">Payment</th><th className="px-3 py-3">Workflow</th><th className="px-3 py-3">Created</th></tr></thead>
               <tbody>{orders?.length ? priorityOrders.map((order) => {

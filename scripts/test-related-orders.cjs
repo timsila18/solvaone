@@ -1,0 +1,17 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const ts = require("typescript");
+const source = fs.readFileSync("src/lib/job-desk/related-orders.ts", "utf8");
+const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const mod = { exports: {} };
+new Function("exports", "require", "module", compiled)(mod.exports, require, mod);
+const { sameOrderIdentity } = mod.exports;
+const person = { full_name: "Mary Wangui Muraya", email: "mary@example.test", whatsapp_phone: "+254 700 000 001" };
+assert.equal(sameOrderIdentity(person, { ...person, full_name: " MARY  WANGUI MURAYA ", email: "MARY@example.test", whatsapp_phone: "254700000001" }), true);
+assert.equal(sameOrderIdentity(person, { ...person, email: "other@example.test" }), false);
+assert.equal(sameOrderIdentity(person, { ...person, whatsapp_phone: "254700000002" }), false);
+assert.equal(sameOrderIdentity(person, { ...person, full_name: "Mary Other" }), false);
+assert.equal(sameOrderIdentity({ full_name: "Mary" }, { full_name: "Mary" }), false);
+assert.equal(sameOrderIdentity({ ...person, email: "" }, person), false);
+assert.equal(sameOrderIdentity({ ...person, whatsapp_phone: "123" }, { ...person, whatsapp_phone: "123" }), false);
+console.log("Related-order identity tests passed; names alone never combine histories.");

@@ -32,6 +32,7 @@ import { OrderRefresh } from "@/components/job-desk/order-refresh";
 import { AgentPhase } from "@/components/job-desk/agent-phase";
 import { jobDeskAiEnabled } from "@/lib/job-desk/ai-policy";
 import { ManualCvForm } from "@/components/job-desk/manual-cv-form";
+import { RelatedOrderHistory } from "@/components/job-desk/related-order-history";
 
 type Question = { id: string; category: string; question: string; reason: string; required?: boolean };
 
@@ -116,6 +117,7 @@ export default async function JobDeskOrderPage({ params }: { params: Promise<{ o
       {isCvService && document?.status !== "approved" ? <ManualCvForm orderId={orderId} sourceText={file?.extracted_text ?? ""} /> : null}
       {isJobSearch && jobDeskAiEnabled() ? <AgentPhase tasks={tasks ?? []} eligible={document?.status === "approved" && !paymentNeedsReview && order.payment_status === "paid" && Boolean(applicationScope)} /> : null}
       {isJobSearch ? <ClientProgress matches={matches} shortlist={shortlist} applications={recordedApplications ?? []} /> : null}
+      <RelatedOrderHistory orderId={orderId} client={client ?? {}} />
 
       <div className="grid gap-6 py-7 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="space-y-6">
