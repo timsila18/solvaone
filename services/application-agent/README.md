@@ -188,3 +188,9 @@ do not replace the installed legacy runner with an older repository snapshot.
 ```sh
 node --test services/application-agent/handoff.test.mjs
 ```
+
+On the browser host, `node scripts/test-handoff-browser.mjs` runs an isolated
+Chromium `about:blank` fixture. It checks actual screenshot generation, pointer
+input, typing and receipt handling in a temporary ledger, without contacting
+an employer or recording a SolvaOne application. It is not proof that a real
+employer accepts an application; that remains a separate acceptance check.
