@@ -46,7 +46,7 @@ export function JobDeskIntakeForm() {
         if ((name === "applicantLinkedinUrl" || name === "portfolioUrl") && raw && (typeof raw !== "string" || !raw.startsWith("https://"))) continue;
         if (name === "remotePreference") {
           if (control.value === "flexible" && raw !== "flexible") { control.value = String(raw); filled.push(name); }
-        } else if (!control.value.trim() && raw) { control.value = Array.isArray(raw) ? raw.join(", ") : String(raw); filled.push(name); }
+        } else if (!control.value.trim() && raw && (!Array.isArray(raw) || raw.length > 0)) { control.value = Array.isArray(raw) ? raw.join(", ") : String(raw); filled.push(name); }
       }
       setPrefilledFields(filled);
       setPreviewMessage(filled.length ? `CV filled ${filled.length} field${filled.length === 1 ? "" : "s"}.` : "No additional explicit details were found in the CV.");
