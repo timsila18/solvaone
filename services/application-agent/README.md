@@ -159,3 +159,32 @@ Fixture tests (no employer calls):
 ```sh
 node --test services/application-agent/scheduler.test.mjs
 ```
+
+## Admin browser handoff
+
+Supported Lever/Greenhouse attempts may retain one browser for up to 15 minutes
+when human input is required. Only the admin-authenticated handoff API can reach
+the agent's bearer-authenticated `/applications/:id/handoff` route. No browser
+debugging or remote desktop port is exposed. Inputs are limited to mouse clicks,
+text, a small key allowlist, scrolling, receipt verification and reattaching this
+attempt's stored CV/letter. There is no arbitrary shell, JavaScript, navigation
+or filesystem upload command. Typed answers/passwords are not logged or retained
+by the handoff handler. Screenshots can include personal data; restrict admin access.
+
+The web proxy requires the current approved CV ID/content, paid/active order,
+recorded consent and matching scope before browser controls. Any human input
+makes the attempt non-retryable before it reaches the browser. Verification
+requires an official same-job confirmation URL, visible receipt text and no
+remaining Submit application button. Only then can the admin record submission.
+Expired sessions or historical forms cannot be reconstructed by this feature;
+their evidence and prepared packets remain for review. Full browser continuity
+does not survive a host/Chromium restart, although the application ledger does.
+
+The legacy server override binds `server.handoff.mjs`, `runner.handoff.cjs` and
+`handoff.mjs`. These are additive patches to its installed server/runner, preserving
+existing adapters and task-ledger paths. Keep them with the override on deployment;
+do not replace the installed legacy runner with an older repository snapshot.
+
+```sh
+node --test services/application-agent/handoff.test.mjs
+```

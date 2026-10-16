@@ -6,5 +6,6 @@
 !services/
 !services/application-agent/
 !services/application-agent/server.mjs
+!services/application-agent/handoff.mjs
 !services/application-agent/build-runner.cjs
 !services/application-agent/Dockerfile

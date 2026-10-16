@@ -2,6 +2,11 @@ services:
   agent:
     environment:
       SOLVAONE_WORKER_URL: ''
+      APPLICATION_AGENT_HANDOFF_ENABLED: '1'
+    volumes:
+      - ./server.handoff.mjs:/app/services/application-agent/server.mjs:ro
+      - ./handoff.mjs:/app/services/application-agent/handoff.mjs:ro
+      - ./runner.handoff.cjs:/app/services/application-agent/runner.cjs:ro
   scheduler:
     image: solvaone-application-agent:latest
     entrypoint: [node, /app/scheduler.mjs]

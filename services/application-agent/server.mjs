@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHandoffHandler } from './handoff.mjs';
 
 const token = process.env.APPLICATION_AGENT_TOKEN_FILE
   ? (await fs.readFile(process.env.APPLICATION_AGENT_TOKEN_FILE, 'utf8')).trim()
@@ -54,11 +55,14 @@ async function execute(job) {
 setInterval(() => { if (!busy) { const job = [...jobs.values()].find(j => j.status === 'queued'); if (job) execute(job).catch(() => { busy = false; }); } }, 500);
 function reply(res, status, body) { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); }
 const creating = new Set();
+const handoff = createHandoffHandler({ jobs, directory: id => path.join(root, id), save });
+setInterval(() => { void handoff.cleanup(); }, 60000).unref();
 http.createServer(async (req, res) => {
   try {
     if (req.url === '/health' && req.method === 'GET') return reply(res, 200, { ok: true });
     const supplied = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${token}`);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return reply(res, 401, { error: 'Unauthorized' });
+    if (await handoff.handle(req, res)) return;
     if (req.url === '/ready' && req.method === 'GET') {
       const browser = spawnSync('agent-browser', ['--version'], { timeout: 10000, encoding: 'utf8' });
       const runner = await fs.access(path.join(import.meta.dirname, 'runner.cjs')).then(() => true, () => false);
