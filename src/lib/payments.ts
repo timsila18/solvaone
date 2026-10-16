@@ -66,7 +66,7 @@ export async function requestJobDeskStkPush(input: { phone: string; amount: numb
     signal: AbortSignal.timeout(20000)
   }).catch(() => { throw new Error("M-Pesa request status is unknown. Check your phone and contact support before paying again."); });
   const data = await response.json().catch(() => null);
-  if (!data || response.status >= 500 || (data.ResponseCode === "0" && !data.CheckoutRequestID)) throw new Error("M-Pesa request status is unknown. Check your phone and contact support before paying again.");
+  if (!data || response.status >= 500 || (response.ok && data.ResponseCode == null) || (data.ResponseCode === "0" && !data.CheckoutRequestID)) throw new Error("M-Pesa request status is unknown. Check your phone and contact support before paying again.");
   if (!response.ok || data.ResponseCode !== "0") throw new Error(`M-Pesa rejected the request: ${data.errorMessage ?? data.ResponseDescription ?? "Prompt could not be sent."}`);
   return { checkoutRequestId: String(data.CheckoutRequestID), merchantRequestId: String(data.MerchantRequestID ?? "") };
 }

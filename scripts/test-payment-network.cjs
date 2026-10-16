@@ -29,6 +29,8 @@ async function run() {
   await assert.rejects(mod.exports.requestJobDeskStkPush(input), /status is unknown/);
   mock({ ok: true, status: 200, json: async () => ({ ResponseCode: "0" }) });
   await assert.rejects(mod.exports.requestJobDeskStkPush(input), /status is unknown/);
+  mock({ ok: true, status: 200, json: async () => ({}) });
+  await assert.rejects(mod.exports.requestJobDeskStkPush(input), /status is unknown/);
   mock({ ok: true, status: 200, json: async () => { throw new Error("Invalid JSON"); } });
   await assert.rejects(mod.exports.requestJobDeskStkPush(input), /status is unknown/);
   console.log("Payment network tests passed: safe authentication retry, unknown send hold, deadlines, provider acceptance/rejection and malformed response handling. No live payment sent.");
