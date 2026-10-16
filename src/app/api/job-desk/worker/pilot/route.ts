@@ -5,6 +5,7 @@ import { runJobDeskWorker } from "@/lib/job-desk/worker";
 import { distinctSuccessfulDeliveries } from "@/lib/job-desk/application-progress";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
 import { enqueueTask } from "@/lib/job-desk/automation";
+import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -42,13 +43,18 @@ export async function GET(request: Request) {
     let selected: { id: string; submitted: number } | undefined;
     for (const candidate of rotated) {
       const { data: matches, error: matchError } = await db.from("job_desk_matches")
-        .select("id,status,reasons").eq("order_id", candidate.id).in("status", ["suggested", "ready", "authorized"])
+        .select("id,status,reasons,application:job_desk_applications(status,provider_response)").eq("order_id", candidate.id).in("status", ["suggested", "ready", "authorized", "needs_human"])
         .order("created_at").limit(30);
       if (matchError) throw matchError;
       // Local preparation never invents suitability: only previously reviewed matches proceed.
-      const reviewed = (matches ?? []).filter(match => Array.isArray(match.reasons) && match.reasons.some((reason: string) => reason.startsWith("Suitability review:")));
+      const reviewed = (matches ?? []).filter(match => {
+        const application = Array.isArray(match.application) ? match.application[0] : match.application;
+        return Array.isArray(match.reasons) && match.reasons.some((reason: string) => reason.startsWith("Suitability review:"))
+          && (!application || canRetrySubmission(application)) && (match.status !== "needs_human" || Boolean(application));
+      });
       for (const match of reviewed.slice(0, 3)) {
-        await enqueueTask(match.status === "authorized" ? "submit" : "prepare", `local-pilot:${match.id}:${Math.floor(Date.now() / 3600000)}`, candidate.id, { matchId: match.id });
+        const type = match.status === "authorized" ? "submit" : match.status === "needs_human" ? "resume_assisted" : "prepare";
+        await enqueueTask(type, `local-pilot:${match.id}:${Math.floor(Date.now() / 3600000)}`, candidate.id, { matchId: match.id });
       }
       const { count, error: taskError } = await db.from("job_desk_tasks").select("id", { count: "exact", head: true })
         .eq("order_id", candidate.id).eq("status", "queued").lte("available_at", new Date().toISOString());
