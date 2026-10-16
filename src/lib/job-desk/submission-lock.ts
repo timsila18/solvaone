@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { canRetrySubmission } from "./submission-preflight";
 
 // A match has one application row. Only its pending row may acquire the send lock.
 export async function claimApplication(matchId: string, orderId: string, method: string, recipient: string) {
@@ -8,7 +9,7 @@ export async function claimApplication(matchId: string, orderId: string, method:
   const { data: current, error: readError } = await db.from("job_desk_applications").select("id,status,provider_response,provider_message_id").eq("match_id", matchId).single();
   if (readError) throw new Error(readError.message);
   if (current.provider_message_id || ["sending", "submitted"].includes(current.status)) return false;
-  if (current.status === "needs_human" && (current.provider_response as { clicked?: boolean })?.clicked === false) {
+  if (current.status === "needs_human" && canRetrySubmission(current)) {
     const { error } = await db.from("job_desk_applications").update({ status: "pending" }).eq("id", current.id).eq("status", "needs_human").eq("provider_response", JSON.stringify(current.provider_response));
     if (error) throw new Error(error.message);
   }
