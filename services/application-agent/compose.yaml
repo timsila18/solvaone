@@ -31,6 +31,7 @@ services:
     restart: unless-stopped
     environment:
       APPLICATION_AGENT_TOKEN_FILE: /run/secrets/agent_token
+      APPLICATION_AGENT_HANDOFF_ENABLED: '1'
     secrets:
       - agent_token
     volumes:

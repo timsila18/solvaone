@@ -10,6 +10,7 @@ const endpoint = `http://127.0.0.1:${port}`;
 const id = '11111111-1111-4111-8111-111111111111';
 let child;
 await fs.copyFile('services/application-agent/server.mjs', path.join(root, 'server.mjs'));
+await fs.copyFile('services/application-agent/handoff.mjs', path.join(root, 'handoff.mjs'));
 await fs.writeFile(path.join(root, 'runner.cjs'), 'console.log(JSON.stringify({status:"needs_human",clicked:false,reason:"TEST FIXTURE: no external browser or submission"}));');
 async function start(useSecretFile = false) {
   const secretPath = path.join(root, 'agent-token');
@@ -27,6 +28,7 @@ const body = JSON.stringify({ data: { applicationId: id, provider: 'lever', site
 try {
   await start();
   assert.equal((await fetch(endpoint + '/applications/' + id)).status, 401);
+  assert.equal((await fetch(endpoint + '/applications/' + id + '/handoff')).status, 401);
   assert.equal((await fetch(endpoint + '/applications/' + id, { method: 'POST', headers, body: body.replace('jobs.lever.co', 'example.com') })).status, 400);
   assert.equal((await fetch(endpoint + '/applications/' + id, { method: 'POST', headers, body })).status, 202);
   let job;

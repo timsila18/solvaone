@@ -4,6 +4,8 @@ import { isOfficialApplyUrl } from "./vacancy-feeds";
 
 export type PortalApplication = {
   applicationId?: string;
+  approvedCvId?: string;
+  approvedCvFingerprint?: string;
   dryRun?: boolean;
   provider?: "greenhouse" | "lever";
   url: string;
@@ -35,6 +37,7 @@ const { execFileSync } = require('node:child_process');
 const root = process.env.APPLICATION_WORKDIR || '/vercel/sandbox';
 const data = JSON.parse(fs.readFileSync(root + '/application.json', 'utf8'));
 let clicked = false;
+let retained = false;
 function browser(...args) { return execFileSync('agent-browser', args, { encoding: 'utf8', timeout: 30000, maxBuffer: 2 * 1024 * 1024 }).trim(); }
 function evaluate(expression) {
   let value = browser('eval', expression);
@@ -43,6 +46,19 @@ function evaluate(expression) {
 }
 function hold(reason) { return { status: 'needs_human', reason, clicked }; }
 function finish(result) {
+  if (process.env.APPLICATION_AGENT_HANDOFF_ENABLED === '1' && ['lever', 'greenhouse'].includes(data.provider) && result.status === 'needs_human' && !data.dryRun) {
+    try {
+      const url = browser('get', 'url');
+      if (allowed(url) && /^[a-f0-9-]{36}$/i.test(data.applicationId || '')) {
+        const leasePath = require('node:path').join(root, '..', 'active-handoff.json');
+        try { const previous = JSON.parse(fs.readFileSync(leasePath, 'utf8')); if (Date.parse(previous.expiresAt) <= Date.now()) fs.unlinkSync(leasePath); } catch {}
+        const marker = { session: data.applicationId, expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() };
+        fs.writeFileSync(leasePath, JSON.stringify(marker), { mode: 0o600, flag: 'wx' });
+        fs.writeFileSync(root + '/handoff.json', JSON.stringify(marker), { mode: 0o600 });
+        retained = true;
+      }
+    } catch {}
+  }
   fs.writeFileSync(root + '/result.tmp', JSON.stringify(result), { mode: 0o600 });
   fs.renameSync(root + '/result.tmp', root + '/result.json');
   console.log(JSON.stringify(result));
@@ -124,7 +140,7 @@ try {
   }
 } catch (error) {
   finish(hold(error instanceof Error ? error.message.slice(0,500) : 'Portal application needs review.'));
-} finally { try { browser('close'); } catch {} }
+} finally { if (!retained) { try { browser('close'); } catch {} } }
 `;
 
 async function checked(sandbox: Sandbox, cmd: string, args: string[]) {
