@@ -4,6 +4,38 @@ import { schedulerConfig, tick } from './scheduler.mjs';
 import fs from 'node:fs/promises';
 import ts from 'typescript';
 
+async function loadLocalModule(name) {
+  const source = await fs.readFile(new URL(`../../src/lib/job-desk/${name}.ts`, import.meta.url), 'utf8');
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+}
+
+test('local letter adds no qualifications and is bound to the exact approved CV', async () => {
+  const { localApplicationLetter } = await loadLocalModule('local-letter');
+  const first = localApplicationLetter('Fixture Candidate', 'Coordinator', 'Fixture Employer', 'cv-1', '<p>Approved background</p>');
+  assert.match(first.letter, /Coordinator at Fixture Employer/);
+  assert.doesNotMatch(first.letter, /years|expert|degree|certified|proficient/i);
+  assert.deepEqual(first, localApplicationLetter('Fixture Candidate', 'Coordinator', 'Fixture Employer', 'cv-1', '<p>Approved background</p>'));
+  assert.notEqual(first.evidence, localApplicationLetter('Fixture Candidate', 'Coordinator', 'Fixture Employer', 'cv-2', '<p>Approved background</p>').evidence);
+  assert.notEqual(first.evidence, localApplicationLetter('Fixture Candidate', 'Coordinator', 'Fixture Employer', 'cv-1', '<p>Changed background</p>').evidence);
+});
+
+test('pilot permits only local preparation and resume, never AI matching or CV processing', async () => {
+  const { localPilotTask } = await loadLocalModule('worker-pilot');
+  const previous = process.env.JOB_DESK_WORKER_PILOT_ORDER_IDS;
+  const id = '00000000-0000-4000-8000-000000000001';
+  try {
+    process.env.JOB_DESK_WORKER_PILOT_ORDER_IDS = id;
+    assert.equal(localPilotTask('prepare', id), true);
+    assert.equal(localPilotTask('resume_assisted', id), true);
+    for (const type of ['match', 'process_cv', 'draft_answers', 'review_matches']) assert.equal(localPilotTask(type, id), false);
+    assert.equal(localPilotTask('prepare', 'other-order'), false);
+  } finally {
+    if (previous === undefined) delete process.env.JOB_DESK_WORKER_PILOT_ORDER_IDS;
+    else process.env.JOB_DESK_WORKER_PILOT_ORDER_IDS = previous;
+  }
+});
+
 test('pilot allowlist fails closed and caps enrollment at five distinct orders', async () => {
   const source = await fs.readFile(new URL('../../src/lib/job-desk/worker-pilot.ts', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;

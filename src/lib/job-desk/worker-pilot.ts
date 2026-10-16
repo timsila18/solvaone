@@ -5,3 +5,8 @@ export function workerPilotOrders(value: string | undefined): string[] {
   }
   return ids;
 }
+
+export function localPilotTask(taskType: string, orderId: string | null | undefined) {
+  if (!orderId || !["prepare", "resume_assisted"].includes(taskType)) return false;
+  return workerPilotOrders(process.env.JOB_DESK_WORKER_PILOT_ORDER_IDS).includes(orderId);
+}

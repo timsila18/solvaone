@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { localApplicationLetter } from "./local-letter";
+import { localPilotTask } from "./worker-pilot";
 import { createOpenAIClient } from "@/lib/openai";
 import { AI_DEPENDENT_TASKS, isAiQuotaError, jobDeskAiEnabled } from "./ai-policy";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
@@ -108,7 +110,10 @@ async function prepareMatch(matchId: string, assistedRequested = false) {
   const fingerprint = createHash("sha256").update(prompt).digest("hex");
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
   const { data: previous } = await db.from("job_desk_ai_runs").select("output_payload").eq("order_id", order.id).eq("operation", "match_cover_letter").eq("input_fingerprint", fingerprint).eq("status", "succeeded").maybeSingle();
-  let letter = (previous?.output_payload as { letter?: string } | null)?.letter;
+  const local = !jobDeskAiEnabled() && localPilotTask("prepare", order.id)
+    ? localApplicationLetter(client.full_name, vacancy.title, vacancy.company_name, latestCv.id, String(cv.html)) : null;
+  let letter = local?.letter ?? (previous?.output_payload as { letter?: string } | null)?.letter;
+  if (!letter && !jobDeskAiEnabled()) throw new Error("AI preparation is disabled for this order.");
   if (!letter) {
     const { data: run, error } = await db.from("job_desk_ai_runs").upsert({ order_id: order.id, initiated_by: null, operation: "match_cover_letter", input_fingerprint: fingerprint, model_used: model, status: "running", input_payload: { matchId, vacancyId: vacancy.id }, started_at: new Date().toISOString() }, { onConflict: "order_id,operation,input_fingerprint" }).select("id").single();
     if (error || !run) throw new Error(error?.message ?? "Could not record AI run.");
@@ -145,7 +150,7 @@ async function prepareMatch(matchId: string, assistedRequested = false) {
       throw cause;
     }
   }
-  const { data: ready, error: updateError } = await db.from("job_desk_matches").update({ cover_letter: letter, status: "ready" }).eq("id", matchId).in("status", ["suggested", "preparing", "ready"]).select("id").maybeSingle();
+  const { data: ready, error: updateError } = await db.from("job_desk_matches").update({ cover_letter: letter, status: "ready", ...(local ? { reasons: [...(match.reasons ?? []).filter((reason: string) => !reason.startsWith("Local factual letter v1:")), local.evidence] } : {}) }).eq("id", matchId).in("status", ["suggested", "preparing", "ready"]).select("id").maybeSingle();
   if (updateError) throw new Error(updateError.message);
   if (!ready || !order.application_authorized || !["approved", "active"].includes(order.status)) return;
   const scope = readApplicationScope(order.service_details);
@@ -204,7 +209,9 @@ async function submitMatch(matchId: string) {
   const cvPlain = plainText(String(cv.html));
   const { data: reviewedLetter, error: reviewError } = await db.from("job_desk_ai_runs").select("output_payload").eq("order_id", order.id).eq("operation", "match_cover_letter").eq("status", "succeeded").contains("output_payload", { letter: match.cover_letter, factualReview: "passed", cvId: latestCv.id, promptVersion: LETTER_PROMPT_VERSION }).limit(1).maybeSingle();
   if (reviewError) throw new Error(reviewError.message);
-  if (!reviewedLetter) {
+  const local = localApplicationLetter(client.full_name, vacancy.title, vacancy.company_name, latestCv.id, String(cv.html));
+  const validLocalLetter = localPilotTask("prepare", order.id) && match.cover_letter === local.letter && Array.isArray(match.reasons) && match.reasons.includes(local.evidence);
+  if (!reviewedLetter && !validLocalLetter) {
     const { error } = await db.from("job_desk_matches").update({ status: "suggested", cover_letter: null }).eq("id", matchId).eq("status", "authorized");
     if (error) throw new Error(error.message);
     await enqueueTask("prepare", `prepare-reviewed:${matchId}:${latestCv.id}:${LETTER_PROMPT_VERSION}`, order.id, { matchId });
@@ -415,7 +422,7 @@ export async function runJobDeskWorker({ maxTasks = 10, maxRunMs = 45000, orderI
       });
     }, 60_000);
     try {
-      const paused = !jobDeskAiEnabled() && AI_DEPENDENT_TASKS.has(task.task_type);
+      const paused = !jobDeskAiEnabled() && AI_DEPENDENT_TASKS.has(task.task_type) && !localPilotTask(task.task_type, task.order_id);
       const result = paused ? { outcome: "manual_review", reason: "Manual processing enabled; no OpenAI API call was made." } : await processTask(task);
       const { error: finishError } = await db.from("job_desk_tasks").update({ status: paused ? "cancelled" : "succeeded", result, last_error: null, locked_at: null, lease_until: null, locked_by: null }).eq("id", task.id).eq("locked_by", workerId);
       if (finishError) throw new Error(finishError.message);
