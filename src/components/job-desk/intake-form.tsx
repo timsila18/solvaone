@@ -15,6 +15,7 @@ export function JobDeskIntakeForm() {
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [previewMessage, setPreviewMessage] = useState("");
+  const [cvSourceText, setCvSourceText] = useState("");
   const [prefilledFields, setPrefilledFields] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("paid");
@@ -31,12 +32,13 @@ export function JobDeskIntakeForm() {
       setError("Select a CV before filling the form.");
       return;
     }
-    setReading(true); setError(""); setPreviewMessage(""); setPrefilledFields([]);
+    setReading(true); setError(""); setPreviewMessage(""); setPrefilledFields([]); setCvSourceText("");
     try {
       const response = await fetch("/api/admin/job-desk/intake-preview", { method: "POST", body: formData });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "Could not read the CV.");
       if (!body.fields || typeof body.fields !== "object") throw new Error("The CV reader returned no details. Please try again.");
+      setCvSourceText(typeof body.sourceText === "string" ? body.sourceText : "");
       const filled: string[] = [];
       for (const [name, raw] of Object.entries(body.fields as Record<string, unknown>)) {
         const control = formRef.current?.elements.namedItem(name);
@@ -83,6 +85,7 @@ export function JobDeskIntakeForm() {
         <details className="mt-3"><summary className="cursor-pointer text-sm font-bold text-brand-blue">Scanned CV? Add its text</summary><div className="mt-3"><Field label="CV text"><Textarea name="pastedCvText" placeholder="Only needed if the CV cannot be read." /></Field></div></details>
         <button type="button" onClick={prefill} disabled={reading || busy} className="mt-4 inline-flex items-center gap-2 rounded border border-brand-blue px-4 py-2 text-sm font-bold text-brand-blue disabled:opacity-50">{reading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanText className="h-4 w-4" />}{reading ? "Reading CV..." : "Fill from CV"}</button>
         {previewMessage ? <p role="status" className="mt-2 text-sm text-brand-blue">{previewMessage}</p> : null}
+        {cvSourceText ? <details className="mt-3"><summary className="cursor-pointer text-sm font-bold">Read CV text</summary><pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm">{cvSourceText}</pre></details> : null}
         {prefilledFields.length ? <p className="mt-1 text-xs text-black/55 dark:text-white/55">Filled from CV: {prefilledFields.map((field) => ({ fullName: "name", email: "email", whatsappPhone: "phone", targetJobTitles: "target roles", preferredIndustries: "industries", preferredLocations: "location", experienceLevel: "experience", remotePreference: "work arrangement", currentCity: "city", currentCountry: "country", noticePeriod: "availability", applicantLinkedinUrl: "LinkedIn", portfolioUrl: "portfolio" }[field] ?? field)).join(", ")}.</p> : null}
       </section>
       <section>

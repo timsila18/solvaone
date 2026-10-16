@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { z } from "zod";
 import { zodTextFormat } from "openai/helpers/zod";
 import { createOpenAIClient } from "@/lib/openai";
+import { jobDeskAiEnabled } from "./ai-policy";
 import { estimateCost, extractTokenUsage } from "@/lib/solva-intelligence/costs";
 import { sectionsToHtml, sanitizeText, stripUnsafeHtml } from "@/lib/solva-intelligence/safety";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -76,6 +77,7 @@ function buildPrompt(input: {
 }
 
 export async function processJobDeskOrder({ orderId, adminId, force = false }: ProcessJobDeskOrderInput) {
+  if (!jobDeskAiEnabled()) throw new Error("Manual CV preparation is enabled. Save the verified CV in the order editor.");
   const db = createSupabaseAdminClient();
   const { data: order, error: orderError } = await db
     .from("job_desk_orders")

@@ -1,4 +1,5 @@
 import { after, NextResponse } from "next/server";
+import { jobDeskAiEnabled } from "@/lib/job-desk/ai-policy";
 import { completionHold } from "@/lib/job-desk/general-jobs";
 import { distinctSuccessfulDeliveries } from "@/lib/job-desk/application-progress";
 import { z } from "zod";
@@ -57,7 +58,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     queued = true;
     const { data: paidOrder } = await db.from("job_desk_orders").select("payment_status,amount,payment_reference").eq("id", orderId).single();
     const { data: serviceOrder } = await db.from("job_desk_orders").select("service_type").eq("id", orderId).single();
-    if (serviceOrder?.service_type === "job_search_full" && hasVerifiedJobDeskPayment(paidOrder)) {
+    if (jobDeskAiEnabled() && serviceOrder?.service_type === "job_search_full" && hasVerifiedJobDeskPayment(paidOrder)) {
       const { data: sources, error: sourceError } = await db.from("job_desk_sources").select("id").eq("active", true).limit(100);
       if (sourceError) return NextResponse.json({ error: sourceError.message }, { status: 500 });
       for (const source of sources ?? []) await enqueueTask("discover", `discover:${source.id}:approval:${document.id}`, null, { sourceId: source.id });
