@@ -36,6 +36,16 @@ test('pilot permits only local preparation and resume, never AI matching or CV p
   }
 });
 
+test('unchanged pilot input does not create hourly retries; verified revisions get new task keys', async () => {
+  const { pilotInputRevision, pilotTaskKey } = await loadLocalModule('worker-pilot');
+  const revision = pilotInputRevision('cv-1', ['approved CV'], { answer: 'Verified answer' });
+  const key = pilotTaskKey('match-1', revision, 'needs_human');
+  assert.equal(key, pilotTaskKey('match-1', pilotInputRevision('cv-1', ['approved CV'], { answer: 'Verified answer' }), 'needs_human'));
+  assert.notEqual(key, pilotTaskKey('match-1', pilotInputRevision('cv-1', ['approved CV'], { answer: 'Updated verified answer' }), 'needs_human'));
+  assert.notEqual(key, pilotTaskKey('match-1', pilotInputRevision('cv-2', ['new approved CV'], { answer: 'Verified answer' }), 'needs_human'));
+  assert.notEqual(key, pilotTaskKey('match-1', revision, 'authorized'));
+});
+
 test('pilot allowlist fails closed and caps enrollment at five distinct orders', async () => {
   const source = await fs.readFile(new URL('../../src/lib/job-desk/worker-pilot.ts', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;

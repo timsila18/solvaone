@@ -55,6 +55,14 @@ export function createHandoffHandler({ jobs, directory, save, browserCommand }) 
     }
   }
   return { cleanup, async handle(req, res) {
+    if (req.url === '/handoff/status' && req.method === 'GET') {
+      let marker;
+      try { marker = JSON.parse(await fs.readFile(path.join(directory('00000000-0000-4000-8000-000000000000'), '..', 'active-handoff.json'), 'utf8')); } catch {}
+      const occupied = marker && Date.parse(marker.expiresAt) > Date.now();
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ available: !occupied, expiresAt: occupied ? marker.expiresAt : null }));
+      return true;
+    }
     const id = req.url?.match(/^\/applications\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\/handoff$/i)?.[1];
     if (!id) return false;
     const reply = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); return true; };

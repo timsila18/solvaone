@@ -4,7 +4,9 @@ import { AppShell } from "@/components/dashboard/app-shell";
 import { createSupabaseServerClient, getCurrentUser } from "@/lib/supabase/server";
 import { underTargetDeliveryReview } from "@/lib/job-desk/delivery-review";
 import { canRetrySubmission } from "@/lib/job-desk/submission-preflight";
-import { submissionOriginCounts } from "@/lib/job-desk/application-progress";
+import { submissionOriginCounts, distinctSuccessfulDeliveries } from "@/lib/job-desk/application-progress";
+import { workerPilotOrders } from "@/lib/job-desk/worker-pilot";
+import { jobDeskAiEnabled } from "@/lib/job-desk/ai-policy";
 
 export default async function JobDeskReviewPage({ searchParams }: { searchParams: Promise<{ humanPage?: string }> }) {
   const user = await getCurrentUser();
@@ -43,6 +45,8 @@ export default async function JobDeskReviewPage({ searchParams }: { searchParams
   }
   const zeroDeliveryOrders = (activeOrders ?? []).map(order => ({ order, review: underTargetDeliveryReview(order, applications.filter(application=>application.order_id===order.id)) })).filter(item=>item.review).sort((a, b) => Number(a.review!.delivered > 0) - Number(b.review!.delivered > 0) || b.review!.ageHours - a.review!.ageHours);
   const origins = submissionOriginCounts(applications);
+  const pilotIds = workerPilotOrders(process.env.JOB_DESK_WORKER_PILOT_ORDER_IDS);
+  const pilotOrders = (activeOrders ?? []).filter(order => pilotIds.includes(order.id));
   const nameByOrder = new Map(orders.map((order) => [order.id, order.client?.[0]?.full_name]));
 
   return <AppShell email={user.email} isAdmin><div className="mx-auto max-w-5xl py-6">
@@ -50,7 +54,11 @@ export default async function JobDeskReviewPage({ searchParams }: { searchParams
     <h1 className="mt-2 text-3xl font-black">Needs your attention</h1>
     <p className="mt-2 text-sm text-black/60 dark:text-white/60">Work from top to bottom. Automated processing continues for the rest of the queue.</p>
     <div className="mt-7 space-y-8">
-      {aiResult.data?.error_message && /\b429\b|insufficient_quota|no credits remaining/i.test(aiResult.data.error_message) ? <p role="alert" className="border-l-4 border-amber-600 bg-amber-50 p-3 text-sm text-black">A recent AI suitability review failed because the API reported no credits. Automatic matching cannot complete new reviews until the service quota is restored. Existing confirmed submissions remain recorded.</p> : null}
+      <ReviewSection title="Low-cost worker pilot" count={pilotIds.length} empty="Pilot is not configured.">
+        <p className="py-3 text-sm">Paid AI: {jobDeskAiEnabled() ? "Enabled" : "Disabled"}. Target: 10 submissions per order.</p>
+        {pilotOrders.map(order => { const client = Array.isArray(order.client) ? order.client[0] : order.client; const submitted = distinctSuccessfulDeliveries(applications.filter(application => application.order_id === order.id)); return <ReviewRow key={order.id} title={`${client?.full_name ?? "Client"} · ${submitted}/10 submitted`} description={submitted >= 10 ? "Target reached." : "Reviewed applications only; unresolved employer steps remain in the admin queue."} href={`/dashboard/admin/job-desk/${order.id}`} action="Open pilot order" />; })}
+      </ReviewSection>
+      {jobDeskAiEnabled() && aiResult.data?.error_message && /\b429\b|insufficient_quota|no credits remaining/i.test(aiResult.data.error_message) ? <p role="alert" className="border-l-4 border-amber-600 bg-amber-50 p-3 text-sm text-black">A recent AI suitability review failed because the API reported no credits. Automatic matching cannot complete new reviews until the service quota is restored. Existing confirmed submissions remain recorded.</p> : null}
       <section><h2 className="border-b border-black/15 pb-2 text-lg font-black dark:border-white/15">Submission source</h2><p className="py-3 text-sm">Agent: {origins.agentEmail} accepted emails and {origins.agentPortal} confirmed portals. Admin-recorded: {origins.adminRecorded}. Historical source not established: {origins.unattributed}. Admin-recorded entries may include Codex-assisted work; the existing records do not identify that separately.</p></section>
       <ReviewSection title="Delivery target: orders below ten" count={zeroDeliveryOrders.length} empty="No under-target issues in the reviewed paid orders.">
         <p className="py-3 text-sm">Clients without a submission first, then oldest orders. Orders waiting 24 hours or more are flagged overdue. Provider-accepted emails count as submitted, but delivery is tracked separately. Up to 500 active paid orders are reviewed.</p>

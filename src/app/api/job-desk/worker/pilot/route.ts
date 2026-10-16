@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { workerPilotOrders } from "@/lib/job-desk/worker-pilot";
+import { workerPilotOrders, pilotInputRevision, pilotTaskKey } from "@/lib/job-desk/worker-pilot";
 import { runJobDeskWorker } from "@/lib/job-desk/worker";
 import { distinctSuccessfulDeliveries } from "@/lib/job-desk/application-progress";
 import { hasVerifiedJobDeskPayment } from "@/lib/job-desk/payment";
@@ -20,14 +20,14 @@ export async function GET(request: Request) {
     if (!ids.length) return NextResponse.json({ processed: 0, reason: "Pilot disabled; no approved order allowlist configured." });
     const db = createSupabaseAdminClient();
     const { data: orders, error } = await db.from("job_desk_orders")
-      .select("id,payment_status,payment_reference,amount,application_authorized,status,created_at")
+      .select("id,payment_status,payment_reference,amount,application_authorized,status,created_at,service_details")
       .in("id", ids).eq("service_type", "job_search_full").eq("application_authorized", true)
       .in("status", ["approved", "active"]).order("created_at");
     if (error) throw error;
     const candidates = [];
     for (const order of orders ?? []) {
       if (!hasVerifiedJobDeskPayment(order)) continue;
-      const { data: cv, error: cvError } = await db.from("job_desk_documents").select("status")
+      const { data: cv, error: cvError } = await db.from("job_desk_documents").select("id,status,html,structured_content")
         .eq("order_id", order.id).eq("document_type", "revamped_cv").order("version", { ascending: false }).limit(1).maybeSingle();
       if (cvError) throw cvError;
       if (cv?.status !== "approved") continue;
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
         .select("match_id,status,method,provider_message_id,provider_response").eq("order_id", order.id).eq("status", "submitted").limit(1000);
       if (applicationError || applications?.length === 1000) throw new Error("Pilot progress could not be safely verified.");
       const submitted = distinctSuccessfulDeliveries(applications ?? []);
-      if (submitted < 10) candidates.push({ id: order.id, submitted });
+      if (submitted < 10) candidates.push({ id: order.id, submitted, revision: pilotInputRevision(cv.id, [cv.html, cv.structured_content], order.service_details) });
     }
     // Rotate equal-progress clients by time so a difficult order cannot monopolize the pilot.
     const rotation = Math.floor(Date.now() / 60000) % Math.max(1, candidates.length);
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
       });
       for (const match of reviewed.slice(0, 3)) {
         const type = match.status === "authorized" ? "submit" : match.status === "needs_human" ? "resume_assisted" : "prepare";
-        await enqueueTask(type, `local-pilot:${match.id}:${Math.floor(Date.now() / 3600000)}`, candidate.id, { matchId: match.id });
+        await enqueueTask(type, pilotTaskKey(match.id, candidate.revision, match.status), candidate.id, { matchId: match.id });
       }
       const { count, error: taskError } = await db.from("job_desk_tasks").select("id", { count: "exact", head: true })
         .eq("order_id", candidate.id).eq("status", "queued").lte("available_at", new Date().toISOString());

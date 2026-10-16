@@ -36,6 +36,7 @@ const questions = [
 assert.deepEqual(missingPortalRequirements(questions, "Former employee? = No", { first_name: "Test" }), ["Certificates"]);
 assert.deepEqual(missingPortalRequirements(questions, "Former employee? = Maybe", { first_name: "Test" }), ["Former employee?*", "Certificates"]);
 assert.equal(canRetrySubmission({ status: "needs_human", provider_response: { clicked: false } }), true);
+assert.equal(canRetrySubmission({ status: "needs_human", provider_response: { clicked: false, handoffAttemptId: "11111111-1111-4111-8111-111111111111" } }), false);
 for (const application of [null, { status: "submitted", provider_response: { clicked: false } }, { status: "needs_human", provider_response: { clicked: true } }, { status: "needs_human" }]) assert.equal(canRetrySubmission(application), false);
 assert.equal(applicationOutcome({ status: "submitted", provider_response: { confirmation: "Received" } }), "Confirmed submitted");
 assert.match(applicationOutcome({ status: "submitted", provider_message_id: "email-1" }), /not confirmed/);

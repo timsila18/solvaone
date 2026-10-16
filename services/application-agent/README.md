@@ -180,6 +180,21 @@ Expired sessions or historical forms cannot be reconstructed by this feature;
 their evidence and prepared packets remain for review. Full browser continuity
 does not survive a host/Chromium restart, although the application ledger does.
 
+For reviewed preflight holds that never opened a browser, the admin can explicitly
+prepare an employer form. This separate action rechecks the official vacancy,
+scope, CV and prior ledger, creates a saved attempt pointer before uploading, and
+forces `handoffOnly`: it must never click Submit automatically, even if every field
+is filled. The admin can enter missing facts and consent in the retained session.
+An uncertain prior attempt cannot be reopened. Candidate-own-words requirements
+remain excluded from generated materials. The current job title and employer are
+shown before preparation. Preparing uploads the approved CV/contact data to that
+specific employer; it is not an offline preview.
+
+Pilot task deduplication uses the approved CV, saved answer/scope revision and
+match stage, not the current hour. Unchanged blocked applications do not spawn
+fresh hourly retries. Permanent requirement/schema failures become admin holds;
+transient infrastructure errors retain bounded task backoff.
+
 The legacy server override binds `server.handoff.mjs`, `runner.handoff.cjs` and
 `handoff.mjs`. These are additive patches to its installed server/runner, preserving
 existing adapters and task-ledger paths. Keep them with the override on deployment;

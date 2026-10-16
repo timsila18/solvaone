@@ -6,6 +6,7 @@ export type PortalApplication = {
   applicationId?: string;
   approvedCvId?: string;
   approvedCvFingerprint?: string;
+  handoffOnly?: boolean;
   dryRun?: boolean;
   provider?: "greenhouse" | "lever";
   url: string;
@@ -125,6 +126,7 @@ try {
   if (page.challenge || /security challenge|verify you are human|complete (?:an? )?assessment|identity verification required/i.test(page.body)) throw new Error('The portal requires a challenge or assessment.');
   const submit = evaluate("JSON.stringify([...document.querySelectorAll('button,input[type=submit]')].filter(e=>e.getClientRects().length && /submit application|apply now|submit/i.test((e.innerText||e.value||'').trim())).map(e=>({id:e.id,type:e.type,text:(e.innerText||e.value||'').trim()})))");
   if (!Array.isArray(submit) || submit.length !== 1 || submit[0].text.toLowerCase() !== 'submit application') throw new Error('No unambiguous application submission button.');
+  if (data.handoffOnly) throw new Error('Administrator requested a prepared browser. Complete the remaining employer steps manually.');
   if (data.dryRun) {
     finish({ status: 'needs_human', testReady: true, reason: 'Test passed: required fields and documents completed. Submission intentionally disabled.', finalUrl: page.url, clicked: false });
   } else {
