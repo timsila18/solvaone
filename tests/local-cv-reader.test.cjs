@@ -40,6 +40,20 @@ test("local parser does not substitute referee details or dates", () => {
   assert.equal(readLocalCvFields("https://evil-linkedin.com/in/wrong").applicantLinkedinUrl, "");
 });
 
+test("PDF sidebar layout supports stacked names, separated country code and work after referees", () => {
+  const source = `MILICENT\nMUSENYA\nMAYINA\nSALES CONSULTANT (Real Estate)\nPROFILE\nDetail-oriented with Six years of\nexperience in customer service.\nCONTACT\nPHONE:\n254-728-874-278\nEMAIL:\nexample@example.com\nEDUCATION\nMakerere University\nBachelor's Degree in Communication\nWORK EXPERIENCE\nThe Example Real Estate Limited – Sales Consultant\nJuly 2025 - Present\nMaintained client relationships.\nREFEREES\nAvailable upon request\nExample Group Limited-Property Manager\nNovember 2018 - March 2025\nManaged properties and lease agreements.\nSKILLS\nOTHER CERTIFICATES\n2007: Certificate in Computing\n85%\n100%\nLeadership\nTimeManagement\nCommunication`;
+  const fields = readLocalCvFields(source);
+  assert.equal(fields.fullName, "MILICENT MUSENYA MAYINA");
+  assert.equal(fields.whatsappPhone, "254-728-874-278");
+  assert.equal(fields.email, "example@example.com");
+  assert.deepEqual(fields.targetJobTitles, ["Sales Consultant", "Property Manager"]);
+  const sections = readLocalCvSections(source);
+  assert.match(sections.experience, /Managed properties/);
+  assert.match(sections.skills, /Leadership/);
+  assert.doesNotMatch(sections.education, /Leadership/);
+  assert.equal(fields.currentCountry, "");
+});
+
 const headedCv = `JANE EXAMPLE DOE
 FINANCE | ACCOUNTING | PROCUREMENT
 +254 712 345 678 / +254 700 000 000
